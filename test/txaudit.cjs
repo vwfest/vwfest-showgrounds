@@ -9,7 +9,7 @@ const tIx = (op, accts, extra = []) => ({ programId: TOKEN, accounts: accts.map(
 const sysIx = (kind, lamports, dest = W) => ({ programId: SYS, accounts: [{ pubkey: U }, { pubkey: dest }], data: b64([kind, 0, 0, 0, ...u64(lamports)]) });
 // REAL Jupiter swap-instructions output (lite-api.jup.ag, 2026-10-31): ExactIn 0.05 SOL -> USDC (route), ExactOut USDC -> 10 USDC-equivalent (exact_out_route)
 const REAL_IN = '5RfLl3rjrSoBAAAAsgFkAAGA8PoCAAAAACU+SQAAAAAAZAAA', REAL_OUT = '0DPvl3sr7VwBAAAAEQBkAAGAlpgAAAAAADOlDgAAAAAAZAAA'; // in: 50,000,000 exact | out: quoted input 959,795 @100bps
-const D = 'DestVwfestAta1111111111111111111111111111111'; const R = { dest: D, minOut: 4752037n, maxSlippageBps: 100, quotedOut: 4800037n }; // the quote the REAL route bytes were issued for (outAmount 4800037, otherAmountThreshold 4752037, 100 bps)
+const D = 'ata'; /* the player's own $VWFEST account (also the burn account in mk()) */ const R = { dest: D, minOut: 4752037n, maxSlippageBps: 100, quotedOut: 4800037n }; // the quote the REAL route bytes were issued for (outAmount 4800037, otherAmountThreshold 4752037, 100 bps)
 const jupIx = (data, src = W, dest = D, x4 = JUP) => ({ programId: JUP, accounts: [{ pubkey: TOKEN }, { pubkey: U }, { pubkey: src }, { pubkey: dest }, { pubkey: x4 }, { pubkey: MINT }, { pubkey: JUP }], data }); // `route` layout (Jupiter IDL): source at 2, destination at 3, optional second destination at 4
 let n = 0; const t = async (name, f) => { try { await f(); n++; console.log('ok  ', name); } catch (e) { console.error('FAIL', name, e.stack.split('\n').slice(0, 3).join(' | ')); process.exitCode = 1; } };
 (async () => {
@@ -39,7 +39,7 @@ let n = 0; const t = async (name, f) => { try { await f(); n++; console.log('ok 
   const burnIx = (amt, mint = MINT, auth = U, dec = 6) => ({ p: 'tok', a: ['ata', mint, auth], d: Uint8Array.from([15, ...u64(amt), dec]) });
   const mk = (extra = [], over = {}) => { const keys = [U, 'ata', MINT, X, TOKEN, MEMO, CORE, SYS, ASSET, BUD, JUP, ATA, W, D]; const ixs = [{ p: BUD, a: [], d: Uint8Array.from([2, 0x40, 0x0d, 0x03, 0]) }, { p: TOKEN, a: ['ata', MINT, U], d: Uint8Array.from([15, ...u64(1000), 6]) }, { p: MEMO, a: [], d: new TextEncoder().encode('vwfest:q1') }, ...extra];
     const idx = (x) => keys.indexOf(x); return { keys, ixs: ixs.map((i) => ({ p: idx(i.p), a: i.a.map(idx), d: i.d })), numSigners: 1, ...over }; };
-  const C = { user: U, mint: MINT, decimals: 6, burn: 1000n, memo: 'vwfest:q1', devWallet: '', devLamports: 0n, asset: null, name: '', uri: '', swap: null };
+  const C = { user: U, ata: 'ata', mint: MINT, decimals: 6, burn: 1000n, memo: 'vwfest:q1', devWallet: '', devLamports: 0n, asset: null, name: '', uri: '', swap: null };
   await t('whole transaction: payer, memo, exactly one burnChecked of the exact amount from the player\'s account', () => {
     assert(auditMessage(mk(), C)); const m = mk(); m.keys[0] = X; bad(() => auditMessage(m, C), /fee payer/); bad(() => auditMessage(mk(), { ...C, memo: 'vwfest:other' }), /Memo/); bad(() => auditMessage(mk(), { ...C, burn: 999n }), /Burn amount/);
     bad(() => auditMessage(mk([{ p: TOKEN, a: ['ata', MINT, U], d: Uint8Array.from([15, ...u64(1), 6]) }]), C), /Burn amount/); bad(() => auditMessage(mk(), { ...C, decimals: 9 }), /Burn instruction/); bad(() => auditMessage(mk(), { ...C, mint: X }), /Burn instruction/);
@@ -79,6 +79,13 @@ let n = 0; const t = async (name, f) => { try { await f(); n++; console.log('ok 
     bad(() => audit([jupIx(REAL_IN)], 0n, { ...base, quotedOut: undefined, minOut: 4752038n }), /guarantees less/); audit([jupIx(REAL_IN)], 0n, { ...base, quotedOut: undefined, minOut: 4752037n });
     bad(() => audit([tweak((d, o) => (d[o + 18] = 50))], 0n, base), /platform fee/);
     bad(() => audit([jupIx(REAL_IN)], 0n, { ...base, maxSwapIn: 50000001n }), /exactly the quoted input/);
+  });
+  await t('the burn is pinned to the player\'s OWN $VWFEST account (c.ata), like the server; a burn from any other account, or a context without it, is refused', () => {
+    assert(auditMessage(mk(), C)); const other = mk(); other.ixs[1].a[0] = other.keys.indexOf(X); bad(() => auditMessage(other, C), /Burn instruction/); // burn from X's account
+    bad(() => auditMessage(mk(), { ...C, ata: X }), /Burn instruction/); bad(() => auditMessage(mk(), { ...C, ata: undefined }), /Burn instruction/);
+    const sw = { maxLamports: 56000000n, maxSwapIn: 50000000n, wsolAta: W, dest: X, maxSlippageBps: 100, quotedOut: 4800037n };
+    const wrap = { p: SYS, a: [U, W], d: Uint8Array.from([2, 0, 0, 0, ...u64(50000000)]) }; const route = { p: JUP, a: [TOKEN, U, W, D, JUP, MINT, JUP], d: Buffer.from(REAL_IN, 'base64') }; const sync = { p: TOKEN, a: [W], d: Uint8Array.of(17) };
+    bad(() => auditMessage(mk([wrap, sync, route]), { ...C, swap: sw }), /not going to the account that is burned from/); // swap destination X differs from the burn account
   });
   await t('the wallet must return the exact message that was audited', () => { assert(sameMessage(Uint8Array.of(1, 2, 3), Uint8Array.of(1, 2, 3))); assert(!sameMessage(Uint8Array.of(1, 2, 3), Uint8Array.of(1, 2, 4))); assert(!sameMessage(Uint8Array.of(1, 2), Uint8Array.of(1, 2, 3))); assert(!sameMessage(null, Uint8Array.of(1))); });
   await t('pay.js source: emits burnChecked (15) with decimals, never the unchecked burn (8), and re-audits the exact bytes right before signing', () => {

@@ -34,7 +34,6 @@ const ix = (j) => new TransactionInstruction({ programId: new PublicKey(j.progra
 async function jget(url) { const r = await fetch(url); if (!r.ok) throw new Error('Price service error (' + r.status + ')'); return r.json(); }
 
 // Funding sources: 'sol' (Jupiter ExactIn SOL -> $VWFEST), 'token' (Jupiter ExactOut: any SPL token -> exactly the burn amount), 'direct' ($VWFEST already held / test mode).
-//  opts.sweepLamports: swap this much SOL instead of the quoted amount (Entry flow: burn what the on-ramp delivered, minus fees).
 //  opts.payToken: { mint, sym, dec } to pay with an SPL token instead of SOL (e.g. USDC, BONK).
 async function build({ q, cfg, conn, user, mint, tokenProg, ata, swapLamports, payToken, onStep }) {
   const ixs = []; const alts = []; let burn = BigInt(q.burnRaw), swapInfo = null, simTok = null;
@@ -96,7 +95,7 @@ async function build({ q, cfg, conn, user, mint, tokenProg, ata, swapLamports, p
   onStep && onStep('Checking the transaction…');
   const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash('confirmed');
   const msg = new TransactionMessage({ payerKey: user, recentBlockhash: blockhash, instructions: ixs }).compileToV0Message(alts); const tx = new VersionedTransaction(msg); if (asset) tx.sign([asset]);
-  const auditCtx = { alts, c: { user: user.toBase58(), mint: cfg.mint, decimals: cfg.decimals, burn, memo: 'vwfest:' + q.id, devWallet: BigInt(q.devLamports) > 0n ? q.devWallet : '', devLamports: BigInt(q.devLamports), asset: asset ? asset.publicKey.toBase58() : null, name: q.name || 'VW FEST NFT', uri: q.uri || '', swap: swapCtx } };
+  const auditCtx = { alts, c: { user: user.toBase58(), mint: cfg.mint, ata: ata.toBase58(), decimals: cfg.decimals, burn, memo: 'vwfest:' + q.id, devWallet: BigInt(q.devLamports) > 0n ? q.devWallet : '', devLamports: BigInt(q.devLamports), asset: asset ? asset.publicKey.toBase58() : null, name: q.name || 'VW FEST NFT', uri: q.uri || '', swap: swapCtx } };
   auditTx(tx, auditCtx); // 1st audit: the compiled transaction, before it is simulated or shown
   const size = tx.serialize().length; if (size > 1232) throw new Error(`Transaction too large (${size} bytes). Try again; the route may have changed.`);
   const pre = await conn.getBalance(user, 'confirmed'); const sim = await conn.simulateTransaction(tx, { sigVerify: false, replaceRecentBlockhash: true, commitment: 'confirmed', accounts: { encoding: 'base64', addresses: [user.toBase58(), ...(simTok ? [simTok.addr.toBase58()] : [])] } });
@@ -105,7 +104,7 @@ async function build({ q, cfg, conn, user, mint, tokenProg, ata, swapLamports, p
   const post = sim.value.accounts && sim.value.accounts[0] ? sim.value.accounts[0].lamports : null; const spentLamports = post === null ? null : pre - post;
   return { auditCtx, tx, asset, conn, burn, blockhash, lastValidBlockHeight, swapInfo, spentLamports, size, units: sim.value.unitsConsumed, user, ata, balance: BigInt(pre) };
 }
-export async function prepare({ q, cfg, server, pubkey, onStep, payToken, sweep, reserveLamports }) {
+export async function prepare({ q, cfg, server, pubkey, onStep, payToken }) {
   assertTop();
   // The browser talks to the public RPC directly (simulate + broadcast): the game server has no transaction relay by design. Reads could use /api/rpc, but one endpoint keeps it simple.
   const cbase = { commitment: 'confirmed', disableRetryOnRateLimit: true }; // simulate + broadcast MUST go to the public RPC (the proxy is read-only); the proxy (with the session token) is only a fallback for reads when no public RPC is configured
@@ -114,13 +113,7 @@ export async function prepare({ q, cfg, server, pubkey, onStep, payToken, sweep,
   const tokenProg = mintInfo.owner.equals(TOKEN22) ? TOKEN22 : TOKEN;
   const [ata] = PublicKey.findProgramAddressSync([user.toBytes(), tokenProg.toBytes(), mint.toBytes()], ATA_PROG);
   const base = { q, cfg, conn, user, mint, tokenProg, ata, payToken, onStep };
-  if (!sweep || payToken || !q.swap) return build({ ...base, swapLamports: BigInt(q.swapLamports) });
-  // Entry / sweep: burn everything the on-ramp delivered except what the network + NFT rent will cost. Two passes: measure the real cost by simulation, then re-quote.
-  const bal = BigInt(await conn.getBalance(user, 'confirmed')); const cap = BigInt(q.totalLamports) * 3n / 2n; const margin = 300000n; // 0.0003 SOL cushion
-  let guess = bal - BigInt(reserveLamports || 6500000); if (guess < BigInt(q.totalLamports) / 3n) throw new Error(`Your wallet holds ${Number(bal) / 1e9} SOL, not enough yet. Add funds first.`);
-  let p1 = await build({ ...base, swapLamports: guess > cap ? cap : guess }); const fees = p1.spentLamports - p1.swapInfo.swapLamports;
-  let sw = bal - fees - margin; if (sw > cap) sw = cap; if (sw < BigInt(q.totalLamports) / 3n) throw new Error('Not enough SOL after network fees. Add a little more and try again.');
-  if (sw === p1.swapInfo.swapLamports) return p1; const p2 = await build({ ...base, swapLamports: sw }); return p2;
+  return build({ ...base, swapLamports: BigInt(q.swapLamports) });
 }
 export async function signAndSend(prep, provider, onStep) {
   assertTop();

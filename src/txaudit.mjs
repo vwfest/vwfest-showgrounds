@@ -81,7 +81,7 @@ function decodeCreate(d) { // Core CreateV1: [0][dataState 0][name str][uri str]
   const name = rs(), uri = rs(); if (o + 1 !== d.length || d[o] !== 0) throw new Error('NFT instruction carries plugins or trailing data.'); return { name, uri };
 }
 // m: { keys: string[] (static + lookup-table keys, in message order), ixs: [{ p, a: number[], d: Uint8Array }], numSigners }
-// c: { user, mint, decimals, burn (BigInt, exact), memo, devWallet, devLamports (BigInt), asset (string|null), name, uri, swap: null | { maxLamports, maxSwapIn, wsolAta, dest, maxSlippageBps, quotedOut, iso: null | { temp, main, mint, dec, amount, maxRent } } }
+// c: { user, mint, ata (the player's own $VWFEST token account: the ONLY account that may be burned from, and the swap's destination), decimals, burn (BigInt, exact), memo, devWallet, devLamports (BigInt), asset (string|null), name, uri, swap: null | { maxLamports, maxSwapIn, wsolAta, dest, maxSlippageBps, quotedOut, iso: null | { temp, main, mint, dec, amount, maxRent } } }
 //   swap.iso (token-funded swaps): the swap's input is isolated. [createAccountWithSeed temp (space 165, owner Token, rent<=maxRent)] [InitializeAccount3 temp] [transferChecked main -> temp, EXACTLY `amount`] [Jupiter route, source = temp] [closeAccount temp -> player].
 //   The route can then only ever reach `amount` of the pay token, and the player's own token account (`main`) may appear in no Jupiter instruction.
 export function auditMessage(m, c) {
@@ -104,7 +104,7 @@ export function auditMessage(m, c) {
     else if (iso && pid === TOKEN && d[0] === 9 && a(0) === iso.temp) { if (d.length !== 1 || a(1) !== c.user || a(2) !== c.user) throw new Error('Temporary account would be closed to someone else. Aborted.'); once('close', n, 'account close'); }
     else if (pid === MEMO) { if (new TextDecoder().decode(d) !== c.memo) throw new Error('Memo does not match your purchase.'); memoOk = true; }
     else if ((pid === TOKEN || pid === TOKEN22) && d[0] === 15) { // burnChecked [15][amount u64][decimals u8], accounts [account, mint, authority]
-      if (d.length !== 10 || a(1) !== c.mint || a(2) !== c.user || d[9] !== c.decimals) throw new Error('Burn instruction does not match your purchase.'); burns++; burned += u64(d, 1); }
+      if (d.length !== 10 || !c.ata || a(0) !== c.ata || a(1) !== c.mint || a(2) !== c.user || d[9] !== c.decimals) throw new Error('Burn instruction does not match your purchase.'); burns++; burned += u64(d, 1); }
     else if ((pid === TOKEN || pid === TOKEN22) && d[0] === 8) throw new Error('Unchecked burn is not allowed.');
     else if (pid === SYSTEM && c.devWallet && a(1) === c.devWallet && d.length === 12 && new DataView(d.buffer, d.byteOffset).getUint32(0, true) === 2) { if (a(0) !== c.user) throw new Error('Creator fee comes from an unexpected account.'); dev += u64(d, 4); }
     else if (pid === CORE) {
@@ -118,6 +118,7 @@ export function auditMessage(m, c) {
   if (dev !== c.devLamports) throw new Error('Creator fee does not match your quote.'); if (core !== (c.asset ? 1 : 0)) throw new Error('NFT instruction count does not match your purchase.');
   if (iso) { if (st.create === -1 || st.init === -1 || st.xfer === -1 || st.close === -1 || st.jupFirst === -1) throw new Error('Swap isolation steps are missing. Aborted for your safety.');
     if (!(st.create < st.init && st.init < st.xfer && st.xfer < st.jupFirst && st.jupLast < st.close)) throw new Error('Swap isolation steps are out of order. Aborted for your safety.'); }
+  if (c.swap && c.swap.dest !== c.ata) throw new Error('Swap output is not going to the account that is burned from. Aborted for your safety.');
   if (c.swap) audit(jup, c.swap.maxLamports, { user: c.user, wsolAta: c.swap.wsolAta, maxSwapIn: c.swap.maxSwapIn, dest: c.swap.dest, minOut: c.burn, maxSlippageBps: c.swap.maxSlippageBps, quotedOut: c.swap.quotedOut, source: iso ? iso.temp : c.swap.wsolAta, forbid: iso ? [iso.main] : undefined });
   else { if (jup.some((x) => x.programId !== BUDGET)) throw new Error('Unexpected instructions in a purchase without a swap.'); audit(jup, 0n, { user: c.user }); }
   return true;
