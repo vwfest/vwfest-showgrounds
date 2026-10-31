@@ -39,6 +39,12 @@ const publicUrl = (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || 
 // Env bridge for solana/: our historical names -> its names. Avatar/ride mints are 100% buyback & burn (no creator fee); the fee applies to shop/vendor SOL/token payments only.
 if (process.env.MINT_DEV_FEE === undefined) process.env.MINT_DEV_FEE = '0';
 if (!process.env.RPC_URL && process.env.SOLANA_RPC_URL) process.env.RPC_URL = process.env.SOLANA_RPC_URL;
+// Server-side RPC on mainnet via Helius (HELIUS_API_KEY is a Render secret: used only for RPC_URL, which never reaches browsers). Devnet keeps the public devnet RPC.
+if (!process.env.RPC_URL && process.env.HELIUS_API_KEY && NETWORK === 'mainnet-beta') process.env.RPC_URL = 'https://mainnet.helius-rpc.com/?api-key=' + encodeURIComponent(process.env.HELIUS_API_KEY.trim());
+// "Continue with Google" (Web3Auth): the client ID is public by design (it is shipped to every browser). This is the Sapphire DEVNET project, so it is only a default on devnet;
+// set WEB3AUTH_CLIENT_ID (+ WEB3AUTH_NETWORK=sapphire_mainnet) to override, or WEB3AUTH_CLIENT_ID=off to disable.
+if (NETWORK === 'devnet' && process.env.WEB3AUTH_CLIENT_ID === undefined) { process.env.WEB3AUTH_CLIENT_ID = 'BGa81203zpBLcIz_Fq8OYie2IHJGc1MtgPZMG8GjlpwXUciSqaoJyaqL8C0vWQXcnxlQXXGBN1ey7mOvvD4OdFE'; if (!process.env.WEB3AUTH_NETWORK) process.env.WEB3AUTH_NETWORK = 'sapphire_devnet'; }
+if (process.env.WEB3AUTH_CLIENT_ID === 'off') delete process.env.WEB3AUTH_CLIENT_ID;
 if (!process.env.PUBLIC_BASE_URL) process.env.PUBLIC_BASE_URL = publicUrl;
 // ---- avatar-minting config. OFF unless MINT_ENABLED=1 (and, on mainnet, MINT_MAINNET=1 as a second deliberate switch). ----
 const mint = {
@@ -50,7 +56,7 @@ const mint = {
   explorer(id, kind) { const q = NETWORK === 'devnet' ? '?cluster=devnet' : ''; return NETWORK === 'localnet' ? null : `https://solscan.io/${kind}/${id}${q}`; },
 };
 // Embedded wallet (Google sign-in -> non-custodial Solana wallet) via Web3Auth / MetaMask Embedded Wallets. The client id is public by design.
-mint.embedded = process.env.WEB3AUTH_CLIENT_ID ? { provider: 'web3auth', clientId: process.env.WEB3AUTH_CLIENT_ID, network: process.env.WEB3AUTH_NETWORK === 'sapphire_devnet' ? 'sapphire_devnet' : 'sapphire_mainnet' } : null;
+mint.embedded = process.env.WEB3AUTH_CLIENT_ID ? { provider: 'web3auth', clientId: process.env.WEB3AUTH_CLIENT_ID, network: (process.env.WEB3AUTH_NETWORK || (NETWORK === 'devnet' ? 'sapphire_devnet' : 'sapphire_mainnet')) === 'sapphire_devnet' ? 'sapphire_devnet' : 'sapphire_mainnet' } : null;
 mint.entryUsd = num(process.env.ENTRY_ONRAMP_USD, mint.feeUsd); mint.entryMinBurnPct = Math.min(Math.max(num(process.env.ENTRY_MIN_BURN_PCT, 60), 10), 100);
 mint.payTokens = (() => { const d = [['USDC', 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 6], ['USDT', 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', 6], ['BONK', 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263', 5], ['JUP', 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN', 6]].map(([sym, mint, dec]) => ({ sym, mint, dec })); try { const e = JSON.parse(process.env.PAY_TOKENS || 'null'); if (Array.isArray(e)) return e.filter((t) => t && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(t.mint) && /^[A-Za-z0-9]{1,10}$/.test(t.sym) && t.dec >= 0 && t.dec <= 12).slice(0, 12); } catch {} return d; })();
 const vcfg = { feeUsd: num(process.env.VENDOR_FEE_USD, 30), days: Math.min(Math.max(Math.round(num(process.env.VENDOR_DAYS, 30)), 1), 365), plots: Math.min(Math.max(Math.round(num(process.env.VENDOR_BOOTHS, 24)), 4), 24), imgKb: Math.min(Math.max(num(process.env.VENDOR_IMG_KB, 150), 20), 400), autoHide: Math.max(Math.round(num(process.env.VENDOR_AUTOHIDE_REPORTS, 3)), 2), premod: process.env.VENDOR_PREMOD === '1', maxProducts: 6 };
@@ -77,12 +83,13 @@ let burnVer = -1;
 const app = express();
 app.set('trust proxy', 1); app.disable('x-powered-by');
 const RPC_HOSTS = ["'self'", ...(() => { try { return [new URL(process.env.PUBLIC_RPC_URL || RPC_DEFAULT[NETWORK]).origin]; } catch { return []; } })()];
-const W3A = ['https://*.web3auth.io', 'https://*.web3auth.com', 'https://*.toruslabs.com', 'https://*.metamask.io']; // only allowed when an embedded-wallet client id is configured
+const W3A = ['wss://*.web3auth.io', 'https://*.web3auth.io', 'https://*.web3auth.com', 'https://*.authnetwork.dev', 'https://*.toruslabs.com', 'https://*.tor.us', 'https://*.metamask.io']; // only allowed when an embedded-wallet client id is configured
 app.use(helmet({
   contentSecurityPolicy: {
     useDefaults: false,
     directives: {
-      defaultSrc: ["'self'"], scriptSrc: ["'self'", "'wasm-unsafe-eval'"], styleSrc: ["'self'"], imgSrc: ["'self'", 'data:', 'blob:', 'https://vwfestmemecoin.com'], fontSrc: ["'self'", 'data:'],
+      defaultSrc: ["'self'"], scriptSrc: ["'self'", "'wasm-unsafe-eval'"], styleSrc: ["'self'"], styleSrcAttr: ["'unsafe-inline'"], // inline style ATTRIBUTES only (the Web3Auth frame sets them); <style> elements stay blocked
+       imgSrc: ["'self'", 'data:', 'blob:', 'https://vwfestmemecoin.com'], fontSrc: ["'self'", 'data:'],
       connectSrc: [...RPC_HOSTS, ...(mint.embedded ? W3A : []), 'wss://*.onrender.com', 'https://lite-api.jup.ag', 'https://api.coinbase.com', ...(PROD ? [] : ['ws://127.0.0.1:*', 'ws://localhost:*'])],
       frameSrc: mint.embedded ? W3A : ["'none'"], workerSrc: ["'self'", 'blob:'], mediaSrc: ["'self'"], objectSrc: ["'none'"], baseUri: ["'none'"], formAction: ["'none'"], frameAncestors: ["'self'", 'https://vwfest.github.io', 'https://vwfestmemecoin.com'],
       upgradeInsecureRequests: PROD ? [] : null,

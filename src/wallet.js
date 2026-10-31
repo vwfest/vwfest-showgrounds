@@ -21,7 +21,13 @@ async function web3auth(cfg, server) {
   if (w3a) return w3a; const e = cfg.embedded; if (!e) throw new Error('Google sign-in is not set up yet.');
   const m = await import('@web3auth/no-modal'); const main = cfg.network === 'mainnet-beta';
   const inst = new m.Web3AuthNoModal({ clientId: e.clientId, web3AuthNetwork: e.network === 'sapphire_devnet' ? m.WEB3AUTH_NETWORK.SAPPHIRE_DEVNET : m.WEB3AUTH_NETWORK.SAPPHIRE_MAINNET, uiConfig: { appName: 'VW FEST SHOW GROUNDS', mode: 'dark' }, chains: [{ chainNamespace: 'solana', chainId: main ? '0x1' : '0x3', rpcTarget: main ? 'https://api.mainnet-beta.solana.com' : 'https://api.devnet.solana.com', displayName: main ? 'Solana Mainnet' : 'Solana Devnet', blockExplorerUrl: 'https://solscan.io', ticker: 'SOL', tickerName: 'Solana' }] });
-  await inst.init(); inst._m = m; return (w3a = inst);
+  if (location.search.includes('debug')) window.__w3a = inst; // debugging aid (?debug), not used by the app
+  // init() can resolve (or hang) without the Google connector becoming ready (blocked network, origin not allowed in the Web3Auth dashboard): never leave the user on a dead button.
+  try { await Promise.race([inst.init(), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 25000))]); } catch (e) { throw new Error(e && e.message === 'timeout' ? 'Google sign-in took too long to start. Check your connection and try again.' : 'Google sign-in could not start: ' + ((e && e.message) || 'unknown error')); }
+  // init() can resolve a moment before the Google ('auth') connector reports ready: wait for it (connectTo throws "not ready" otherwise).
+  const auth = () => (inst.connectors || []).find((c) => c.name === 'auth'); for (let i = 0; i < 120 && !(auth() && (auth().status === 'ready' || auth().status === 'connected')); i++) await new Promise((r) => setTimeout(r, 250));
+  if (!auth() || (auth().status !== 'ready' && auth().status !== 'connected')) throw new Error('Google sign-in is not available from this site right now (' + (auth() ? auth().status : 'no connector') + '). Try again, or use your own wallet.');
+  inst._m = m; return (w3a = inst);
 }
 async function adapt(inst) {
   const conn = inst.connection; if (!conn) return null; const acct = conn.solanaWallet && conn.solanaWallet.accounts && conn.solanaWallet.accounts[0]; const addr = acct && (acct.address || (acct.publicKey && new PublicKey(acct.publicKey).toBase58()));

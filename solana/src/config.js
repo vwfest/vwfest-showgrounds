@@ -24,7 +24,7 @@ function parseSecretKey(s) {
     const t = String(s).trim();
     const raw = t.startsWith('[') ? Uint8Array.from(JSON.parse(t)) : bs58.decode(t);
     return Keypair.fromSecretKey(raw);
-  } catch { throw new Error('AUTHORITY_SECRET_KEY is not a valid base58 / JSON-array secret key'); }
+  } catch { throw new Error('AUTHORITY_SECRET_KEY / MAINNET_AUTHORITY_SECRET_KEY is not a valid base58 / JSON-array secret key'); }
 }
 
 const NETWORKS = {
@@ -40,7 +40,8 @@ function loadConfig(env = process.env) {
   const mainnetArmed = mainnet && (flag(env.MAINNET_ARMED, false) || flag(env.MINT_MAINNET, false)); // mainnet needs an explicit second switch
   const vwfestMint = mainnet ? (env.VWFEST_MINT || VWFEST_MINT) : (env.DEVNET_VWFEST_MINT || env.VWFEST_MINT || '');
   const devWallet = env.DEV_WALLET || DEV_WALLET;
-  const authority = parseSecretKey(env.AUTHORITY_SECRET_KEY);
+  // Mainnet uses its own variable so a devnet deploy can never pick up (or spend from) the mainnet authority key; nothing signs with it unless MAINNET_ARMED + MINT_ENABLED are on.
+  const authority = parseSecretKey(mainnet ? (env.MAINNET_AUTHORITY_SECRET_KEY || env.AUTHORITY_SECRET_KEY) : env.AUTHORITY_SECRET_KEY);
   const serverSecret = env.SERVER_SECRET || '';
   const cfg = {
     network, mainnet, mainnetArmed,

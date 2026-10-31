@@ -1,6 +1,7 @@
 # What's New
 
 ## 2026-10-31
+- "Continue with Google" is available (test network): sign in with a Google account to get a wallet you control and can export, e.g. to show an NFT on your avatar. No card payments.
 - DJ booth in front of the stage: claim the decks (queue and time limit), synced house playlist everyone hears with volume that fades away from the stage, your own volume and mute, DJ microphone to talk over the music, DJ name and now-playing screen, stage lights that pulse to the beat, and a crowd hype emote. DJs must play only music they have the rights to.
 - Use an NFT you already own as your avatar: verified on-chain, shown on your chest and in a gold frame above your head, re-checked regularly (free, no burn).
 - Fixed walking: forward/back and left/right were mirrored on keyboard and joystick. The Info Booth moved clear of the arcade kiosks.

@@ -156,3 +156,13 @@ test('verify.inspectPayTx: parsed-tx checks (signer, memo, burn, dev fee, no CPI
   const inner = tx({ ixs: [{ program: 'spl-memo', parsed: 'vwfest:q1' }], inner: [{ index: 0, instructions: [{ program: 'spl-token', parsed: { type: 'burnChecked', info: { mint, authority: w, tokenAmount: { amount: '150' } } } }] }] }); assert.match(verify.inspectPayTx(inner, { ...q, devLamports: '0' }, cfg).why, /No \$VWFEST burn/, 'burn hidden in a CPI does not count');
   assert.ok(!verify.isSig('abc'));
 });
+
+test('config: MAINNET_AUTHORITY_SECRET_KEY loads on mainnet only (JSON array or base58); a devnet deploy never picks it up', () => {
+  const kp = Keypair.generate(); const json = JSON.stringify(Array.from(kp.secretKey)); const b58 = require('bs58'); const enc = (b58.default || b58).encode(kp.secretKey);
+  for (const v of [json, enc]) {
+    const m = C.loadConfig({ SOLANA_NETWORK: 'mainnet-beta', MAINNET_AUTHORITY_SECRET_KEY: v }); assert.equal(m.authority.publicKey.toBase58(), kp.publicKey.toBase58()); assert.equal(m.simulateOnly, true, 'loading the key does not arm mainnet');
+    assert.equal(C.loadConfig({ SOLANA_NETWORK: 'devnet', MAINNET_AUTHORITY_SECRET_KEY: v }).authority, null, 'devnet ignores the mainnet authority');
+  }
+  const dev = Keypair.generate(); assert.equal(C.loadConfig({ SOLANA_NETWORK: 'devnet', AUTHORITY_SECRET_KEY: JSON.stringify(Array.from(dev.secretKey)), MAINNET_AUTHORITY_SECRET_KEY: json }).authority.publicKey.toBase58(), dev.publicKey.toBase58());
+  assert.throws(() => C.loadConfig({ SOLANA_NETWORK: 'mainnet-beta', MAINNET_AUTHORITY_SECRET_KEY: 'not-a-key' }), /not a valid/);
+});
