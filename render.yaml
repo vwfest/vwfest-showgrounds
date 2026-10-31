@@ -1,0 +1,30 @@
+# Render Blueprint for the game server (static client is on GitHub Pages: see .github/workflows/pages.yml)
+services:
+  - type: web
+    name: vwfest-showgrounds
+    runtime: node
+    plan: free
+    buildCommand: npm ci --omit=dev --ignore-scripts
+    startCommand: node server.js
+    healthCheckPath: /healthz
+    envVars:
+      - { key: NODE_ENV, value: production }
+      - { key: SERVER_SECRET, generateValue: true }        # required in production (lib/secret.js)
+      - { key: ADMIN_SECRET, generateValue: true }         # vendor moderation endpoint
+      - { key: PUBLIC_URL, value: https://vwfest-showgrounds.onrender.com }
+      - { key: ALLOWED_ORIGINS, value: "https://vwfest.github.io" }
+      - { key: MAX_PLAYERS, value: "150" }
+      - { key: DATABASE_URL, sync: false }                 # Supabase Postgres connection string (schema `showgrounds` is created automatically)
+      - { key: PG_CA_CERT, sync: false }                   # Supabase "Server root certificate" PEM (TLS is verified)
+      - { key: MINT_ENABLED, value: "0" }                  # purchases stay OFF until you arm them
+      - { key: MINT_NETWORK, value: mainnet-beta }
+      - { key: MINT_MAINNET, value: "0" }
+      - { key: VWFEST_MINT, value: 9ktd1qdiu9wRFhxHPczWKrKRGmJb9nkanv2Zz27Rpump }
+      - { key: DEV_WALLET, sync: false }
+      - { key: SOLANA_RPC_URL, sync: false }
+      - { key: VENDOR_PREMOD, value: "1" }
+      - { key: WEB3AUTH_CLIENT_ID, sync: false }
+      - { key: MOONPAY_API_KEY, sync: false }
+      - { key: MOONPAY_SECRET_KEY, sync: false }
+      - { key: TURN_URL, sync: false }
+      - { key: TURN_SECRET, sync: false }

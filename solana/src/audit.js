@@ -18,12 +18,19 @@ function auditPayTx(tx, q, cfg) {
   const burnMint = cfg.vwfestMint; let burn = 0n, dev = 0n, devTok = 0n, memoOk = false;
   const memoExpected = 'vwfest:' + q.id + (q.commit ? ':' + q.commit : '');
   const progs = new Set(ALLOWED_PROGRAMS); EXTRA_OK.forEach((p) => progs.add(p));
+  const wsolAta = getAssociatedTokenAddressSync(new PublicKey(C.WSOL), new PublicKey(q.wallet), true).toBase58();
   const ata = (owner, mint, prog) => getAssociatedTokenAddressSync(new PublicKey(mint), new PublicKey(owner), true, new PublicKey(prog || C.TOKEN_PROGRAM)).toBase58();
   for (const ix of m.compiledInstructions) {
     const pid = keys[ix.programIdIndex]; if (!pid || !progs.has(pid)) throw new Error('Transaction uses an unexpected program');
     const d = Buffer.from(ix.data); const acct = (i) => { const idx = ix.accountKeyIndexes[i]; return idx < keys.length ? keys[idx] : null; };
     if (pid === C.MEMO_PROGRAM) { if (d.toString('utf8') !== memoExpected) throw new Error('Memo does not match your quote'); memoOk = true; }
-    else if (pid === SystemProgram.programId.toBase58() && d.length >= 12 && d.readUInt32LE(0) === 2 && acct(0) === q.wallet && acct(1) === q.devWallet) dev += u64(d, 4);
+    else if (pid === SystemProgram.programId.toBase58()) {
+      const kind = d.length >= 4 ? d.readUInt32LE(0) : -1;
+      if (kind === 2 && acct(0) === q.wallet && acct(1) === q.devWallet && q.devWallet) dev += u64(d, 4);
+      else if (q.swap && kind === 2 && acct(0) === q.wallet && acct(1) === wsolAta) { /* wrap SOL for the Jupiter swap (bounded by the server-side Jupiter audit) */ }
+      else if (q.swap && (kind === 0 || kind === 8)) { /* temp accounts from the Jupiter route */ }
+      else throw new Error('Transaction moves SOL somewhere unexpected');
+    }
     else if ((pid === C.TOKEN_PROGRAM || pid === C.TOKEN_2022_PROGRAM) && (d[0] === 15 || d[0] === 8)) { // burnChecked | burn
       if (d[0] === 15) { if (acct(1) !== burnMint || acct(2) !== q.wallet) throw new Error('Burn instruction does not match your quote'); burn += u64(d, 1); }
       else throw new Error('Unchecked burn is not allowed');

@@ -49,7 +49,7 @@ class Solana {
   publicConfig() {
     const cfg = this.cfg; const k = cfg.kinds;
     return { ...this.flags(), mint: cfg.vwfestMint, decimals: cfg.decimals, devWallet: cfg.devWallet, devFeePct: cfg.devFeePct, discountPct: cfg.discountPct, slippageBps: cfg.slippageBps,
-      rpcUrl: cfg.publicRpcUrl, memoProgram: C.MEMO_PROGRAM, prices: { avatarUsd: k.avatar.usd, rideUsd: k.ride.usd, vendorUsd: k.vendor.usd },
+      vwfestMint: cfg.vwfestMint, rpcUrl: cfg.publicRpcUrl, memoProgram: C.MEMO_PROGRAM, prices: { avatarUsd: k.avatar.usd, rideUsd: k.ride.usd, vendorUsd: k.vendor.usd },
       discountKinds: Object.keys(k).filter((x) => k[x].discount), mintDevFee: k.avatar.devFee,
       payTokens: cfg.features.payWithSpl && cfg.mainnet ? cfg.payTokens : [], collections: { avatar: cfg.collections.avatar.address || null, ride: cfg.collections.ride.address || null },
       odds: this.roller.tiers.map((t, i) => ({ tier: t, pct: this.roller.odds[i] })), onramp: onramp.providers(cfg, this.env).map(({ id, name, how, mode, publishableKey }) => ({ id, name, how, mode, publishableKey })),
@@ -64,15 +64,15 @@ class Solana {
   session(token) { return this.auth ? this.auth.session(token) : null; }
 
   // ---------- quotes ----------
-  _gate(kind) {
+  _gate(kind, { sim = false } = {}) {
     const f = this.cfg.features;
     if (!this.ready) throw new Error('Payments are off: ' + this.problems[0]);
-    if (this.cfg.simulateOnly) throw new Error('Mainnet is not armed yet (simulate only).');
+    if (this.cfg.simulateOnly && !sim) throw new Error('Mainnet is not armed yet (simulate only).');
     if ((kind === 'avatar' && !f.mintAvatar) || (kind === 'ride' && !f.mintRide) || (kind === 'shop' && !f.shop) || (kind === 'vendor' && !f.vendor)) throw new Error('That purchase is switched off');
   }
   // o: { wallet, kind, method, payTokenMint?, ref?, item?, usd?(shop: trusted host only), nft?{fingerprint?,traits,name?,image?,imageSvg?} }
   async quote(o) {
-    this._gate(o.kind);
+    this._gate(o.kind, { sim: true }); // quoting works while mainnet is disarmed (breakdown + simulation); confirming/granting does not
     const open = this.store.values('quote').filter((q) => q.wallet === o.wallet && q.state === 'open' && q.expires > Date.now());
     if (open.length >= 6) throw new Error('Too many open quotes. Finish or wait for them to expire.');
     let usd = o.usd; if (o.kind === 'shop') { usd = this.shopPrice ? this.shopPrice(o.item) : usd; if (!usd) throw new Error('Unknown shop item'); }
@@ -98,7 +98,7 @@ class Solana {
 
   // ---------- build (unsigned) transactions ----------
   async buildPay({ quoteId, wallet }) {
-    this._gate(this.store.get('quote', quoteId)?.kind);
+    this._gate(this.store.get('quote', quoteId)?.kind, { sim: true });
     const q = this.getQuote(quoteId, wallet); if (!q) return fail('Unknown quote');
     if (q.state !== 'open') return fail('This quote is already used');
     if (q.expires < Date.now()) return fail('This quote expired. Please request a new one.');
