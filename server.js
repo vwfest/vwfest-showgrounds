@@ -493,6 +493,11 @@ async function init() {
   await chain.init({ env: process.env, db: require('./lib/db').pool() }); // one shared TLS-verified pg pool; memory-only without DATABASE_URL
   chain.mountRoutes(chainRouter, { express, rateLimit, allowedOrigins: [...ORIGINS] });
   await vendors.init(); await rides.init(); await profiles.init(); await nftav.init();
+  try { // moderation survives restarts: the same database as the profiles, else MOD_FILE (a path on a persistent disk), else memory only
+    const { dbStore, fileStore } = require('./lib/moderation'); const schema = (process.env.DB_SCHEMA || 'showgrounds').replace(/[^a-z0-9_]/gi, '');
+    const store = profiles.q ? await dbStore(profiles.q, schema).init() : process.env.MOD_FILE ? fileStore(process.env.MOD_FILE) : null;
+    if (store) console.log(`[moderation] ${await mod.attach(store)} active mutes/bans restored (${profiles.q ? 'database' : 'file'})`); else console.warn('[moderation] memory only: mutes and bans are lost on restart (set DATABASE_URL or MOD_FILE)');
+  } catch (e) { console.error('[moderation] persistence unavailable, memory only:', String(e.message).slice(0, 120)); }
   if (profiles.q) require('./lib/rls').enableRls(profiles.q, (process.env.DB_SCHEMA || 'showgrounds').replace(/[^a-z0-9_]/gi, '')).then((t) => t.length && console.log('[rls] enabled on', t.join(', '))); // best-effort, never blocks boot
 }
 if (require.main === module) {

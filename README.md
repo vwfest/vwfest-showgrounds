@@ -49,7 +49,7 @@ Honest limits: avatars are hierarchical rigid parts (not a skinned mesh); depth 
 | Vendors | `VENDOR_FEE_USD=30`, `VENDOR_DAYS=30`, `VENDOR_BOOTHS=24` (4–24), `VENDOR_IMG_KB=150`, `VENDOR_AUTOHIDE_REPORTS=3`, `VENDOR_PREMOD=1` (recommended), `ADMIN_SECRET` (≥16 chars, enables `/api/admin/vendors`) |
 | Voice | `TURN_URL`, `TURN_SECRET` (>= 16 chars, coturn `use-auth-secret`; optional `TURN_TTL_SEC`, default 900). STUN is always used; TURN credentials are short-lived per-session HMACs, sent over the authenticated WebSocket only after the player turns Voice on. Static `TURN_USERNAME`/`TURN_CREDENTIAL` are no longer used |
 | DJ mic | `DJ_MIC_RANGE` (default 110: only players this close to the stage get the mic audio), `DJ_MIC_MAX_BPS` (default 24000 bytes/s hard cap) |
-| Moderation | `ADMIN_SECRET` (>= 16 chars). `GET/POST /api/admin/mod` (header `x-admin-secret`): `{action: mute\|unmute\|kick\|ban\|unban, pid: <profile id or session id>, minutes}`. Mutes cover chat, voice signaling and the DJ mic; bans block join by profile and by IP. In memory: a restart clears them |
+| Moderation | `ADMIN_SECRET` (>= 16 chars). `GET/POST /api/admin/mod` (header `x-admin-secret`): `{action: mute\|unmute\|kick\|ban\|unban, pid: <profile id or session id>, minutes}`. Mutes cover chat, voice signaling and the DJ mic; bans block join by profile and by IP. Persistent: stored in the same database as profiles (`DATABASE_URL`, table `<schema>.moderation`, RLS on), else in the JSON file `MOD_FILE` (needs a persistent disk), else memory only (logged at boot) |
 | Timeouts | `PREJOIN_MS` (default 20000): connections that do not join in time are closed |
 | Test only | `FIXED_SOL_USD`, `DEVNET_TOKENS_PER_USD`, `DEVNET_BURN_TOKENS` |
 
