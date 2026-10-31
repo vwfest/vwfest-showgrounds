@@ -14,9 +14,9 @@ const ata = (o, m) => PublicKey.findProgramAddressSync([o.toBytes(), TOK.toBytes
   const tokenAcctData = (owner, amt) => { const b = Buffer.alloc(165); owner.toBuffer().copy(b, 32); b.writeBigUInt64LE(amt, 64); return b; };
   const acc = (data, owner = TOKEN) => ({ data: [Buffer.from(data).toString('base64'), 'base64'], executable: false, lamports: 1461600, owner, rentEpoch: 0 });
   const key = (p, s = false, w = false) => ({ pubkey: p.toBase58(), isSigner: s, isWritable: w });
-  const routeIx = () => { const src = mode === 'foreign' ? dest : main; const d = Buffer.from(REAL_IN, 'base64'); d.writeBigUInt64LE(mode === 'overspend' ? MAXIN * 3n : MAXIN, d.length - 19);
+  const routeIx = () => { const src = mode === 'foreign' ? dest : main; const d = Buffer.from(REAL_IN, 'base64'); d.writeBigUInt64LE(mode === 'overspend' ? MAXIN * 3n : MAXIN, d.length - 19); d.writeBigUInt64LE(996000000n, d.length - 11); d.writeUInt16LE(mode === 'slippage' ? 3000 : 50, d.length - 3); // quoted_out_amount / slippage_bps as the mock quote says
     const extra = mode === 'smuggle' ? [key(main, false, true)] : mode === 'stray' ? [key(stray, false, true)] : [];
-    return { programId: JUP, accounts: [key(TOK), key(user, true), key(src, false, true), key(vwAta, false, true), key(new PublicKey(JUP)), key(vwMint), key(new PublicKey(JUP)), ...amm.map((a) => key(a, false, true)), ...extra], data: d.toString('base64') }; };
+    return { programId: JUP, accounts: [key(TOK), key(user, true), key(src, false, true), key(mode === 'redirect' ? dest : vwAta, false, true), key(mode === 'second' ? dest : new PublicKey(JUP)), key(vwMint), key(new PublicKey(JUP)), ...amm.map((a) => key(a, false, true)), ...extra], data: d.toString('base64') }; };
   const rpc = (m, p) => { calls.push(m); switch (m) {
     case 'getAccountInfo': { const k = p[0]; if (k === vwMint.toBase58() || k === payMint.toBase58()) return acc(Buffer.alloc(82)); return null; }
     case 'getTokenAccountBalance': return { amount: HAVE.toString(), decimals: 6, uiAmount: 20, uiAmountString: '20' };
@@ -46,6 +46,8 @@ const ata = (o, m) => PublicKey.findProgramAddressSync([o.toBytes(), TOK.toBytes
   await t('MALICIOUS Jupiter: route input from a different account than the player\'s own is refused', async () => { mode = 'foreign'; await assert.rejects(go(), /own token account/); });
   await t('MALICIOUS Jupiter: player\'s own token account smuggled into the route accounts is refused', async () => { mode = 'smuggle'; await assert.rejects(go(), /must not use/); });
   await t('MALICIOUS Jupiter: ANOTHER token account owned by the player in the route is refused (RPC owner check)', async () => { mode = 'stray'; stray = Keypair.generate().publicKey; await assert.rejects(go(), /another token account of yours/); stray = null; });
+  await t('MALICIOUS Jupiter: output redirected to the attacker (route idx 3), a second destination (idx 4), or more slippage than the quote is refused', async () => {
+    mode = 'redirect'; await assert.rejects(go(), /somewhere other than your own account/); mode = 'second'; await assert.rejects(go(), /second destination/); mode = 'slippage'; await assert.rejects(go(), /more slippage/); });
   await t('tampered tx after build: bumping the transfer amount makes the re-audit (run right before signing) refuse it', async () => {
     mode = 'honest'; const p = await go(); const tx = VersionedTransaction.deserialize(p.tx.serialize()); const ix = tx.message.compiledInstructions.find((i) => i.data.length === 10 && i.data[0] === 12); new DataView(ix.data.buffer, ix.data.byteOffset, ix.data.byteLength).setBigUint64(1, MAXIN * 2n, true); assert.throws(() => pay.auditTx(tx, p.auditCtx), /does not match your quote/); });
   srv.close(); fs.rmSync(out, { force: true }); console.log(process.exitCode ? 'PAYISO TESTS FAILED' : `all ${n} client token-pay tests passed`); process.exit(process.exitCode || 0);

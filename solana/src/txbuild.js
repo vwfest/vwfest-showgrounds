@@ -37,7 +37,7 @@ class Builder {
     }
     if (q.swap) {
       ixs.push(spl.createAssociatedTokenAccountIdempotentInstruction(user, ata, user, mint, prog));
-      const maxSol = q.swapInputMint === C.WSOL ? BigInt(q.swapInRaw) + 10000000n : 10000000n; // swap amount + rent for temp accounts
+      const maxSol = q.swapInputMint === C.WSOL ? BigInt(q.swapInRaw) + 6000000n : 6000000n; // swap amount + rent for temp accounts
       // Token-funded swaps are ISOLATED: exactly swapInRaw moves from the player's own token account into a temporary account (createAccountWithSeed, base = the player, so no extra signer);
       // Jupiter's route is rewritten to take its input from that account only, and the account is closed back to the player afterwards. The route can never reach more than the quoted input.
       let iso = null; const pre = [], post = [];
@@ -49,7 +49,7 @@ class Builder {
         pre.push(SystemProgram.createAccountWithSeed({ fromPubkey: user, newAccountPubkey: temp, basePubkey: user, seed, lamports: rent, space: ACCOUNT_SIZE, programId: inProg }), new TransactionInstruction({ programId: inProg, keys: [{ pubkey: temp, isSigner: false, isWritable: true }, { pubkey: im, isSigner: false, isWritable: false }], data: Buffer.concat([Buffer.from([18]), user.toBuffer()]) }) /* InitializeAccount3 */, spl.createTransferCheckedInstruction(main, im, temp, user, BigInt(q.swapInRaw), dec, [], inProg));
         post.push(new TransactionInstruction({ programId: inProg, keys: [{ pubkey: temp, isSigner: false, isWritable: true }, { pubkey: user, isSigner: false, isWritable: true }, { pubkey: user, isSigner: true, isWritable: false }], data: Buffer.from([9]) }) /* CloseAccount */);
       }
-      const sw = await jup.swapInstructions({ cfg, prices: this.prices, conn: this.conn, user: q.wallet, inputMint: q.swapInputMint, amount: BigInt(q.swapInRaw), maxSolLamports: maxSol, iso, allow: [ata.toBase58()], fetchImpl: this.f });
+      const sw = await jup.swapInstructions({ cfg, prices: this.prices, conn: this.conn, user: q.wallet, inputMint: q.swapInputMint, amount: BigInt(q.swapInRaw), maxSolLamports: maxSol, iso, allow: [ata.toBase58()], dest: ata.toBase58(), fetchImpl: this.f });
       if (sw.minOut < BigInt(q.burnMin)) throw new Error('The price moved since your quote. Please request a new quote.');
       ixs.push(...pre, ...sw.instructions, ...post); alts = sw.alts; burn = sw.minOut; swapInfo = { expectOut: sw.outAmount.toString(), minOut: sw.minOut.toString() };
     } else if (q.method === 'vwfest' || q.network !== 'mainnet-beta') {

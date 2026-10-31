@@ -23,10 +23,25 @@ function pinSource(ix, account, expected) {
   if (expected && ix.accounts[idx].pubkey !== expected) throw new Error('Swap route does not take its input from your own token account. Aborted.');
   return { ...ix, accounts: ix.accounts.map((a, n) => (n === idx ? { ...a, pubkey: account } : a)) };
 }
+// Route layouts from the Jupiter v6 IDL: route [.., 3 user_destination_token_account, 4 destination_token_account (optional: program id when unused), 5 destination_mint, 6 platform_fee_account ..]; shared_accounts_route [.., 6 destination_token_account, .., 9 platform_fee_account ..].
+const DEST_IDX = { e517cb977ae3ad2a: 3, c1209b3341d69c81: 6 };
+// The route's OUTPUT must land in the player's own $VWFEST account and its guaranteed minimum must cover what the transaction burns. dest, minOut (BigInt), maxSlippageBps, quotedOut (BigInt, optional).
+function checkRoute(ix, d, opts) {
+  const h = d.subarray(0, 8).toString('hex'), di = DEST_IDX[h]; if (di === undefined) throw new Error('Unrecognised swap route type. Aborted.'); if (!opts.dest) throw new Error('No destination pinned for this swap. Aborted.');
+  const at = (n) => (ix.accounts[n] ? ix.accounts[n].pubkey : null);
+  if (at(di) !== opts.dest) throw new Error('Swap route would send the $VWFEST somewhere other than your own account. Aborted.');
+  if (h === 'e517cb977ae3ad2a') { const x = at(4); if (x !== C.JUPITER_PROGRAM && x !== opts.dest) throw new Error('Swap route names a second destination account. Aborted.'); }
+  const o = d.length - 19, quoted = d.readBigUInt64LE(o + 8), slip = BigInt(d.readUInt16LE(o + 16)), fee = d[o + 18];
+  if (fee !== 0) throw new Error('Swap route carries a platform fee. Aborted.');
+  if (opts.maxSlippageBps !== undefined && slip > BigInt(opts.maxSlippageBps)) throw new Error('Swap route allows more slippage than quoted. Aborted.');
+  if (opts.quotedOut !== undefined && quoted !== BigInt(opts.quotedOut)) throw new Error('Swap route promises a different output than quoted. Aborted.');
+  if (opts.minOut === undefined) throw new Error('No minimum output for this swap. Aborted.');
+  if ((quoted * (10000n - slip) + 9999n) / 10000n < BigInt(opts.minOut)) throw new Error('Swap route guarantees less $VWFEST than this purchase burns. Aborted.');
+}
 const dataOf = (ix) => Buffer.from(ix.data, 'base64');
 
 // source: the ONLY token account the route may take its input from (wSOL account for SOL swaps, the isolated temp account for token swaps); forbid: accounts no route instruction may reference (the player's own token account of the pay token).
-function auditJupiterIxs(list, { user, maxLamports, maxSwapIn, source, forbid }) {
+function auditJupiterIxs(list, { user, maxLamports, maxSwapIn, source, forbid, dest, minOut, maxSlippageBps, quotedOut }) {
   let lamports = 0n, spend = 0n;
   const u = new PublicKey(user);
   const wsolAta = getAssociatedTokenAddressSync(new PublicKey(C.WSOL), u, true).toBase58();
@@ -40,11 +55,11 @@ function auditJupiterIxs(list, { user, maxLamports, maxSwapIn, source, forbid })
         const dest = ix.accounts[1] && ix.accounts[1].pubkey; if (dest !== wsolAta) throw new Error('Swap route tried to send SOL somewhere unexpected. Aborted.');
         lamports += d.readBigUInt64LE(4);
       } else if (kind === 0) { lamports += d.readBigUInt64LE(4); } // createAccount (rent for temp accounts)
-      else if (kind !== 8) throw new Error('Unexpected system instruction in swap route. Aborted.'); // allocate only
+      else throw new Error('Unexpected system instruction in swap route. Aborted.'); // no allocate/assign/etc.
     } else if (ix.programId === C.TOKEN_PROGRAM || ix.programId === C.TOKEN_2022_PROGRAM) {
       if (!TOKEN_OK.has(d[0])) throw new Error('Unexpected token instruction in swap route. Aborted.');
       if (d[0] === 9) { const dest = ix.accounts[1] && ix.accounts[1].pubkey; if (dest !== user) throw new Error('Swap route would close an account to someone else. Aborted.'); }
-    } else if (ix.programId === C.JUPITER_PROGRAM && maxSwapIn !== undefined) { spend += jupSpend(d); if (!source) throw new Error('No source account pinned for this swap. Aborted.'); if (jupSource(ix, d) !== source) throw new Error('Swap route would take its input from a different account than the one prepared for it. Aborted.'); // the route's own amount fields bound what it can take from the player (SOL swaps and token swaps alike)
+    } else if (ix.programId === C.JUPITER_PROGRAM && maxSwapIn !== undefined) { spend += jupSpend(d); if (!source) throw new Error('No source account pinned for this swap. Aborted.'); if (jupSource(ix, d) !== source) throw new Error('Swap route would take its input from a different account than the one prepared for it. Aborted.'); { const sp = jupSpend(d); if (sp > BigInt(maxSwapIn)) throw new Error('Swap route would spend more than quoted. Aborted.'); if (sp !== BigInt(maxSwapIn)) throw new Error('Swap route does not spend exactly the quoted input. Aborted.'); } checkRoute(ix, d, { dest, minOut, maxSlippageBps, quotedOut }); // the route's own amount fields bound what it can take from the player (SOL swaps and token swaps alike)
     } else if (ix.programId === C.ATA_PROGRAM) {
       const owner = ix.accounts[2] && ix.accounts[2].pubkey; if (owner !== user) throw new Error('Swap route would create an account for someone else. Aborted.');
     }
@@ -66,7 +81,8 @@ async function assertNoStrayUserTokenAccounts(conn, ixs, user, allowed) {
   }
 }
 // iso: { temp, main } for token-funded swaps (input comes from the isolated temp account only); omit for SOL swaps (input comes from the wSOL account only). allow: extra accounts of the player that the route may reference ($VWFEST account).
-async function swapInstructions({ cfg, prices, conn, user, inputMint, amount, maxSolLamports, iso, allow = [], fetchImpl = fetch }) {
+async function swapInstructions({ cfg, prices, conn, user, inputMint, amount, maxSolLamports, iso, allow = [], dest, fetchImpl = fetch }) {
+  if (!dest) throw new Error('No destination account for the swap output');
   const quote = await prices.jupQuote({ inputMint, outputMint: cfg.vwfestMint, amount: amount.toString(), extra: '&maxAccounts=40' });
   if (!quote || !quote.outAmount) throw new Error('No swap route available right now');
   if (Number(quote.priceImpactPct || 0) > 0.05) throw new Error('Price impact too high right now. Try a smaller amount or later.');
@@ -82,10 +98,10 @@ async function swapInstructions({ cfg, prices, conn, user, inputMint, amount, ma
   const swapIx = iso ? pinSource(j.swapInstruction, iso.temp, iso.main) : j.swapInstruction; // token swaps: take the input from the isolated account, never the player's own
   const list = [...(j.setupInstructions || []), swapIx, ...(j.cleanupInstruction ? [j.cleanupInstruction] : [])];
   const budget = j.computeBudgetInstructions || [];
-  auditJupiterIxs([...budget, ...list], { user, maxLamports: maxSolLamports === undefined ? 0n : maxSolLamports, maxSwapIn: amount, source: iso ? iso.temp : wsolAta, forbid: iso ? [iso.main] : undefined });
+  auditJupiterIxs([...budget, ...list], { user, maxLamports: maxSolLamports === undefined ? 0n : maxSolLamports, maxSwapIn: amount, source: iso ? iso.temp : wsolAta, forbid: iso ? [iso.main] : undefined, dest, minOut: BigInt(quote.otherAmountThreshold), maxSlippageBps: cfg.slippageBps, quotedOut: BigInt(quote.outAmount) });
   await assertNoStrayUserTokenAccounts(conn, [swapIx], user, [wsolAta, ...allow, ...(iso ? [iso.temp] : [])]);
   const alts = [];
   for (const a of j.addressLookupTableAddresses || []) { const acc = await conn.getAccountInfo(new PublicKey(a)); if (acc) alts.push(new AddressLookupTableAccount({ key: new PublicKey(a), state: AddressLookupTableAccount.deserialize(acc.data) })); }
   return { instructions: list.map(toIx), computeBudget: budget.map(toIx), alts, quote, outAmount: BigInt(quote.outAmount), minOut: BigInt(quote.otherAmountThreshold) };
 }
-module.exports = { auditJupiterIxs, swapInstructions, assertNoStrayUserTokenAccounts, jupSpend, jupSource, pinSource, ALLOWED_PROGRAMS };
+module.exports = { checkRoute, auditJupiterIxs, swapInstructions, assertNoStrayUserTokenAccounts, jupSpend, jupSource, pinSource, ALLOWED_PROGRAMS };

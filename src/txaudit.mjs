@@ -30,12 +30,28 @@ export function pinSource(swapIx, account, expected) {
   if (expected && swapIx.accounts[idx].pubkey !== expected) throw new Error('Swap route does not take its input from your own token account. Aborted for your safety.');
   const accounts = swapIx.accounts.map((a, n) => (n === idx ? { ...a, pubkey: account } : a)); return { ...swapIx, accounts };
 }
+// Route layouts from the Jupiter v6 IDL (jup-ag/jupiter-cpi idl.json): route [0 token_program, 1 user_transfer_authority, 2 user_source_token_account, 3 user_destination_token_account, 4 destination_token_account (optional: the program id when unused), 5 destination_mint, 6 platform_fee_account, ...]
+// shared_accounts_route [0 token_program, 1 program_authority, 2 user_transfer_authority, 3 source_token_account, 4 program_source, 5 program_destination, 6 destination_token_account, 7 source_mint, 8 destination_mint, 9 platform_fee_account, ...]. Data tail: [in_amount u64][quoted_out_amount u64][slippage_bps u16][platform_fee_bps u8].
+const DEST_IDX = { e517cb977ae3ad2a: 3, c1209b3341d69c81: 6 };
+// The route's OUTPUT must land in the player's own $VWFEST account, and what it promises must cover what the transaction goes on to burn.
+//  opts: { dest, minOut (BigInt: the burn the transaction relies on), maxSlippageBps, quotedOut (optional BigInt: Jupiter's quote outAmount) }
+export function checkRoute(i, d, opts) {
+  const h = hex(d), di = DEST_IDX[h]; if (di === undefined) throw new Error('Unrecognised swap route type. Aborted for your safety.'); if (!opts.dest) throw new Error('No destination pinned for this swap. Aborted.');
+  if (acct(i, di) !== opts.dest) throw new Error('Swap route would send the $VWFEST somewhere other than your own account. Aborted for your safety.');
+  if (h === 'e517cb977ae3ad2a') { const x = acct(i, 4); if (x !== JUP && x !== opts.dest) throw new Error('Swap route names a second destination account. Aborted for your safety.'); } // the optional destination_token_account would redirect the output if set
+  const dv = new DataView(d.buffer, d.byteOffset, d.byteLength), o = d.length - 19, quoted = dv.getBigUint64(o + 8, true), slip = BigInt(dv.getUint16(o + 16, true)), fee = d[o + 18];
+  if (fee !== 0) throw new Error('Swap route carries a platform fee. Aborted for your safety.');
+  if (opts.maxSlippageBps !== undefined && slip > BigInt(opts.maxSlippageBps)) throw new Error('Swap route allows more slippage than quoted. Aborted for your safety.');
+  if (opts.quotedOut !== undefined && quoted !== BigInt(opts.quotedOut)) throw new Error('Swap route promises a different output than quoted. Aborted for your safety.');
+  if (opts.minOut === undefined) throw new Error('No minimum output for this swap. Aborted.');
+  if ((quoted * (10000n - slip) + 9999n) / 10000n < BigInt(opts.minOut)) throw new Error('Swap route guarantees less $VWFEST than this purchase burns. Aborted for your safety.');
+}
 const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 export function b58(str) { let n = 0n; for (const ch of str) { const v = B58.indexOf(ch); if (v < 0) throw new Error('bad base58'); n = n * 58n + BigInt(v); } const out = []; while (n > 0n) { out.unshift(Number(n & 255n)); n >>= 8n; } for (const ch of str) { if (ch !== '1') break; out.unshift(0); } return Uint8Array.from(out); }
 const eqb = (x, y) => x.length === y.length && x.every((v, i) => v === y[i]);
 const bytes = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
 const acct = (i, n) => (i.accounts && i.accounts[n] ? String(i.accounts[n].pubkey) : null);
-// list: Jupiter instruction JSON. opts: { user, wsolAta, maxSwapIn, source, forbid }  source: the ONLY token account the route may take its input from (wSOL account for SOL swaps, the isolated temp account for token swaps); forbid: accounts no instruction of the route may reference (the player's own token account of the pay token). maxSwapIn: the most the route may spend (SOL lamports for a SOL swap, raw token units for a token swap).
+// list: Jupiter instruction JSON. opts: { user, wsolAta, maxSwapIn, source, forbid, dest, minOut, maxSlippageBps, quotedOut }  dest: the player's $VWFEST account (the route's output must go there)  source: the ONLY token account the route may take its input from (wSOL account for SOL swaps, the isolated temp account for token swaps); forbid: accounts no instruction of the route may reference (the player's own token account of the pay token). maxSwapIn: the most the route may spend (SOL lamports for a SOL swap, raw token units for a token swap).
 export function audit(list, maxLamports, opts = {}) {
   const user = opts.user || null; let out = 0n, spend = 0n, hasSwap = false, price = 0n, units = 1400000n;
   for (const i of list) {
@@ -51,7 +67,7 @@ export function audit(list, maxLamports, opts = {}) {
       if (op === 9 && user && acct(i, 1) !== user) throw new Error('Swap route would send reclaimed SOL elsewhere. Aborted.'); }
     else if (i.programId === ATA_PROG) { if (d.length > 1 || (d.length === 1 && d[0] > 1)) throw new Error('Unexpected account instruction in swap route.'); if (user && acct(i, 2) !== user) throw new Error('Swap route would create an account for someone else. Aborted.'); }
     else if (i.programId === BUDGET) { const k = d[0]; if (k === 2 && d.length >= 5) units = BigInt(dv.getUint32(1, true)); else if (k === 3 && d.length >= 9) price = dv.getBigUint64(1, true); else if (k !== 1 && k !== 4 && k !== 2 && k !== 3) throw new Error('Unexpected compute-budget instruction.'); }
-    else if (i.programId === JUP) { hasSwap = true; spend += jupSpend(d); if (!opts.source) throw new Error('No source account pinned for this swap. Aborted.'); if (jupSource(i, d) !== opts.source) throw new Error('Swap route would take its input from a different account than the one prepared for it. Aborted.'); }
+    else if (i.programId === JUP) { hasSwap = true; spend += jupSpend(d); if (!opts.source) throw new Error('No source account pinned for this swap. Aborted.'); if (jupSource(i, d) !== opts.source) throw new Error('Swap route would take its input from a different account than the one prepared for it. Aborted.'); const sp = jupSpend(d); if (opts.maxSwapIn !== undefined) { if (sp > BigInt(opts.maxSwapIn)) throw new Error('Swap route would spend more than quoted. Aborted.'); if (sp !== BigInt(opts.maxSwapIn)) throw new Error('Swap route does not spend exactly the quoted input. Aborted.'); } checkRoute(i, d, opts); }
   }
   if (out > maxLamports) throw new Error('Swap route would move more SOL than quoted. Aborted.');
   if (price * units / 1000000n > MAX_PRIORITY_LAMPORTS) throw new Error('Priority fee is unreasonably high. Aborted.');
@@ -65,7 +81,7 @@ function decodeCreate(d) { // Core CreateV1: [0][dataState 0][name str][uri str]
   const name = rs(), uri = rs(); if (o + 1 !== d.length || d[o] !== 0) throw new Error('NFT instruction carries plugins or trailing data.'); return { name, uri };
 }
 // m: { keys: string[] (static + lookup-table keys, in message order), ixs: [{ p, a: number[], d: Uint8Array }], numSigners }
-// c: { user, mint, decimals, burn (BigInt, exact), memo, devWallet, devLamports (BigInt), asset (string|null), name, uri, swap: null | { maxLamports, maxSwapIn, wsolAta, iso: null | { temp, main, mint, dec, amount, maxRent } } }
+// c: { user, mint, decimals, burn (BigInt, exact), memo, devWallet, devLamports (BigInt), asset (string|null), name, uri, swap: null | { maxLamports, maxSwapIn, wsolAta, dest, maxSlippageBps, quotedOut, iso: null | { temp, main, mint, dec, amount, maxRent } } }
 //   swap.iso (token-funded swaps): the swap's input is isolated. [createAccountWithSeed temp (space 165, owner Token, rent<=maxRent)] [InitializeAccount3 temp] [transferChecked main -> temp, EXACTLY `amount`] [Jupiter route, source = temp] [closeAccount temp -> player].
 //   The route can then only ever reach `amount` of the pay token, and the player's own token account (`main`) may appear in no Jupiter instruction.
 export function auditMessage(m, c) {
@@ -102,7 +118,7 @@ export function auditMessage(m, c) {
   if (dev !== c.devLamports) throw new Error('Creator fee does not match your quote.'); if (core !== (c.asset ? 1 : 0)) throw new Error('NFT instruction count does not match your purchase.');
   if (iso) { if (st.create === -1 || st.init === -1 || st.xfer === -1 || st.close === -1 || st.jupFirst === -1) throw new Error('Swap isolation steps are missing. Aborted for your safety.');
     if (!(st.create < st.init && st.init < st.xfer && st.xfer < st.jupFirst && st.jupLast < st.close)) throw new Error('Swap isolation steps are out of order. Aborted for your safety.'); }
-  if (c.swap) audit(jup, c.swap.maxLamports, { user: c.user, wsolAta: c.swap.wsolAta, maxSwapIn: c.swap.maxSwapIn, source: iso ? iso.temp : c.swap.wsolAta, forbid: iso ? [iso.main] : undefined });
+  if (c.swap) audit(jup, c.swap.maxLamports, { user: c.user, wsolAta: c.swap.wsolAta, maxSwapIn: c.swap.maxSwapIn, dest: c.swap.dest, minOut: c.burn, maxSlippageBps: c.swap.maxSlippageBps, quotedOut: c.swap.quotedOut, source: iso ? iso.temp : c.swap.wsolAta, forbid: iso ? [iso.main] : undefined });
   else { if (jup.some((x) => x.programId !== BUDGET)) throw new Error('Unexpected instructions in a purchase without a swap.'); audit(jup, 0n, { user: c.user }); }
   return true;
 }

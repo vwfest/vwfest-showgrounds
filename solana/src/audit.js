@@ -6,7 +6,8 @@ const { getAssociatedTokenAddressSync } = require('@solana/spl-token');
 const C = require('./config');
 const { ALLOWED_PROGRAMS, auditJupiterIxs } = require('./jupiter');
 
-const RENT_CUSHION = 10000000n; // lamports allowed for temp/rent accounts created by a swap route (matches txbuild)
+const RENT_CUSHION = 6000000n; // lamports allowed for temp/rent accounts created by a swap route (matches txbuild and the client): three accounts' worth
+const TEMP_RENT_MAX = 2100000n; // the isolated temp token account (165 bytes) costs 2,039,280 lamports rent-exempt
 const EXTRA_OK = new Set([C.MEMO_PROGRAM, C.MPL_CORE_PROGRAM]);
 const u64 = (b, o) => Buffer.from(b).readBigUInt64LE(o);
 
@@ -17,7 +18,7 @@ function auditPayTx(tx, q, cfg, alts = []) {
   const m = tx.message; const keys = m.staticAccountKeys.map((k) => k.toBase58());
   const ak = m.getAccountKeys({ addressLookupTableAccounts: alts }); const keyAt = (i) => { const k = ak.get(i); return k ? k.toBase58() : null; }; // resolves keys that live in address lookup tables
   if (keys[0] !== q.wallet) throw new Error('Transaction fee payer is not your wallet');
-  const burnMint = cfg.vwfestMint; let burn = 0n, dev = 0n, devTok = 0n, memoOk = false;
+  const burnMint = cfg.vwfestMint; let burn = 0n, dev = 0n, devTok = 0n, memoOk = false, burnAta = null;
   const jupList = []; let sysLamports = 0n; // every non-fee instruction when swapping, re-audited below exactly like the server did
   const asJup = (ix, pid, d) => ({ programId: pid, accounts: ix.accountKeyIndexes.map((i) => ({ pubkey: keyAt(i) })), data: Buffer.from(d).toString('base64') });
   const memoExpected = 'vwfest:' + q.id + (q.commit ? ':' + q.commit : '');
@@ -36,7 +37,7 @@ function auditPayTx(tx, q, cfg, alts = []) {
     else if (tokenSwap && pid === SystemProgram.programId.toBase58() && d.length >= 4 && d.readUInt32LE(0) === 3) { // createAccountWithSeed [3][base 32][seed len u64][seed][lamports u64][space u64][owner 32]
       const sl = d.length >= 44 ? Number(d.readBigUInt64LE(36)) : -1; if (temp || sl < 0 || sl > 32 || d.length !== 4 + 32 + 8 + sl + 8 + 8 + 32) throw new Error('Bad temporary-account instruction');
       const o = 44 + sl; if (acct(0) !== q.wallet || !d.subarray(4, 36).equals(userB) || d.readBigUInt64LE(o + 8) !== 165n || !d.subarray(o + 16, o + 48).equals(tokenB)) throw new Error('Temporary account is not what was prepared for you');
-      if (d.readBigUInt64LE(o) > RENT_CUSHION) throw new Error('Temporary account would cost more rent than expected'); sysLamports += d.readBigUInt64LE(o); temp = acct(1); once('create', 'temporary account'); }
+      if (d.readBigUInt64LE(o) > TEMP_RENT_MAX) throw new Error('Temporary account would cost more rent than expected'); sysLamports += d.readBigUInt64LE(o); temp = acct(1); once('create', 'temporary account'); }
     else if (temp && pid === C.TOKEN_PROGRAM && d[0] === 18 && acct(0) === temp) { if (d.length !== 33 || acct(1) !== q.swapInputMint || !d.subarray(1, 33).equals(userB)) throw new Error('Temporary account is not owned by you / wrong token'); once('init', 'account initialisation'); }
     else if (temp && pid === C.TOKEN_PROGRAM && d[0] === 12 && acct(2) === temp) { if (d.length !== 10 || acct(0) !== isoMain || acct(1) !== q.swapInputMint || acct(3) !== q.wallet || (q.payToken && d[9] !== q.payToken.dec) || u64(d, 1) !== BigInt(q.swapInRaw)) throw new Error('Token transfer into the swap does not match your quote'); once('xfer', 'token transfer'); }
     else if (temp && pid === C.TOKEN_PROGRAM && d[0] === 9 && acct(0) === temp) { if (d.length !== 1 || acct(1) !== q.wallet || acct(2) !== q.wallet) throw new Error('Temporary account would be closed to someone else'); once('close', 'account close'); }
@@ -44,11 +45,11 @@ function auditPayTx(tx, q, cfg, alts = []) {
       const kind = d.length >= 4 ? d.readUInt32LE(0) : -1;
       if (kind === 2 && acct(0) === q.wallet && acct(1) === q.devWallet && q.devWallet) { const l = u64(d, 4); dev += l; sysLamports += l; }
       else if (q.swap && kind === 2 && acct(0) === q.wallet && acct(1) === wsolAta) { sysLamports += u64(d, 4); jupList.push(asJup(ix, pid, d)); } // wrap SOL for the swap: bounded below
-      else if (q.swap && (kind === 0 || kind === 8)) { if (kind === 0) sysLamports += u64(d, 4); jupList.push(asJup(ix, pid, d)); } // temp accounts from the route: bounded below
+      else if (q.swap && kind === 0) { sysLamports += u64(d, 4); jupList.push(asJup(ix, pid, d)); } // temp accounts from the route: bounded below
       else throw new Error('Transaction moves SOL somewhere unexpected');
     }
     else if ((pid === C.TOKEN_PROGRAM || pid === C.TOKEN_2022_PROGRAM) && (d[0] === 15 || d[0] === 8)) { // burnChecked | burn
-      if (d[0] === 15) { if (acct(1) !== burnMint || acct(2) !== q.wallet) throw new Error('Burn instruction does not match your quote'); burn += u64(d, 1); }
+      if (d[0] === 15) { if (acct(1) !== burnMint || acct(2) !== q.wallet || acct(0) !== ata(q.wallet, burnMint, pid) || (burnAta && burnAta !== acct(0))) throw new Error('Burn instruction does not match your quote'); burnAta = acct(0); burn += u64(d, 1); }
       else throw new Error('Unchecked burn is not allowed');
     } else if ((pid === C.TOKEN_PROGRAM || pid === C.TOKEN_2022_PROGRAM) && d[0] === 12) { // transferChecked (dev fee in SPL)
       const mint = acct(1), dest = acct(2), auth = acct(3);
@@ -68,7 +69,7 @@ function auditPayTx(tx, q, cfg, alts = []) {
     const maxLamports = (q.swapInputMint === C.WSOL ? BigInt(q.swapInRaw) : 0n) + RENT_CUSHION;
     if (tokenSwap) { if (st.create === -1 || st.init === -1 || st.xfer === -1 || st.close === -1 || st.jupFirst === -1) throw new Error('Swap isolation steps are missing');
       if (!(st.create < st.init && st.init < st.xfer && st.xfer < st.jupFirst && st.jupLast < st.close)) throw new Error('Swap isolation steps are out of order'); }
-    auditJupiterIxs(jupList, { user: q.wallet, maxLamports, maxSwapIn: BigInt(q.swapInRaw), source: tokenSwap ? temp : wsolAta, forbid: tokenSwap ? [isoMain] : undefined }); // ExactIn: the route may spend exactly the quoted input (SOL via the wSOL account, or the pay-token), whatever the input mint is
+    auditJupiterIxs(jupList, { user: q.wallet, maxLamports, maxSwapIn: BigInt(q.swapInRaw), source: tokenSwap ? temp : wsolAta, forbid: tokenSwap ? [isoMain] : undefined, dest: burnAta, minOut: burn, maxSlippageBps: cfg.slippageBps }); // ExactIn: the route may spend exactly the quoted input (SOL via the wSOL account, or the pay-token), whatever the input mint is
     const cap = BigInt(q.devLamports) * 101n / 100n + 1n + maxLamports; // total SOL that may leave the wallet via System transfer/createAccount
     if (sysLamports > cap) throw new Error('Transaction moves more SOL than your quote allows');
   }

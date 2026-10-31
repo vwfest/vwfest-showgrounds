@@ -85,14 +85,33 @@ test('assertNoStrayUserTokenAccounts: a route that references ANOTHER token acco
 
 test('swapInstructions end to end (mock Jupiter): token swap pins the route to the temp account; a hostile Jupiter reply is refused', async () => {
   const r = await rig(); const j = (ix) => ({ programId: ix.programId.toBase58(), accounts: ix.keys.map((k) => ({ pubkey: k.pubkey.toBase58(), isSigner: k.isSigner, isWritable: k.isWritable })), data: ix.data.toString('base64') });
-  const prices = { jupQuote: async () => ({ outAmount: '9000', otherAmountThreshold: '8900', priceImpactPct: '0' }) }; const conn = { getAccountInfo: async () => null, getMultipleAccountsInfo: async (k) => k.map(() => null) };
+  const prices = { jupQuote: async () => ({ outAmount: '4800037', otherAmountThreshold: '4752037', priceImpactPct: '0' }) }; const conn = { getAccountInfo: async () => null, getMultipleAccountsInfo: async (k) => k.map(() => null) };
   const reply = (swapIx) => async () => ({ ok: true, status: 200, json: async () => ({ computeBudgetInstructions: [], setupInstructions: [], swapInstruction: swapIx, cleanupInstruction: null, addressLookupTableAddresses: [] }) });
-  const iso = { temp: r.temp.toBase58(), main: r.main.toBase58() }; const cfg = { vwfestMint: r.vwMint.toBase58(), jupiterBase: 'http://x' };
-  const ok = await jup.swapInstructions({ cfg, prices, conn, user: r.q.wallet, inputMint: r.q.swapInputMint, amount: AMOUNT, maxSolLamports: 10_000_000n, iso, allow: [r.vwAta.toBase58()], fetchImpl: reply(j(r.route(r.main))) });
+  const iso = { temp: r.temp.toBase58(), main: r.main.toBase58() }; const cfg = { vwfestMint: r.vwMint.toBase58(), jupiterBase: 'http://x', slippageBps: 100 }; const dest = r.vwAta.toBase58();
+  const ok = await jup.swapInstructions({ cfg, prices, conn, user: r.q.wallet, inputMint: r.q.swapInputMint, amount: AMOUNT, maxSolLamports: 10_000_000n, iso, allow: [r.vwAta.toBase58()], dest, fetchImpl: reply(j(r.route(r.main))) });
   assert.equal(ok.instructions[0].keys[2].pubkey.toBase58(), r.temp.toBase58(), 'route input rewritten to the isolated account');
-  await assert.rejects(jup.swapInstructions({ cfg, prices, conn, user: r.q.wallet, inputMint: r.q.swapInputMint, amount: AMOUNT, maxSolLamports: 10_000_000n, iso, allow: [], fetchImpl: reply(j(r.route(Keypair.generate().publicKey))) }), /own token account/); // hostile: input from some other account
-  await assert.rejects(jup.swapInstructions({ cfg, prices, conn, user: r.q.wallet, inputMint: r.q.swapInputMint, amount: AMOUNT, maxSolLamports: 10_000_000n, iso, allow: [], fetchImpl: reply(j(r.route(r.main, AMOUNT * 3n))) }), /spend more/); // hostile: in_amount x3
-  await assert.rejects(jup.swapInstructions({ cfg, prices, conn, user: r.q.wallet, inputMint: r.q.swapInputMint, amount: AMOUNT, maxSolLamports: 10_000_000n, iso, allow: [], fetchImpl: reply(j(r.route(r.main, AMOUNT, [r.main]))) }), /must not use/); // hostile: main smuggled into the route accounts
+  await assert.rejects(jup.swapInstructions({ cfg, prices, conn, user: r.q.wallet, inputMint: r.q.swapInputMint, amount: AMOUNT, maxSolLamports: 10_000_000n, iso, allow: [], dest, fetchImpl: reply(j(r.route(Keypair.generate().publicKey))) }), /own token account/); // hostile: input from some other account
+  await assert.rejects(jup.swapInstructions({ cfg, prices, conn, user: r.q.wallet, inputMint: r.q.swapInputMint, amount: AMOUNT, maxSolLamports: 10_000_000n, iso, allow: [], dest, fetchImpl: reply(j(r.route(r.main, AMOUNT * 3n))) }), /spend more/); // hostile: in_amount x3
+  await assert.rejects(jup.swapInstructions({ cfg, prices, conn, user: r.q.wallet, inputMint: r.q.swapInputMint, amount: AMOUNT, maxSolLamports: 10_000_000n, iso, allow: [], dest, fetchImpl: reply(j(r.route(r.main, AMOUNT, [r.main]))) }), /must not use/); // hostile: main smuggled into the route accounts
+});
+
+test('swapInstructions: a hostile Jupiter reply that redirects the OUTPUT (route idx 3 / idx 4) or inflates slippage is refused; a missing dest is a programming error', async () => {
+  const r = await rig(); const j = (ix, f) => { const o = { programId: ix.programId.toBase58(), accounts: ix.keys.map((k) => ({ pubkey: k.pubkey.toBase58(), isSigner: k.isSigner, isWritable: k.isWritable })), data: ix.data.toString('base64') }; f && f(o); return o; };
+  const prices = { jupQuote: async () => ({ outAmount: '4800037', otherAmountThreshold: '4752037', priceImpactPct: '0' }) }; const conn = { getAccountInfo: async () => null, getMultipleAccountsInfo: async (k) => k.map(() => null) };
+  const reply = (swapIx) => async () => ({ ok: true, status: 200, json: async () => ({ computeBudgetInstructions: [], setupInstructions: [], swapInstruction: swapIx, cleanupInstruction: null, addressLookupTableAddresses: [] }) });
+  const iso = { temp: r.temp.toBase58(), main: r.main.toBase58() }; const cfg = { vwfestMint: r.vwMint.toBase58(), jupiterBase: 'http://x', slippageBps: 100 }; const dest = r.vwAta.toBase58(); const att = r.attacker.toBase58();
+  const go = (swapIx, d = dest) => jup.swapInstructions({ cfg, prices, conn, user: r.q.wallet, inputMint: r.q.swapInputMint, amount: AMOUNT, maxSolLamports: 10_000_000n, iso, allow: [], dest: d, fetchImpl: reply(swapIx) });
+  await go(j(r.route(r.main))); await assert.rejects(go(j(r.route(r.main), (o) => (o.accounts[3].pubkey = att))), /somewhere other than your own account/); await assert.rejects(go(j(r.route(r.main), (o) => (o.accounts[4].pubkey = att))), /second destination/);
+  await assert.rejects(go(j(r.route(r.main), (o) => { const d = Buffer.from(o.data, 'base64'); d.writeUInt16LE(3000, d.length - 3); o.data = d.toString('base64'); })), /more slippage/); await assert.rejects(go(j(r.route(r.main)), null), /No destination account|somewhere other/);
+});
+test('server audit: a pay tx whose route output goes to an account other than the burn account is refused; the burn must come from the player\'s own $VWFEST ATA', async () => {
+  const r = await rig(); const bad = (o) => { const x = r.route(); x.keys[3] = { ...x.keys[3], pubkey: o }; return x; };
+  assert.throws(() => audit.auditPayTx(r.build([r.create(), r.init(), r.xfer(), bad(r.attacker), r.close(), r.burn, r.memo]), r.q, r.cfg), /somewhere other than your own account/);
+  const burnOther = spl.createBurnCheckedInstruction(r.attacker, r.vwMint, r.user.publicKey, 1000n, 6); assert.throws(() => audit.auditPayTx(r.build([r.create(), r.init(), r.xfer(), r.route(), r.close(), burnOther, r.memo]), r.q, r.cfg), /Burn instruction does not match/);
+  assert.throws(() => audit.auditPayTx(r.build([r.create(), r.init(), r.xfer(), r.route(), r.close(), r.burn, r.memo]), r.q, { ...r.cfg, slippageBps: 50 }), /more slippage/); // the route says 100 bps; the server allows 50
+});
+test('server audit: the isolated temp account may cost at most ~rent-exempt, not the whole route cushion', async () => {
+  const r = await rig(); assert.throws(() => audit.auditPayTx(r.build([r.create({ lamports: 3_000_000 }), r.init(), r.xfer(), r.route(), r.close(), r.burn, r.memo]), r.q, r.cfg), /more rent/);
 });
 
 // ---- on-chain: the real SPL Token program (litesvm). The "route" stand-in is a token transfer the player signs, i.e. the most a hostile CPI could ever do with the player's authority.
