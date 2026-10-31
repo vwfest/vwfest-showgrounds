@@ -6,6 +6,9 @@ const rateLimit = require('express-rate-limit');
 const http = require('http');
 const path = require('path');
 const crypto = require('crypto');
+require('./lib/secret'); // fails fast in production without SERVER_SECRET
+const session = require('./lib/session');
+const walletauth = require('./lib/walletauth');
 const { WebSocketServer } = require('ws');
 const { Hub } = require('./lib/hub');
 const { Burns, isSig } = require('./lib/burns');
@@ -22,6 +25,7 @@ const { Vendors, checkJpeg } = require('./lib/vendors');
 const guide = require('./lib/guide');
 const GAMES = require('./shared/games');
 const PROD = process.env.NODE_ENV === 'production';
+const REQUIRE_PROOF = process.env.REQUIRE_WALLET_PROOF !== '0';
 const VOICE_RANGE = Number.isFinite(+process.env.VOICE_RANGE) && +process.env.VOICE_RANGE > 0 ? +process.env.VOICE_RANGE : 15;
 const num = (v, d) => (v === undefined || v === '' || !Number.isFinite(+v) ? d : +v);
 const PORT = num(process.env.PORT, 3000);
@@ -83,7 +87,7 @@ app.use(helmet({
 app.use(compression());
 const cors = (req, res, next) => {
   const o = req.get('origin');
-  if (o && ORIGINS.has(o)) { res.set('Access-Control-Allow-Origin', o); res.set('Vary', 'Origin'); res.set('Access-Control-Allow-Methods', 'GET,POST,OPTIONS'); res.set('Access-Control-Allow-Headers', 'content-type'); res.set('Access-Control-Max-Age', '600'); }
+  if (o && ORIGINS.has(o)) { res.set('Access-Control-Allow-Origin', o); res.set('Vary', 'Origin'); res.set('Access-Control-Allow-Methods', 'GET,POST,OPTIONS'); res.set('Access-Control-Allow-Headers', 'content-type,x-rpc-token'); res.set('Access-Control-Max-Age', '600'); }
   if (req.method === 'OPTIONS') return res.status(204).end();
   next();
 };
@@ -99,7 +103,7 @@ const iceServers = () => {
   const out = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
   const urls = (process.env.TURN_URL || '').split(',').map((x) => x.trim()).filter(Boolean);
   if (urls.length) {
-    if (process.env.TURN_SECRET) { const exp = Math.floor(Date.now() / 1000) + 6 * 3600; const user = String(exp); out.push({ urls, username: user, credential: crypto.createHmac('sha1', process.env.TURN_SECRET).update(user).digest('base64') }); }
+    if (process.env.TURN_SECRET) { const exp = Math.floor(Date.now() / 1000) + 3 * 3600; const user = String(exp); out.push({ urls, username: user, credential: crypto.createHmac('sha1', process.env.TURN_SECRET).update(user).digest('base64') }); }
     else if (process.env.TURN_USERNAME) out.push({ urls, username: process.env.TURN_USERNAME, credential: process.env.TURN_CREDENTIAL || '' });
   }
   return out;
@@ -107,7 +111,7 @@ const iceServers = () => {
 const shopView = () => SHOP.map((i) => ({ ...i, vwfestUsd: Math.round(i.usd * (1 - mint.discountPct / 100) * 100) / 100 }));
 const payFlags = () => ({ enabled: mint.enabled, reason: mint.reason, network: mint.network, mint: mint.mint, decimals: mint.decimals, feeUsd: mint.feeUsd, rideUsd: mint.rideUsd, slippageBps: mint.slippageBps, discountPct: mint.discountPct, devFeePct: mint.devFeePct, solShopEnabled: !!mint.devWallet, jupiter: mint.jupiter, embedded: mint.embedded, onramp: onramp.providers().map(({ id, name, how }) => ({ id, name, how })), entryUsd: mint.entryUsd, entryMinBurnPct: mint.entryMinBurnPct, payTokens: mint.payTokens, devnetTokensPerUsd: mint.devnetTokensPerUsd, base: publicUrl, vendor: { feeUsd: vcfg.feeUsd, days: vcfg.days, plots: vcfg.plots, imgKb: vcfg.imgKb, maxProducts: vcfg.maxProducts, devFeePct: mint.devFeePct, solAvailable: !!mint.devWallet, premod: vcfg.premod } });
 app.get('/api/config', (req, res) => res.set('Cache-Control', 'no-store').json({
-  ...payFlags(), shop: shopView(), odds: R.TIERS.map((t, i) => ({ tier: t, pct: R.ODDS[i] })), iceServers: iceServers(), turn: !!process.env.TURN_URL, voiceRange: VOICE_RANGE, maxPlayers: cfg.maxPlayers,
+  ...payFlags(), shop: shopView(), odds: R.TIERS.map((t, i) => ({ tier: t, pct: R.ODDS[i] })), iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }], turn: !!process.env.TURN_URL, /* TURN credentials are only sent over the authenticated WebSocket after join */ voiceRange: VOICE_RANGE, maxPlayers: cfg.maxPlayers,
 }));
 app.get('/api/mint/config', (req, res) => res.set('Cache-Control', 'no-store').json({ ...payFlags(), shop: undefined }));
 app.get('/api/rides', (req, res) => res.set('Cache-Control', 'public, max-age=10').json({ ok: true, count: rides.byId.size, recent: rides.recent(12).map(pubRide) }));
@@ -160,13 +164,28 @@ app.get('/api/admin/vendors/:plot/image/:id', adminLimit, adminAuth, (req, res) 
 app.post('/api/admin/vendors/:plot', adminLimit, adminAuth, express.json({ limit: '1kb' }), async (req, res) => {
   const r = vendors.admin(req.params.plot, req.body && req.body.action, req.body && req.body.days); if (!r.ok) return res.status(400).json(r); await vendors.save(r.booth); broadcastVendors(); console.warn(`[admin] vendor ${req.params.plot}: ${req.body.action}`); res.json({ ok: true, booth: vendors.adminList().find((x) => x.plot === +req.params.plot) });
 });
-// Allow-listed JSON-RPC proxy so the browser never needs a keyed RPC URL. Read + submit only; origin-locked.
-const RPC_OK = new Set(['getLatestBlockhash', 'getBalance', 'getAccountInfo', 'getTokenAccountsByOwner', 'getTokenAccountBalance', 'getMinimumBalanceForRentExemption', 'getFeeForMessage', 'getSignatureStatuses', 'sendTransaction', 'simulateTransaction', 'isBlockhashValid', 'getBlockHeight', 'getMultipleAccounts']);
-app.post('/api/rpc', express.json({ limit: '120kb' }), async (req, res) => {
+// Allow-listed JSON-RPC proxy so the browser never needs a keyed RPC URL. Origin-locked. READ methods are open (per-IP limited by /api limiter);
+// WRITE methods (sendTransaction / simulateTransaction) need a short-lived token issued over the authenticated WebSocket to a joined player
+// (welcome + every quote), are limited per player (RPC_WRITE_PER_MIN, default 20) and per IP (30/min), and must carry a base64 transaction of sane size.
+const RPC_READ = new Set(['getLatestBlockhash', 'getBalance', 'getAccountInfo', 'getTokenAccountsByOwner', 'getTokenAccountBalance', 'getMinimumBalanceForRentExemption', 'getFeeForMessage', 'getSignatureStatuses', 'isBlockhashValid', 'getBlockHeight', 'getMultipleAccounts']);
+const RPC_WRITE = new Set(['sendTransaction', 'simulateTransaction']);
+const budgets = new Map();
+const budget = (key, limit, windowMs = 60e3) => { const now = Date.now(); const a = (budgets.get(key) || []).filter((t) => now - t < windowMs); if (a.length >= limit) { budgets.set(key, a); return false; } a.push(now); budgets.set(key, a); return true; };
+setInterval(() => { const now = Date.now(); for (const [k, a] of budgets) if (!a.length || now - a[a.length - 1] > 120e3) budgets.delete(k); }, 60e3).unref();
+const rpcToken = (pid) => session.sign({ k: 'rpc', pid }, 30 * 60e3);
+app.post('/api/rpc', express.json({ limit: '8kb' }), async (req, res) => {
   const o = req.get('origin'); if (!o || !ORIGINS.has(o)) return res.status(403).json({ error: 'forbidden' });
-  const b = req.body; if (!b || typeof b !== 'object' || Array.isArray(b) || !RPC_OK.has(b.method) || !Array.isArray(b.params)) return res.status(400).json({ error: 'method not allowed' });
+  const b = req.body; if (!b || typeof b !== 'object' || Array.isArray(b) || !Array.isArray(b.params) || !(RPC_READ.has(b.method) || RPC_WRITE.has(b.method))) return res.status(400).json({ error: 'method not allowed' });
+  let params = b.params;
+  if (RPC_WRITE.has(b.method)) {
+    const t = session.verify(req.get('x-rpc-token'), 'rpc'); if (!t) return res.status(401).json({ error: 'join the world first (missing or expired token)' });
+    if (!budget('rpcw:' + t.pid, num(process.env.RPC_WRITE_PER_MIN, 20)) || !budget('rpcwip:' + req.ip, 30)) return res.status(429).json({ error: 'Too many requests' });
+    if (typeof params[0] !== 'string' || params[0].length > 2400 || !/^[A-Za-z0-9+/=]+$/.test(params[0])) return res.status(400).json({ error: 'bad transaction' });
+    params = [params[0], { ...(params[1] && typeof params[1] === 'object' ? params[1] : {}), encoding: 'base64' }];
+    if (params[1].maxRetries !== undefined) params[1].maxRetries = Math.min(5, Math.max(0, +params[1].maxRetries | 0));
+  } else if (params.length > 4 || JSON.stringify(params).length > 4000) return res.status(400).json({ error: 'bad params' });
   try {
-    const r = await fetch(mint.rpcUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: b.id ?? 1, method: b.method, params: b.params }), signal: AbortSignal.timeout(15000) });
+    const r = await fetch(mint.rpcUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: b.id ?? 1, method: b.method, params }), signal: AbortSignal.timeout(15000) });
     res.status(r.status).type('json').send(await r.text());
   } catch { res.status(502).json({ error: 'rpc unavailable' }); }
 });
@@ -203,7 +222,7 @@ app.use((req, res) => res.status(404).type('text').send('Not found'));
 // ---- websocket ----
 const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true, maxPayload: 6144, perMessageDeflate: false });
-const ipOf = (req) => String((req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '?').slice(0, 64);
+const ipOf = (req) => String((req.headers['x-forwarded-for'] || '').split(',').pop().trim() || req.socket.remoteAddress || '?').slice(0, 64);
 server.on('upgrade', (req, socket, head) => {
   const reject = (code, msg) => { socket.write(`HTTP/1.1 ${code} ${msg}\r\nConnection: close\r\n\r\n`); socket.destroy(); };
   let url; try { url = new URL(req.url, 'http://x'); } catch { return reject(400, 'Bad Request'); }
@@ -266,13 +285,14 @@ async function handle(c, m) {
       let prof = profiles.login(m.id, m.secret), created = null;
       if (!prof) {
         if (typeof m.nick !== 'string' && m.id) return hub.json(c, { t: 'joinerr', err: 'stale', why: 'Your saved profile was not found. Pick a nickname to start a new one.' });
+        if (!budget('mk:' + c.ip, num(process.env.PROFILE_CREATE_PER_HOUR, 5), 3600e3)) return hub.json(c, { t: 'joinerr', err: 'rate', why: 'Too many new profiles from your network. Try again later.' });
         const r = profiles.create(m.nick, m.quiz); if (!r.ok) return hub.json(c, { t: 'joinerr', err: r.err, why: r.why });
         prof = r.prof; created = { id: prof.id, secret: r.secret };
       }
       const r = hub.join(c, prof, burns.forProfile(prof.id).length > 0 || rides.forProfile(prof.id).length > 0);
       if (r.full) { hub.json(c, { t: 'full', online: hub.size, cap: cfg.maxPlayers }); return setTimeout(() => c.ws.close(1000, 'full'), 200); }
       if (r.err) return hub.json(c, { t: 'joinerr', err: r.err, why: r.why });
-      clearTimeout(c.joinTimer); setRide(r.p, prof.ride); hub.json(c, vendorMsg()); hub.welcome(r.p, { cred: created, created: prof.created, inv: inv(r.p), vibe: prof.av.vibe });
+      clearTimeout(c.joinTimer); setRide(r.p, prof.ride); hub.json(c, vendorMsg()); hub.welcome(r.p, { iceServers: iceServers(), rpcToken: rpcToken(prof.id), cred: created, created: prof.created, inv: inv(r.p), vibe: prof.av.vibe });
       break;
     }
     case 'chat': if (p) hub.onChat(p, m); break;
@@ -330,24 +350,35 @@ async function handle(c, m) {
         if (entry) { q.burnMin = (BigInt(q.burnRaw) * BigInt(mint.entryMinBurnPct) / 100n).toString(); } // Entry: the player burns what the on-ramp delivered minus fees, never less than this share
         const rec = pay.create({ ...q, kind, item: item && item.id, pid: p.prof.id, uri, code, plot: extra.plot });
         if (kind === 'ride') { rec.uri = `${publicUrl}/ride/${rec.id}.json`; extra = { name: 'VW Fest Ride', commit: commitOf(serverSeed(rec.id)) }; }
-        hub.json(c, { t: 'quote', q: { id: rec.id, kind, item: rec.item, method, usd, paidUsd: q.paidUsd, solUsd: q.solUsd, discountPct: q.discountPct, devPct: q.devPct, swap: q.swap, totalLamports: q.totalLamports, swapLamports: q.swapLamports, devLamports: q.devLamports, devWallet: q.devWallet, burnRaw: q.burnRaw, burnMin: q.burnMin, burnUi: q.burnUi, entry, uri: rec.uri, expires: rec.expires, ...extra } });
+        hub.json(c, { t: 'quote', rpcToken: rpcToken(p.prof.id), q: { id: rec.id, kind, item: rec.item, method, usd, paidUsd: q.paidUsd, solUsd: q.solUsd, discountPct: q.discountPct, devPct: q.devPct, swap: q.swap, totalLamports: q.totalLamports, swapLamports: q.swapLamports, devLamports: q.devLamports, devWallet: q.devWallet, burnRaw: q.burnRaw, burnMin: q.burnMin, burnUi: q.burnUi, entry, uri: rec.uri, expires: rec.expires, ...extra } });
       } catch (e) { console.error('quote failed', e.message); hub.json(c, { t: 'quoteerr', why: 'Could not get a price right now. Try again in a moment.' }); }
       break;
+    }
+    case 'wauth': { // wallet ownership challenge (signMessage); proofs live only for this WebSocket session
+      if (!p || !budget('wauth:' + p.id, 8)) return; const ch = walletauth.challenge(typeof m.pubkey === 'string' ? m.pubkey : '', p.prof.id);
+      return hub.json(c, ch ? { t: 'wchal', pubkey: m.pubkey, nonce: ch.nonce, message: ch.message, exp: ch.exp } : { t: 'wok', ok: false, why: 'Bad wallet address' });
+    }
+    case 'wproof': {
+      if (!p || !budget('wproof:' + p.id, 12)) return; const ok = walletauth.verify({ nonce: m.nonce, pubkey: m.pubkey, signature: m.sig, pid: p.prof.id });
+      if (ok) { (p.proven || (p.proven = new Map())).set(m.pubkey, Date.now() + 30 * 60e3); if (p.proven.size > 5) p.proven.delete(p.proven.keys().next().value); }
+      return hub.json(c, { t: 'wok', ok, pubkey: m.pubkey, why: ok ? undefined : 'Could not verify the wallet signature' });
     }
     case 'buy': { // client reports a signed+sent purchase tx; nothing is granted until the confirmed tx is verified on-chain
       if (!p || !mint.enabled || typeof m.qid !== 'string') return; const q = pay.quotes.get(m.qid);
       if (!q || q.pid !== p.prof.id || q.used || q.busy || q.expires + 120000 < Date.now()) return hub.json(c, { t: 'buyres', ok: false, why: 'That quote expired. Start again.', qid: m.qid });
       if (!isSig(m.sig)) return hub.json(c, { t: 'buyres', ok: false, why: 'Bad signature', qid: m.qid });
+      const proof = typeof m.wallet === 'string' && p.proven && p.proven.get(m.wallet) > Date.now(); // wallet-bound action: the paying wallet must have signed our challenge in this session
+      if (REQUIRE_PROOF && !proof) return hub.json(c, { t: 'buyres', ok: false, why: 'Please prove you own this wallet first (sign the free message), then try again.', qid: q.id, needProof: true });
       q.busy = true;
       try {
         const kind = q.kind === 'avatar' ? 'mint' : q.kind;
         const r = await burns.submit({ sig: m.sig, swapSig: m.swapSig, nonce: q.id, nick: p.nick, pid: p.prof.id, kind, item: q.item, rideId: q.kind === 'ride' ? q.id : undefined,
-          expect: { code: q.code || undefined, uri: q.uri || undefined, burnMin: BigInt(q.burnMin), devMin: BigInt(q.devMin), devWallet: q.devWallet || undefined } });
+          expect: { wallet: REQUIRE_PROOF ? m.wallet : undefined, code: q.code || undefined, uri: q.uri || undefined, burnMin: BigInt(q.burnMin), devMin: BigInt(q.devMin), devWallet: q.devWallet || undefined } });
         if (!r.ok && !r.dup) return hub.json(c, { t: 'buyres', ok: false, why: r.why, qid: q.id, retry: /not found/i.test(r.why) });
         if (!r.ok) return hub.json(c, { t: 'buyres', ok: false, why: r.why, qid: q.id });
         q.used = true; const burned = (Number(BigInt(r.rec.amount)) / 10 ** mint.decimals).toLocaleString('en-US', { maximumFractionDigits: 2 });
         if (q.kind === 'avatar') { hub.setMinted(p); hub.sys(`${p.nick} minted their avatar NFT and burned ${burned} $VWFEST 🔥`, 'burn'); }
-        else if (q.kind === 'shop') { const g = profiles.grant(p.prof.id, q.item, { sig: m.sig, usd: q.usd, method: q.method, ts: Date.now() }); const it = SHOP.find((x) => x.id === q.item); hub.sys(`${p.nick} bought ${it ? it.name : 'an item'} and burned ${burned} $VWFEST 🔥`, 'burn'); if (it && !p.prof.equipped[it.slot]) { profiles.equip(p.prof.id, it.slot, it.id); hub.refresh(p); } }
+        else if (q.kind === 'shop') { const g = profiles.grant(p.prof.id, q.item, { sig: m.sig, usd: q.usd, method: q.method, ts: Date.now() }); if (!g.ok && !g.dup) { console.error('shop grant failed after verified burn', m.sig, g.why); return hub.json(c, { t: 'buyres', ok: false, why: 'Your burn is confirmed but the item could not be granted (' + g.why + '). Contact the team with this transaction: ' + m.sig.slice(0, 12) + '…', qid: q.id, final: true }); } const it = SHOP.find((x) => x.id === q.item); hub.sys(`${p.nick} bought ${it ? it.name : 'an item'} and burned ${burned} $VWFEST 🔥`, 'burn'); if (it && !p.prof.equipped[it.slot]) { profiles.equip(p.prof.id, it.slot, it.id); hub.refresh(p); } }
         else if (q.kind === 'vendor') { const g = vendors.grant({ pid: p.prof.id, nick: p.nick, plot: q.plot, sig: m.sig, usd: q.usd }); if (!g.ok && g.why !== 'dup') { console.error('vendor grant failed after verified burn', m.sig, g.why); return hub.json(c, { t: 'buyres', ok: false, why: 'Your burn is confirmed but no booth plot is free. Contact the team with this transaction: ' + m.sig.slice(0, 12) + '…', qid: q.id }); } await vendors.save(g.booth); broadcastVendors(); hub.sys(`${p.nick} ${g.mode === 'renew' ? 'renewed' : 'opened'} a booth on Vendor Row (#${g.booth.plot}) and burned ${burned} $VWFEST 🔥`, 'burn'); hub.json(c, { t: 'vendor', plot: g.booth.plot, mode: g.mode, exp: g.booth.expiresAt }); }
         else if (q.kind === 'ride') { const rec = rides.reveal({ id: q.id, pid: p.prof.id, sig: m.sig, asset: r.rec.asset, wallet: r.rec.wallet }); hub.setMinted(p); const d = R.describe(rec.spec); hub.sys(`${p.nick} minted a ${d.tier.toUpperCase()} ${d.model}${d.lowrider ? ' LOWRIDER' : ''} and burned ${burned} $VWFEST 🔥`, 'burn'); if (!p.prof.ride) { setRide(p, rec.id); hub.refresh(p); } hub.json(c, { t: 'reveal', ride: pubRide(rec) }); }
         hub.json(c, { t: 'buyres', ok: true, qid: q.id, kind: q.kind, burned }); hub.json(c, inv(p));
@@ -363,6 +394,6 @@ if (require.main === module) {
   burns.init().then(() => vendors.init()).then(() => rides.init()).then(() => profiles.init()).then(() => {
     server.listen(PORT, '0.0.0.0', () => console.log(`[showgrounds] listening on ${PORT} (cap ${cfg.maxPlayers}, purchases ${mint.enabled ? 'ENABLED on ' + NETWORK : 'off: ' + mint.reason}, SOL shop ${mint.devWallet ? 'on' : 'off (DEV_WALLET unset)'})`));
   });
-  process.on('SIGTERM', () => { server.close(); setTimeout(() => process.exit(0), 500).unref(); });
+  process.on('SIGTERM', () => { server.close(); require('./lib/db').end().catch(() => {}); setTimeout(() => process.exit(0), 500).unref(); });
 }
 module.exports = { app, server, hub, burns, mint, cfg, profiles, rides, pay, vendors, vcfg, guideValues, init: async () => { await burns.init(); await vendors.init(); await rides.init(); await profiles.init(); } };

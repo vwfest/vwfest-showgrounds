@@ -78,8 +78,8 @@ async function build({ q, cfg, conn, user, mint, tokenProg, ata, swapLamports, p
   const post = sim.value.accounts && sim.value.accounts[0] ? sim.value.accounts[0].lamports : null; const spentLamports = post === null ? null : pre - post;
   return { tx, asset, conn, burn, blockhash, lastValidBlockHeight, swapInfo, spentLamports, size, units: sim.value.unitsConsumed, user, ata, balance: BigInt(pre) };
 }
-export async function prepare({ q, cfg, server, pubkey, onStep, payToken, sweep, reserveLamports }) {
-  const conn = new Connection(server + '/api/rpc', { commitment: 'confirmed', disableRetryOnRateLimit: true });
+export async function prepare({ q, cfg, server, pubkey, onStep, payToken, sweep, reserveLamports, rpcToken }) {
+  const conn = new Connection(server + '/api/rpc', { commitment: 'confirmed', disableRetryOnRateLimit: true, httpHeaders: rpcToken ? { 'x-rpc-token': rpcToken } : undefined }); // sendTransaction/simulate need the session token (issued over the WebSocket)
   const mint = new PublicKey(cfg.mint), user = pubkey; const mintInfo = await conn.getAccountInfo(mint); if (!mintInfo) throw new Error('$VWFEST mint not found on this network.');
   const tokenProg = mintInfo.owner.equals(TOKEN22) ? TOKEN22 : TOKEN;
   const [ata] = PublicKey.findProgramAddressSync([user.toBytes(), tokenProg.toBytes(), mint.toBytes()], ATA_PROG);

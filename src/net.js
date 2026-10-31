@@ -8,7 +8,7 @@ export class Net {
     ws.onclose = (e) => { const was = this.open; this.open = false; this.emit('close', { code: e.code, was }); if (!this.closedByUs && !this.noReconnect) setTimeout(() => this.connect(), Math.min(15000, 1000 * 2 ** this.tries++)); };
     ws.onerror = () => {};
   }
-  emit(t, m) { const f = this.on[t]; if (f) f(m); }
+  emit(t, m) { if (m && m.rpcToken) this.rpcToken = m.rpcToken; if (m && m.iceServers) this.ice = m.iceServers; const f = this.on[t]; if (f) f(m); }
   json(o) { if (this.open) { const s = JSON.stringify(o); this.sent += s.length; this.ws.send(s); } }
   move(x, y, z, yaw, flags) { // [1][x i16][y i16][z i16][yaw u8][flags u8], fixed point /200
     if (!this.open || this.ws.bufferedAmount > 4096) return; const b = new DataView(new ArrayBuffer(9)); const q = (v) => Math.max(-32768, Math.min(32767, Math.round(v * 200)));

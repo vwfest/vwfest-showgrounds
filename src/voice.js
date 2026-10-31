@@ -45,7 +45,7 @@ export class Voice {
     for (const id of want) if (!this.peers.has(id) && this.peers.size < MAX_PEERS && self.id < id) this.connect(id, true); // lower id initiates; the other side answers
   }
   mk(id) {
-    const pc = new RTCPeerConnection({ iceServers: this.ice }); const p = { pc, id, queue: [], remoteSet: false, gain: null, pan: null, sender: null, dist: 0, born: Date.now() }; this.peers.set(id, p);
+    const pc = new RTCPeerConnection({ iceServers: this.net.ice || this.ice }); const p = { pc, id, queue: [], remoteSet: false, gain: null, pan: null, sender: null, dist: 0, born: Date.now() }; this.peers.set(id, p);
     pc.onicecandidate = (e) => { if (e.candidate) this.net.json({ t: 'rtc', to: id, k: 'ice', d: e.candidate.toJSON() }); };
     pc.ontrack = (e) => { const ctx = this.audioCtx(); const stream = e.streams[0] || new MediaStream([e.track]); const a = new Audio(); a.srcObject = stream; a.muted = true; a.play().catch(() => {}); p.audio = a; const src = ctx.createMediaStreamSource(stream); const pan = ctx.createPanner(); pan.panningModel = 'HRTF'; pan.distanceModel = 'linear'; pan.refDistance = 1; pan.maxDistance = 1000; pan.rolloffFactor = 0; const g = ctx.createGain(); g.gain.value = 0; src.connect(pan); pan.connect(g); g.connect(ctx.destination); p.pan = pan; p.gain = g; p.src = src; this.onChange(); };
     pc.onconnectionstatechange = () => { if (['failed', 'closed'].includes(pc.connectionState)) this.drop(id, false); else if (pc.connectionState === 'disconnected') setTimeout(() => { if (pc.connectionState === 'disconnected') this.drop(id, false); }, 5000); this.onChange(); };

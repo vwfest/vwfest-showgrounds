@@ -27,7 +27,7 @@ let voice = null, scene, renderer, camera, world, sky, me3 = null, joined = fals
 const ctx = { net, server: SERVER, state, waiters, get cfg() { return state.cfg; }, get voice() { return voice; }, pack: (av) => UI.packAv(av, FIELDS), closeTop() { const m = $('#modals').lastElementChild; if (m) m.remove(); }, openEditor: () => openEditor(), entry: (o) => UI.entryModal(ctx, o), purchase: (kind, o) => UI.purchaseFlow(ctx, kind, { ...o, title: kind === 'ride' ? '🎁 Mystery ride' : kind === 'shop' ? o.item.name : 'Mint avatar NFT' }), voiceChanged: () => updateVoiceHud(), shopRedraw: null, garageRedraw: null };
 const on = (t, f) => { const prev = net.on[t]; net.on[t] = (m) => { if (prev) prev(m); f(m); }; };
 // resolve waiters
-for (const t of ['quote', 'quoteerr', 'buyres']) on(t, (m) => { const w = waiters[t]; if (w && w.length) { waiters[t] = []; w.forEach((f) => f(m)); } });
+for (const t of ['quote', 'quoteerr', 'buyres', 'wchal', 'wok']) on(t, (m) => { const w = waiters[t]; if (w && w.length) { waiters[t] = []; w.forEach((f) => f(m)); } });
 
 // ---------- renderer / scene ----------
 let gfx = null;

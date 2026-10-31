@@ -26,7 +26,7 @@ async function web3auth(cfg, server) {
 async function adapt(inst) {
   const conn = inst.connection; if (!conn) return null; const acct = conn.solanaWallet && conn.solanaWallet.accounts && conn.solanaWallet.accounts[0]; const addr = acct && (acct.address || (acct.publicKey && new PublicKey(acct.publicKey).toBase58()));
   const priv = await conn.ethereumProvider.request({ method: 'solana_privateKey' }); let kp = keypairFromExport(priv, addr); const user = (inst.getUserInfo && (await inst.getUserInfo().catch(() => null))) || {};
-  return { kind: 'embedded', provider: { signTransaction: async (tx) => { if (!kp) throw new Error('Signed out'); tx.sign([kp]); return tx; } }, pubkey: kp.publicKey, label: user.email || 'Google account',
+  return { kind: 'embedded', provider: { signTransaction: async (tx) => { if (!kp) throw new Error('Signed out'); tx.sign([kp]); return tx; }, signMessage: async (bytes) => { if (!kp) throw new Error('Signed out'); const nacl = (await import('tweetnacl')).default; return { signature: nacl.sign.detached(bytes, kp.secretKey) }; } }, pubkey: kp.publicKey, label: user.email || 'Google account',
     exportKey: () => { if (!kp) throw new Error('Signed out'); return b58encode(kp.secretKey); }, logout: async () => { if (kp) kp.secretKey.fill(0); kp = null; try { await inst.logout(); } catch {} } };
 }
 export async function connectEmbedded(cfg, server, via = 'google') {
@@ -37,3 +37,5 @@ export async function connectEmbedded(cfg, server, via = 'google') {
 // Quietly restore an earlier Google session (no popup) if there is one.
 export async function resumeEmbedded(cfg, server) { if (!cfg.embedded || !localStorage.getItem('sg_emb')) return null; try { const inst = await web3auth(cfg, server); if (!inst.connected) return null; const a = await adapt(inst); const lo = a.logout; a.logout = async () => { localStorage.removeItem('sg_emb'); await lo(); w3a = null; }; return a; } catch { return null; } }
 export async function balances(conn, pubkey) { return BigInt(await conn.getBalance(pubkey, 'confirmed')); }
+// Wallet ownership proof (free signMessage, never a transaction). Returns when the server confirmed it for this session.
+export async function signText(provider, text) { const bytes = new TextEncoder().encode(text); const r = await provider.signMessage(bytes, 'utf8'); const sig = r && r.signature ? r.signature : r; return btoa(String.fromCharCode(...new Uint8Array(sig))); }

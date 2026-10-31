@@ -131,3 +131,17 @@ Error contract: throw `Error` with a **user-readable** message (shown in a toast
 ## 6. Test hooks
 `MINT_NETWORK=devnet|localnet` must work without mainnet funds; provide a `chain.__test.fakeVerify()` (or env `CHAIN_FAKE=1`) that makes `verifyPurchase` accept a signed-by-test-key tx so the UI e2e (`test/e2e.cjs`) can run without a validator.
 Current tests: `npm run test:unit`, `test/api.cjs`, `test/guide.cjs`.
+
+## 7. Security contract added after the review (server.js / lib/*, owned by the World/UI worker; `solana/` must keep honouring it)
+* **RPC proxy** (`POST /api/rpc`): read methods open; `sendTransaction` / `simulateTransaction` need header `x-rpc-token` (HMAC token from `lib/session.js`, 30 min,
+  delivered as `rpcToken` in the WS `welcome` and in every `quote`). 20 writes/min per player (`RPC_WRITE_PER_MIN`), 30/min per IP, base64 tx ≤ 2400 chars, encoding forced to base64.
+  Browser: `new Connection(server + '/api/rpc', { httpHeaders: { 'x-rpc-token': net.rpcToken } })` (see `src/pay.js prepare({ rpcToken })`).
+* **Wallet ownership proof** (WS): `{t:'wauth', pubkey}` → `{t:'wchal', nonce, message, exp}` → wallet `signMessage(message)` → `{t:'wproof', pubkey, nonce, sig(base64)}` → `{t:'wok', ok}`.
+  Nonce is single-use, 5-min TTL, bound to the profile. The proof lives in the WS session (30 min). `{t:'buy', qid, sig, wallet}` is refused unless `wallet` is proven
+  (`REQUIRE_WALLET_PROOF=0` disables for tests), and `verifyPurchase` receives `expect.wallet` and MUST fail if the tx signer differs. Server helpers: `lib/walletauth.js` `challenge()/verify()`.
+  Your `chain.auth.*` can replace `lib/walletauth.js`; keep the message format human-readable and the one-time-nonce semantics.
+* **verifyPurchase must be race-safe**: reserve `sig` and avatar `code` synchronously before any `await` and release on failure (`Burns.submit` does this; see `test/security.cjs`).
+* **Grants after a verified burn are never silent**: failure returns `{t:'buyres', ok:false, final:true, why}` containing the first 12 chars of the signature; granting is idempotent by signature.
+* **Database**: one shared pool from `lib/db.js` with TLS verification (`PG_CA_CERT` / `PG_CA_FILE` for Supabase's CA; `PGSSL_INSECURE=1` is an emergency escape hatch). Do not create your own `Pool`.
+* **Secrets**: `lib/secret.js` — `SERVER_SECRET` (≥16 chars) is mandatory when `NODE_ENV=production`.
+* **TURN** credentials are only sent over the authenticated WS (`welcome.iceServers`), never in `/api/config`.
