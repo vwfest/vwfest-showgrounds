@@ -62,3 +62,10 @@ Honest limits: avatars are hierarchical rigid parts (not a skinned mesh); depth 
 * Known dependency note: `elliptic` and `deepmerge` (via the Web3Auth client bundle) have advisories with no upstream fix yet; `uuid` and `stream-json` are pinned to fixed versions with `overrides`. Server runtime dependencies audit clean.
 
 Credits: HDRIs and PBR textures from [Poly Haven](https://polyhaven.com) (CC0); Three.js; Web3Auth; Jupiter; Metaplex Core.
+
+## Publishing the client (GitHub Pages)
+Pages serves `main:/docs`. The built bundle (`docs/js`) is committed, so run `npm run build` and commit `docs/` before pushing client changes.
+(`ci-pages.yml.example` is an optional Actions workflow; copy it to `.github/workflows/` with a token that has the `workflow` scope.)
+
+## Render (game server)
+Build: `npm ci --omit=dev --ignore-scripts && npm ci --omit=dev --ignore-scripts --prefix solana`. Start: `node server.js`. Health check: `/healthz`. Env: see `render.yaml`.
