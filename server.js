@@ -25,7 +25,7 @@ const { Vendors, checkJpeg } = require('./lib/vendors');
 const guide = require('./lib/guide');
 const GAMES = require('./shared/games');
 const PROD = process.env.NODE_ENV === 'production';
-const REQUIRE_PROOF = process.env.REQUIRE_WALLET_PROOF !== '0';
+let REQUIRE_PROOF = true; // set below once the network is known: HARD-ON for mainnet (REQUIRE_WALLET_PROOF=0 only works on test networks)
 const VOICE_RANGE = Number.isFinite(+process.env.VOICE_RANGE) && +process.env.VOICE_RANGE > 0 ? +process.env.VOICE_RANGE : 15;
 const num = (v, d) => (v === undefined || v === '' || !Number.isFinite(+v) ? d : +v);
 const PORT = num(process.env.PORT, 3000);
@@ -34,6 +34,7 @@ const NETS = ['mainnet-beta', 'devnet', 'localnet'];
 const DISAGREE = process.env.SOLANA_NETWORK && process.env.MINT_NETWORK && process.env.SOLANA_NETWORK !== process.env.MINT_NETWORK;
 if (DISAGREE) console.error(`[network] SOLANA_NETWORK (${process.env.SOLANA_NETWORK}) and MINT_NETWORK (${process.env.MINT_NETWORK}) disagree: using devnet (no real money) until they match.`);
 const NETWORK = !DISAGREE && NETS.includes(process.env.SOLANA_NETWORK || process.env.MINT_NETWORK) ? (process.env.SOLANA_NETWORK || process.env.MINT_NETWORK) : 'devnet';
+REQUIRE_PROOF = NETWORK === 'mainnet-beta' || process.env.REQUIRE_WALLET_PROOF !== '0'; if (NETWORK === 'mainnet-beta' && process.env.REQUIRE_WALLET_PROOF === '0') console.warn('[security] REQUIRE_WALLET_PROOF=0 is ignored on mainnet: wallet proof is mandatory for purchases.');
 if (!NETS.includes(process.env.SOLANA_NETWORK || process.env.MINT_NETWORK)) console.warn('[network] SOLANA_NETWORK/MINT_NETWORK missing or invalid: using devnet');
 process.env.SOLANA_NETWORK = NETWORK; process.env.MINT_NETWORK = NETWORK;
 const RPC_DEFAULT = { 'mainnet-beta': 'https://api.mainnet-beta.solana.com', devnet: 'https://api.devnet.solana.com', localnet: 'http://127.0.0.1:8899' };
@@ -62,7 +63,7 @@ const mint = {
   explorer(id, kind) { const q = NETWORK === 'devnet' ? '?cluster=devnet' : ''; return NETWORK === 'localnet' ? null : `https://solscan.io/${kind}/${id}${q}`; },
 };
 // Embedded wallet (Google sign-in -> non-custodial Solana wallet) via Web3Auth / MetaMask Embedded Wallets. The client id is public by design.
-mint.embedded = process.env.WEB3AUTH_CLIENT_ID ? { provider: 'web3auth', clientId: process.env.WEB3AUTH_CLIENT_ID, network: (process.env.WEB3AUTH_NETWORK || (NETWORK === 'devnet' ? 'sapphire_devnet' : 'sapphire_mainnet')) === 'sapphire_devnet' ? 'sapphire_devnet' : 'sapphire_mainnet' } : null;
+mint.embedded = process.env.WEB3AUTH_CLIENT_ID ? { provider: 'web3auth', clientId: process.env.WEB3AUTH_CLIENT_ID, network: NETWORK === 'mainnet-beta' ? 'sapphire_mainnet' : 'sapphire_devnet' } : null; // coupled to the Solana network: a devnet server never talks to the Web3Auth mainnet network (and vice versa)
 mint.entryUsd = num(process.env.ENTRY_ONRAMP_USD, mint.feeUsd); mint.entryMinBurnPct = Math.min(Math.max(num(process.env.ENTRY_MIN_BURN_PCT, 60), 10), 100);
 mint.payTokens = (() => { const d = [['USDC', 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 6], ['USDT', 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', 6], ['BONK', 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263', 5], ['JUP', 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN', 6]].map(([sym, mint, dec]) => ({ sym, mint, dec })); try { const e = JSON.parse(process.env.PAY_TOKENS || 'null'); if (Array.isArray(e)) return e.filter((t) => t && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(t.mint) && /^[A-Za-z0-9]{1,10}$/.test(t.sym) && t.dec >= 0 && t.dec <= 12).slice(0, 12); } catch {} return d; })();
 const vcfg = { feeUsd: num(process.env.VENDOR_FEE_USD, 30), days: Math.min(Math.max(Math.round(num(process.env.VENDOR_DAYS, 30)), 1), 365), plots: Math.min(Math.max(Math.round(num(process.env.VENDOR_BOOTHS, 24)), 4), 24), imgKb: Math.min(Math.max(num(process.env.VENDOR_IMG_KB, 150), 20), 400), autoHide: Math.max(Math.round(num(process.env.VENDOR_AUTOHIDE_REPORTS, 3)), 2), premod: process.env.VENDOR_PREMOD === '1', maxProducts: 6 };
@@ -77,6 +78,7 @@ const hub = new Hub(cfg);
 const burns = new Burns({ network: NETWORK, mint: mint.mint, decimals: mint.decimals, rpcUrl: mint.rpcUrl, explorer: mint.explorer.bind(mint), base: publicUrl });
 const profiles = new Profiles((code) => burns.mintedBy(code));
 const nftav = new NftAvatars({ hub, profiles, env: process.env, publicUrl: publicUrl, db: (sql, params) => { if (!profiles.q) throw new Error('no db'); return profiles.q(sql, params); } });
+const { Moderation } = require('./lib/moderation'); const mod = new Moderation(); hub.mod = mod;
 const dj = new DJ({ hub, env: process.env }); hub.onLeave = (p) => dj.drop(p);
 const rides = new Rides();
 const pay = new Pay(mint);
@@ -91,7 +93,7 @@ app.set('trust proxy', 1); app.disable('x-powered-by');
 const { clientIp, useClientIp } = require('./lib/clientip'); useClientIp(app); // real client IP (CF-Connecting-IP) for every per-IP limiter: XFF's last entry is the Cloudflare EDGE, so everyone would share one bucket
 const OWN_WS = (() => { try { const u = new URL(publicUrl); return u.protocol === 'https:' ? ['wss://' + u.host] : []; } catch { return []; } })(); // this server only (was wss://*.onrender.com: any Render app)
 const RPC_HOSTS = ["'self'", ...(() => { try { return [new URL(process.env.PUBLIC_RPC_URL || RPC_DEFAULT[NETWORK]).origin]; } catch { return []; } })()];
-const W3A = ['wss://*.web3auth.io', 'https://*.web3auth.io', 'https://*.web3auth.com', 'https://*.authnetwork.dev', 'https://*.toruslabs.com', 'https://*.tor.us', 'https://*.metamask.io']; // only allowed when an embedded-wallet client id is configured
+const W3A = require('./shared/w3a'); // only allowed when an embedded-wallet client id is configured
 app.use(helmet({
   contentSecurityPolicy: {
     useDefaults: false,
@@ -99,12 +101,15 @@ app.use(helmet({
       defaultSrc: ["'self'"], scriptSrc: ["'self'", "'wasm-unsafe-eval'"], styleSrc: ["'self'"], styleSrcAttr: ["'unsafe-inline'"], // inline style ATTRIBUTES only (the Web3Auth frame sets them); <style> elements stay blocked
        imgSrc: ["'self'", 'data:', 'blob:', 'https://vwfestmemecoin.com'], fontSrc: ["'self'", 'data:'],
       connectSrc: [...RPC_HOSTS, ...(mint.embedded ? W3A : []), ...OWN_WS, 'https://lite-api.jup.ag', 'https://api.coinbase.com', ...(PROD ? [] : ['ws://127.0.0.1:*', 'ws://localhost:*'])],
-      frameSrc: mint.embedded ? W3A : ["'none'"], workerSrc: ["'self'", 'blob:'], mediaSrc: ["'self'"], objectSrc: ["'none'"], baseUri: ["'none'"], formAction: ["'none'"], frameAncestors: ["'self'", 'https://vwfest.github.io', 'https://vwfestmemecoin.com'],
+      frameAncestors: (process.env.FRAME_ANCESTORS || "'none'").split(',').map((x) => x.trim()).filter(Boolean), // nobody may frame the pages we serve (clickjacking); FRAME_ANCESTORS lists exceptions
+      frameSrc: mint.embedded ? W3A.filter((x) => x.startsWith('https:')) : ["'none'"], workerSrc: ["'self'", 'blob:'], mediaSrc: ["'self'"], objectSrc: ["'none'"], baseUri: ["'none'"], formAction: ["'none'"],
       upgradeInsecureRequests: PROD ? [] : null,
     },
   },
   crossOriginEmbedderPolicy: false, crossOriginResourcePolicy: { policy: 'cross-origin' }, frameguard: false, referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
 }));
+// Browser features this site never needs are switched off for it and for anything it embeds. Microphone stays on for this origin only (proximity voice / DJ mic; the browser still asks the player).
+app.use((req, res, next) => { res.setHeader('Permissions-Policy', 'camera=(), microphone=(self), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), hid=(), midi=(), display-capture=(), accelerometer=(), gyroscope=(), magnetometer=(), interest-cohort=()'); next(); });
 app.use(compression());
 const cors = (req, res, next) => {
   const o = req.get('origin');
@@ -120,13 +125,13 @@ app.get('/api/status', (req, res) => {
     perf: { cpu: process.cpuUsage(), rss: mem0(), tx: s.tx, rx: s.rx, snaps: s.snaps, avgTickMs: s.ticks ? s.tickMsSum / s.ticks : 0, rejectedMoves: s.rejectedMoves, kicks: s.kicks } });
 });
 app.get('/api/burns', (req, res) => res.set('Cache-Control', 'public, max-age=5').json({ ok: true, ...burns.summary(Math.min(+req.query.limit || 15, 50)) }));
-const iceServers = () => {
-  const out = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
-  const urls = (process.env.TURN_URL || '').split(',').map((x) => x.trim()).filter(Boolean);
-  if (urls.length) {
-    if (process.env.TURN_SECRET) { const exp = Math.floor(Date.now() / 1000) + 3 * 3600; const user = String(exp); out.push({ urls, username: user, credential: crypto.createHmac('sha1', process.env.TURN_SECRET).update(user).digest('base64') }); }
-    else if (process.env.TURN_USERNAME) out.push({ urls, username: process.env.TURN_USERNAME, credential: process.env.TURN_CREDENTIAL || '' });
-  }
+// Public STUN only goes out to everyone. TURN is a paid relay: its credentials are minted per session (short-lived HMAC, coturn use-auth-secret) and only after the player opts in to voice.
+// There is NO static shared TURN user/password any more (TURN_USERNAME/TURN_CREDENTIAL are ignored): set TURN_URL + TURN_SECRET.
+const STUN = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
+const TURN_TTL = Math.min(3600, Math.max(60, num(process.env.TURN_TTL_SEC, 900)));
+const iceServers = (p, now = Date.now()) => {
+  const out = STUN.slice(); const urls = (process.env.TURN_URL || '').split(',').map((x) => x.trim()).filter(Boolean);
+  if (p && urls.length && process.env.TURN_SECRET && process.env.TURN_SECRET.length >= 16) { const user = `${Math.floor(now / 1000) + TURN_TTL}:s${p.id}`; out.push({ urls, username: user, credential: crypto.createHmac('sha1', process.env.TURN_SECRET).update(user).digest('base64') }); }
   return out;
 };
 const shopView = () => SHOP.map((i) => ({ ...i, vwfestUsd: Math.round(i.usd * (1 - mint.discountPct / 100) * 100) / 100 }));
@@ -139,12 +144,8 @@ app.get('/api/mint/config', (req, res) => res.set('Cache-Control', 'no-store').j
 app.get('/api/rides', (req, res) => res.set('Cache-Control', 'public, max-age=10').json({ ok: true, count: rides.byId.size, recent: rides.recent(12).map(pubRide) }));
 app.get('/api/mint/price', async (req, res) => { try { res.set('Cache-Control', 'no-store').json({ ok: true, usd: await chain.solUsd() }); } catch { res.status(503).json({ ok: false, error: 'Price unavailable' }); } });
 // Fiat on-ramp checkout link for the player's own wallet. Origin-locked + tightly rate-limited; the provider (not us) takes the card and delivers SOL to that address.
-app.post('/api/onramp/session', rateLimit({ windowMs: 60e3, limit: 6, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests' } }), express.json({ limit: '2kb' }), async (req, res) => {
-  const o = req.get('origin'); if (!o || !ORIGINS.has(o)) return res.status(403).json({ error: 'forbidden' });
-  const b = req.body || {}; if (typeof b.provider !== 'string' || !onramp.isKey(b.address)) return res.status(400).json({ error: 'bad request' });
-  try { const usd = b.purpose === 'vendor' ? Math.ceil(vcfg.feeUsd * 1.08) : mint.entryUsd; const url = await onramp.session(b.provider, { address: b.address, usd, ip: req.ip, redirect: o + '/' }); res.set('Cache-Control', 'no-store').json({ ok: true, url, usd }); }
-  catch (e) { console.error('onramp failed', String(e.message).slice(0, 160)); res.status(502).json({ error: 'The on-ramp is unavailable right now' }); }
-});
+app.post('/api/onramp/session', (req, res) => res.status(410).json({ error: 'Moved: the on-ramp is requested over the authenticated game connection' })); // was HTTP + client-supplied address; now WebSocket 'onramp' + the session's proven wallet only
+
 
 // ---- Info Booth guide: docs/info.json + CHANGELOG.md rendered with LIVE config values ----
 const guideValues = () => guide.values({ mint, vendor: vcfg, shop: SHOP, R, voiceRange: VOICE_RANGE, maxPlayers: cfg.maxPlayers, dj });
@@ -179,10 +180,27 @@ app.post('/api/vendor/report', vLimit, vOrigin, express.json({ limit: '1kb' }), 
   console.warn(`[vendor] report plot ${req.body.plot} by ${p.id} (${r.count} total${r.auto ? ', AUTO-HIDDEN' : ''})`); await vendors.save(r.booth); if (r.auto) broadcastVendors(); res.json({ ok: true });
 });
 // Moderation API. Disabled unless ADMIN_SECRET (>= 16 chars) is set. Send it in the x-admin-secret header.
-const adminAuth = (req, res, next) => { if (!ADMIN_SECRET) return res.status(404).end(); const a = Buffer.from(String(req.get('x-admin-secret') || '')), b = Buffer.from(ADMIN_SECRET); if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return res.status(401).json({ error: 'unauthorized' }); next(); };
+const sha = (x) => crypto.createHash('sha256').update(String(x)).digest(); // compare fixed-length digests: no length leak
+const adminAuth = (req, res, next) => { if (!ADMIN_SECRET) return res.status(404).end(); if (!crypto.timingSafeEqual(sha(req.get('x-admin-secret') || ''), sha(ADMIN_SECRET))) return res.status(401).json({ error: 'unauthorized' }); next(); };
 const adminLimit = rateLimit({ windowMs: 60e3, limit: 30, standardHeaders: true, legacyHeaders: false });
 app.get('/api/admin/dj', adminLimit, adminAuth, (req, res) => res.set('Cache-Control', 'no-store').json({ ok: true, ...dj.view(), queueFull: dj.queue.map((q) => ({ id: q.id, nick: q.nick })) }));
 app.post('/api/admin/dj', adminLimit, adminAuth, express.json({ limit: '1kb' }), (req, res) => { const r = dj.admin(String((req.body && req.body.action) || '')); res.status(r.ok ? 200 : 400).json(r); }); // action: release (end current set) | clear (empty queue) | next (skip track)
+// Moderation: mute/unmute (chat, voice signaling, DJ mic), kick, ban/unban (join, also by IP). `pid` = profile id (VW-...) or the numeric session id of an online player; `minutes` 1..525600.
+app.get('/api/admin/mod', adminLimit, adminAuth, (req, res) => res.set('Cache-Control', 'no-store').json({ ok: true, ...mod.list(), online: [...hub.players.values()].map((q) => ({ sid: q.id, pid: q.prof.id, nick: q.nick })) }));
+app.post('/api/admin/mod', adminLimit, adminAuth, express.json({ limit: '1kb' }), (req, res) => {
+  const b = req.body || {}; const action = String(b.action || ''); const ref = b.pid;
+  const online = Number.isInteger(ref) ? hub.players.get(ref) : typeof ref === 'string' ? hub.find(ref) : null; const pid = online ? online.prof.id : typeof ref === 'string' && /^[\w-]{3,40}$/.test(ref) ? ref : null;
+  if (!pid) return res.status(400).json({ ok: false, why: 'pid must be a profile id or the session id of an online player' });
+  const minutes = Moderation.minutes(b.minutes, action === 'ban' ? 1440 : 60);
+  if (action === 'mute') { mod.mute(pid, minutes); if (online) { online.voice = false; hub.json(online.conn, { t: 'toast', text: 'A moderator has muted you.' }); } }
+  else if (action === 'unmute') mod.unmute(pid);
+  else if (action === 'kick') { if (!online) return res.status(404).json({ ok: false, why: 'not online' }); }
+  else if (action === 'ban') mod.ban(pid, minutes, online && online.conn.ip);
+  else if (action === 'unban') { mod.unban(pid); if (b.ip && typeof b.ip === 'string') mod.unbanIp(b.ip); }
+  else return res.status(400).json({ ok: false, why: 'action: mute | unmute | kick | ban | unban' });
+  if ((action === 'kick' || action === 'ban') && online) { hub.json(online.conn, { t: 'kick', why: action === 'ban' ? 'You were banned by a moderator.' : 'You were removed by a moderator.' }); const w = online.conn.ws; setTimeout(() => w.close(1008, action), 100); hub.leave(online); }
+  console.warn(`[admin] mod ${action} ${pid} ${action === 'mute' || action === 'ban' ? minutes + 'min' : ''}`); res.json({ ok: true, action, pid, minutes: action === 'mute' || action === 'ban' ? minutes : undefined });
+});
 app.get('/api/admin/vendors', adminLimit, adminAuth, (req, res) => res.set('Cache-Control', 'no-store').json({ ok: true, booths: vendors.adminList() }));
 app.get('/api/admin/vendors/:plot/image/:id', adminLimit, adminAuth, (req, res) => { const im = /^[0-9a-f]{20}$/.test(req.params.id) && vendors.images.get(req.params.id); if (!im) return res.status(404).end(); res.set({ 'Content-Type': 'image/jpeg', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; sandbox" }).send(im.buf); });
 app.post('/api/admin/vendors/:plot', adminLimit, adminAuth, express.json({ limit: '1kb' }), async (req, res) => {
@@ -261,16 +279,34 @@ server.on('upgrade', (req, socket, head) => {
   if (conns.size >= cfg.maxConns || (ipCount.get(ip) || 0) >= cfg.maxConnsPerIp) return reject(429, 'Too Many Requests');
   wss.handleUpgrade(req, socket, head, (ws) => onConnect(ws, ip, origin));
 });
+const str = (v, max) => typeof v === 'string' && v.length <= max;
+function cleanSignal(k, d) {
+  if (k === 'bye') return 1;
+  if (!d || typeof d !== 'object' || Array.isArray(d)) return null;
+  if (k === 'offer' || k === 'answer') { // {type, sdp}: audio-only SDP, no data channels / video, bounded
+    if (d.type !== k || !str(d.sdp, 4000) || !d.sdp.startsWith('v=0') || /^m=(video|application|text|message)/m.test(d.sdp) || !/^m=audio/m.test(d.sdp) || /[^\x09\x0a\x0d\x20-\x7e]/.test(d.sdp)) return null;
+    return { type: d.type, sdp: d.sdp };
+  }
+  // ice: {candidate, sdpMid, sdpMLineIndex, usernameFragment}
+  if (!str(d.candidate, 400) || !/^candidate:[\x20-\x7e]+$/.test(d.candidate)) return null; const o = { candidate: d.candidate };
+  if (d.sdpMid !== undefined && d.sdpMid !== null) { if (!str(d.sdpMid, 32)) return null; o.sdpMid = d.sdpMid; }
+  if (d.sdpMLineIndex !== undefined && d.sdpMLineIndex !== null) { if (!Number.isInteger(d.sdpMLineIndex) || d.sdpMLineIndex < 0 || d.sdpMLineIndex > 3) return null; o.sdpMLineIndex = d.sdpMLineIndex; }
+  if (d.usernameFragment !== undefined && d.usernameFragment !== null) { if (!str(d.usernameFragment, 64)) return null; o.usernameFragment = d.usernameFragment; }
+  return o;
+}
+const RTC_MAX_FRAME = 4500; // an audio-only offer/answer is ~1-3 KB
 function onConnect(ws, ip, origin) {
-  const c = { ws, ip, origin, player: null, tokens: 30, last: Date.now(), mv: 30, mvLast: Date.now(), strikes: 0, alive: true, burning: false, lastBurn: 0, joinTimer: null, rtc: 60, rtcLast: Date.now() };
+  const c = { ws, ip, origin, player: null, tokens: 30, last: Date.now(), mv: 30, mvLast: Date.now(), strikes: 0, alive: true, burning: false, lastBurn: 0, joinTimer: null, rtc: 20, rtcLast: Date.now(), mic: 40, micLast: Date.now(), micDrops: 0, joining: false };
   conns.add(c); ipCount.set(ip, (ipCount.get(ip) || 0) + 1);
-  c.joinTimer = setTimeout(() => { if (!c.player) ws.close(1000, 'join timeout'); }, 30000);
+  c.joinTimer = setTimeout(() => { if (!c.player) ws.close(1000, 'join timeout'); }, num(process.env.PREJOIN_MS, 20000));
   hub.json(c, { t: 'hi', online: hub.size, cap: cfg.maxPlayers, full: hub.size >= cfg.maxPlayers, burns: burns.summary(), mint: { enabled: mint.enabled } });
   ws.on('pong', () => { c.alive = true; });
   ws.on('message', (data, isBinary) => {
     const now = Date.now(); hub.stats.rx += data.length;
     if (isBinary) { // 0x04 = DJ microphone packet (own limits inside dj.relay); 0x01 = movement
-      if (data[0] === 4) { if (c.player && data.length <= 4096) dj.relay(c.player, Buffer.from(data)); return; }
+      if (data[0] === 4) { // token bucket BEFORE any copy: 40 packets burst, 30/s sustained, and only the current DJ's frames are ever processed
+        c.mic = Math.min(40, c.mic + ((now - c.micLast) / 1000) * 30); c.micLast = now; if (c.mic < 1) { if (++c.micDrops > 600) ws.close(1008, 'slow down'); return; } c.mic -= 1;
+        if (c.player && data.length <= 4096 && dj.isDj(c.player)) dj.relay(c.player, Buffer.from(data)); return; }
       // movement: separate, generous bucket (20/s)
       c.mv = Math.min(30, c.mv + ((now - c.mvLast) / 1000) * 20); c.mvLast = now;
       if (c.mv < 1) return; c.mv -= 1;
@@ -280,14 +316,14 @@ function onConnect(ws, ip, origin) {
     let m; try { m = JSON.parse(data.toString()); } catch { return; }
     if (!m || typeof m !== 'object' || typeof m.t !== 'string') return;
     if (m.t === 'rtc') { // WebRTC signaling has its own bucket (ICE bursts)
-      c.rtc = Math.min(60, c.rtc + ((now - c.rtcLast) / 1000) * 12); c.rtcLast = now; if (c.rtc < 1) return; c.rtc -= 1;
+      if (data.length > RTC_MAX_FRAME) return; c.rtc = Math.min(20, c.rtc + ((now - c.rtcLast) / 1000) * 6); c.rtcLast = now; if (c.rtc < 1) { if (++c.strikes > 40) ws.close(1008, 'slow down'); return; } c.rtc -= 1;
     } else {
       if (data.length > 2500) return;
       c.tokens = Math.min(30, c.tokens + ((now - c.last) / 1000) * 6); c.last = now;
       if (c.tokens < 1) { if (++c.strikes > 40) ws.close(1008, 'slow down'); return; }
       c.tokens -= 1;
     }
-    try { handle(c, m); } catch (e) { console.error('handler error', e); }
+    try { Promise.resolve(handle(c, m)).catch((e) => console.error('handler error', e && e.message)); } catch (e) { console.error('handler error', e && e.message); } // handle() is async: a rejection must never become an unhandledRejection (process exit)
   });
   ws.on('close', () => { clearTimeout(c.joinTimer); rpcGuard.revoke(c); conns.delete(c); const n = (ipCount.get(ip) || 1) - 1; if (n <= 0) ipCount.delete(ip); else ipCount.set(ip, n); if (c.player) hub.leave(c.player); });
   ws.on('error', () => {});
@@ -311,9 +347,12 @@ async function handle(c, m) {
   const p = c.player;
   switch (m.t) {
     case 'join': {
-      if (p || c.joining) return;
+      if (p || c.joining) return; c.joining = true;
+      try {
+      if (mod.banned(null, c.ip)) { hub.json(c, { t: 'joinerr', err: 'banned', why: 'You are banned from the grounds.' }); return setTimeout(() => c.ws.close(1008, 'banned'), 200); }
       if (hub.size >= cfg.maxPlayers && !hub.find(typeof m.id === 'string' ? m.id : '')) { hub.json(c, { t: 'full', online: hub.size, cap: cfg.maxPlayers }); return setTimeout(() => c.ws.close(1000, 'full'), 200); }
       let prof = profiles.login(m.id, m.secret), created = null;
+      if (prof && mod.banned(prof.id, c.ip)) { hub.json(c, { t: 'joinerr', err: 'banned', why: 'You are banned from the grounds.' }); return setTimeout(() => c.ws.close(1008, 'banned'), 200); }
       if (!prof) {
         if (typeof m.nick !== 'string' && m.id) return hub.json(c, { t: 'joinerr', err: 'stale', why: 'Your saved profile was not found. Pick a nickname to start a new one.' });
         if (!budget('mk:' + c.ip, num(process.env.PROFILE_CREATE_PER_HOUR, 5), 3600e3)) return hub.json(c, { t: 'joinerr', err: 'rate', why: 'Too many new profiles from your network. Try again later.' });
@@ -323,7 +362,8 @@ async function handle(c, m) {
       const r = hub.join(c, prof, burns.forProfile(prof.id).length > 0 || rides.forProfile(prof.id).length > 0);
       if (r.full) { hub.json(c, { t: 'full', online: hub.size, cap: cfg.maxPlayers }); return setTimeout(() => c.ws.close(1000, 'full'), 200); }
       if (r.err) return hub.json(c, { t: 'joinerr', err: r.err, why: r.why });
-      clearTimeout(c.joinTimer); setRide(r.p, prof.ride); hub.json(c, vendorMsg()); nftav.restore && setTimeout(() => nftav.restore(r.p), 50); setTimeout(() => dj.hello(r.p), 80); hub.welcome(r.p, { rpcToken: rpcGuard.issue(c, r.p, c.origin), iceServers: iceServers(), cred: created, created: prof.created, inv: inv(r.p), vibe: prof.av.vibe });
+      clearTimeout(c.joinTimer); setRide(r.p, prof.ride); hub.json(c, vendorMsg()); nftav.restore && setTimeout(() => nftav.restore(r.p), 50); setTimeout(() => dj.hello(r.p), 80); hub.welcome(r.p, { rpcToken: rpcGuard.issue(c, r.p, c.origin), iceServers: STUN, cred: created, created: prof.created, inv: inv(r.p), vibe: prof.av.vibe });
+      } finally { c.joining = false; }
       break;
     }
     case 'rpctok': { if (!p) return; const now = Date.now(); if (now - (p.lastRpcTok || 0) < 5000) return; p.lastRpcTok = now; hub.json(c, { t: 'rpctok', rpcToken: rpcGuard.issue(c, p, c.origin) }); break; } // rotate before expiry (client refreshes at ~60% of ttl)
@@ -362,12 +402,17 @@ async function handle(c, m) {
       if (!p) return; if (!m.on || !p.rd) { p.park = null; hub.refresh(p); break; }
       p.park = { x: Math.round(p.x * 10) / 10, z: Math.round(p.z * 10) / 10, yaw: Math.round(p.yaw * 100) / 100 }; hub.refresh(p); break;
     }
-    case 'rtc': { // WebRTC voice signaling relay, only between players who are near each other
-      if (!p || !Number.isInteger(m.to) || !['offer', 'answer', 'ice', 'bye'].includes(m.k)) return;
-      const q = hub.players.get(m.to); if (!q || q === p) return;
+    case 'voice': { // opt-in: only now does this session get relay (TURN) credentials, and only players with voice on can exchange signaling
+      if (!p || !budget('voice:' + p.id, 12)) return; const on = m.on === true; if (on && mod.muted(p.prof.id)) return hub.json(c, { t: 'toast', text: 'A moderator has muted you.' });
+      p.voice = on; if (on) hub.json(c, { t: 'ice', iceServers: iceServers(p) }); else if (hub.players.size) for (const q of hub.players.values()) if (q.voice && q !== p && (q.x - p.x) ** 2 + (q.z - p.z) ** 2 <= (VOICE_RANGE + 40) ** 2) hub.json(q.conn, { t: 'rtc', from: p.id, k: 'bye', d: 1 });
+      break;
+    }
+    case 'rtc': { // WebRTC voice signaling relay: both sides must have voice on, be near each other, not muted; the payload is rebuilt from an allow-list (never relayed as received)
+      if (!p || !p.voice || !Number.isInteger(m.to) || !['offer', 'answer', 'ice', 'bye'].includes(m.k)) return;
+      const q = hub.players.get(m.to); if (!q || q === p || !q.voice || mod.muted(p.prof.id)) return;
       if ((q.x - p.x) ** 2 + (q.z - p.z) ** 2 > (VOICE_RANGE + 12) ** 2) return;
-      if (m.d === undefined || JSON.stringify(m.d).length > 5000) return;
-      hub.json(q.conn, { t: 'rtc', from: p.id, k: m.k, d: m.d }); break;
+      const d = cleanSignal(m.k, m.d); if (d === null) return;
+      hub.json(q.conn, { t: 'rtc', from: p.id, k: m.k, d }); break;
     }
     case 'quote': {
       if (!p) return; const now = Date.now(); if (now - (p.lastQuote || 0) < 1200) return; p.lastQuote = now;
@@ -377,7 +422,7 @@ async function handle(c, m) {
         if (kind === 'avatar') {
           if (method !== 'sol') return hub.json(c, { t: 'quoteerr', why: 'Avatar minting is paid in SOL (100% is used to buy back and burn $VWFEST).' });
           code = avatar.pack(p.av); if (burns.codes.has(code)) return hub.json(c, { t: 'quoteerr', why: 'This exact avatar has already been minted. Change a trait to mint a new one.' });
-          usd = mint.feeUsd; devPct = 0; uri = `${publicUrl}/nft/${code}.json`; extra = { name: 'VW FEST Avatar', code }; entry = m.entry === true && onramp.providers().length > 0; // the reduced-burn entry quote only exists when an on-ramp can actually deliver the funds (otherwise any client could ask for it)
+          usd = mint.feeUsd; devPct = 0; uri = `${publicUrl}/nft/${code}.json`; extra = { name: 'VW FEST Avatar', code }; entry = m.entry === true && onramp.providers().length > 0 && !!p.rampAt && Date.now() - p.rampAt < 3 * 3600e3 && !!p.rampAddr && p.proven && p.proven.get(p.rampAddr) > Date.now(); // the reduced-burn entry quote only exists when an on-ramp can actually deliver the funds (otherwise any client could ask for it)
         } else if (kind === 'shop') {
           item = SHOP.find((x) => x.id === m.item); if (!item) return hub.json(c, { t: 'quoteerr', why: 'Unknown item.' });
           if (p.prof.items.has(item.id)) return hub.json(c, { t: 'quoteerr', why: 'You already own this.' });
@@ -399,12 +444,21 @@ async function handle(c, m) {
       } catch (e) { console.error('quote failed', e.message); hub.json(c, { t: 'quoteerr', why: 'Could not get a price right now. Try again in a moment.' }); }
       break;
     }
+    case 'onramp': { // fiat on-ramp link: the destination is ALWAYS this session's proven wallet (the client cannot choose an address)
+      if (!p || !budget('onramp:' + p.id, 6) || !budget('onrampip:' + c.ip, 12)) return hub.json(c, { t: 'onramperr', why: 'Too many requests. Try again in a minute.' });
+      let addr = null; const now = Date.now(); if (p.proven) for (const [k, exp] of p.proven) if (exp > now) addr = k; // most recently proven, still valid
+      if (!addr) return hub.json(c, { t: 'onramperr', needProof: true, why: 'Verify your wallet first (free signature), then try again.' });
+      if (typeof m.provider !== 'string' || !onramp.isKey(addr)) return hub.json(c, { t: 'onramperr', why: 'Bad request' });
+      try { const usd = m.purpose === 'vendor' ? Math.ceil(vcfg.feeUsd * 1.08) : mint.entryUsd; const url = await onramp.session(m.provider, { address: addr, usd, ip: c.ip, redirect: c.origin + '/' }); p.rampAt = Date.now(); p.rampAddr = addr; hub.json(c, { t: 'onrampres', url, usd, address: addr }); }
+      catch (e) { console.error('onramp failed', String(e.message).slice(0, 160)); hub.json(c, { t: 'onramperr', why: 'The on-ramp is unavailable right now' }); }
+      break;
+    }
     case 'wauth': { // wallet ownership challenge (signMessage); proofs live only for this WebSocket session
-      if (!p || !budget('wauth:' + p.id, 8)) return; const ch = walletauth.challenge(typeof m.pubkey === 'string' ? m.pubkey : '', p.prof.id);
+      if (!p || !budget('wauth:' + p.id, 8)) return; const ch = walletauth.challenge(typeof m.pubkey === 'string' ? m.pubkey : '', p.prof.id, c.origin, NETWORK);
       return hub.json(c, ch ? { t: 'wchal', pubkey: m.pubkey, nonce: ch.nonce, message: ch.message, exp: ch.exp } : { t: 'wok', ok: false, why: 'Bad wallet address' });
     }
     case 'wproof': {
-      if (!p || !budget('wproof:' + p.id, 12)) return; const ok = walletauth.verify({ nonce: m.nonce, pubkey: m.pubkey, signature: m.sig, pid: p.prof.id });
+      if (!p || !budget('wproof:' + p.id, 12)) return; const ok = walletauth.verify({ nonce: m.nonce, pubkey: m.pubkey, signature: m.sig, pid: p.prof.id, origin: c.origin });
       if (ok) { (p.proven || (p.proven = new Map())).set(m.pubkey, Date.now() + 30 * 60e3); if (p.proven.size > 5) p.proven.delete(p.proven.keys().next().value); }
       return hub.json(c, { t: 'wok', ok, pubkey: m.pubkey, why: ok ? undefined : 'Could not verify the wallet signature' });
     }
@@ -448,4 +502,4 @@ if (require.main === module) {
   });
   process.on('SIGTERM', () => { server.close(); require('./lib/db').end().catch(() => {}); setTimeout(() => process.exit(0), 500).unref(); });
 }
-module.exports = { rpcGuard, dj, nftav, app, server, hub, burns, mint, cfg, profiles, rides, pay, vendors, vcfg, guideValues, init };
+module.exports = { rpcGuard, requireProof: () => REQUIRE_PROOF, mod, iceServers, cleanSignal, dj, nftav, app, server, hub, burns, mint, cfg, profiles, rides, pay, vendors, vcfg, guideValues, init };

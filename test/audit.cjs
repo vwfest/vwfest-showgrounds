@@ -53,7 +53,7 @@ const join = async (nick) => { const c = await client(); await c.wait('hi'); c.s
   holds = [...S.vendors.holds.keys()].length; rec('V1', 'medium', 'one profile can hold at most 1 booth plot at a time', holds <= 1, 'plots held by a single free profile: ' + holds);
   // ---- entry-quote discount abuse
   const en = await join('Entry_01'); en.send({ t: 'quote', kind: 'avatar', method: 'sol', entry: false }); const q0 = await en.wait('quote').catch(() => null); en.msgs.length = 0; en.waiters = []; await wait(1300); en.send({ t: 'quote', kind: 'avatar', method: 'sol', entry: true }); const q1 = await en.wait('quote').catch(() => null);
-  if (q0 && q1) { const r = Number(BigInt(q1.q.burnMin) * 100n / BigInt(q0.q.burnMin)); rec('P1', 'medium', 'client-chosen entry:true does not lower the required burn when no on-ramp is configured', r >= 95, `burnMin ratio entry/normal = ${r}%`); } else rec('P1', 'medium', 'entry quote test', false, 'no quotes');
+  if (q0 && q1) { const r = Number(BigInt(q1.q.burnMin) * 100n / BigInt(q0.q.burnMin)); rec('P1', 'medium', 'client-chosen entry:true does not lower the required burn (no on-ramp session / proven wallet issued by the server)', r >= 95, `burnMin ratio entry/normal = ${r}%`); } else rec('P1', 'medium', 'entry quote test', false, 'no quotes');
   // ---- NFT name sanitization
   const nm = (S.nftav.pub({ nft: { asset: 'x', name: 'Send SOL to evil.com <b>ADMIN</b>' } }) || {}).n; rec('NFT1', 'low', 'on-chain NFT name is filtered like chat (links/offensive/impersonation)', !/evil\.com/.test(nm), 'name shown: ' + JSON.stringify(nm));
   // ---- purchase transaction inspection (wrong mint / amount / recipient / signer / memo / CPI / failed tx)
@@ -83,6 +83,15 @@ const join = async (nick) => { const c = await client(); await c.wait('hi'); c.s
   { const { enableRls } = require('../lib/rls'); const ran = []; const done = await enableRls(async (sql) => { ran.push(sql); return { rows: [{ table_name: 'profiles' }, { table_name: 'we"ird' }] }; }, 'showgrounds');
     rec('RLS', 'medium', 'RLS is enabled (no policies) on every table in the schema, identifiers quoted', done.length === 2 && ran.some((x) => x === 'ALTER TABLE "showgrounds"."profiles" ENABLE ROW LEVEL SECURITY') && ran.some((x) => x.includes('"we""ird"')));
     const ok = await enableRls(async () => { throw new Error('boom'); }, 'showgrounds'); rec('RLS', 'low', 'RLS failures are non-fatal', Array.isArray(ok) && ok.length === 0); }
+  // ---- dependency guard: bigint-buffer (via spl-token) has no patch, so no untrusted bytes may reach spl-token's account/mint DECODERS; only encoders / PDA derivation
+  { const fs = require('fs'); const used = new Set(); for (const f of fs.readdirSync(path.join(ROOT, 'solana/src')).filter((x) => x.endsWith('.js'))) { const src = fs.readFileSync(path.join(ROOT, 'solana/src', f), 'utf8'); for (const m of src.matchAll(/\bspl\.([A-Za-z]+)/g)) used.add(m[1]); }
+    const ok = new Set(['TOKEN', 'createAssociatedTokenAccountIdempotentInstruction', 'createBurnCheckedInstruction', 'createTransferCheckedInstruction', 'getAssociatedTokenAddressSync', 'createMint', 'mintTo', 'getOrCreateAssociatedTokenAccount']); // last three: devnet setup/faucet on the server's own authority account only
+    const extra = [...used].filter((x) => !ok.has(x)); rec('DEP', 'high', 'only allow-listed spl-token functions are used (no decoders such as unpackAccount/getAccount/getMint on untrusted data)', extra.length === 0, 'unexpected: ' + extra.join(', ')); }
+  // ---- Web3Auth origins: server header list == Pages meta CSP list; no broad wildcards
+  { const fs = require('fs'); const W3A = require('../shared/w3a'); const html = fs.readFileSync(path.join(ROOT, 'docs/index.html'), 'utf8'); const meta = /Content-Security-Policy" content="([^"]+)"/.exec(html)[1];
+    rec('CSP', 'medium', 'Pages meta CSP allows exactly the shared Web3Auth origins (connect-src)', W3A.every((o) => meta.split('connect-src')[1].split(';')[0].split(' ').includes(o)));
+    rec('CSP', 'medium', 'no *.tor.us / *.toruslabs.com / *.metamask.io / *.web3auth.com wildcards anywhere', !/\*\.(tor\.us|toruslabs\.com|metamask\.io|web3auth\.com)/.test(meta + W3A.join(' ')));
+    rec('CSP', 'medium', 'no *.onrender.com wildcard in the Pages CSP', !/\*\.onrender\.com/.test(meta)); }
   console.log(res.every((r) => r.ok) ? `all ${res.length} audit tests passed` : 'AUDIT TESTS FAILED');
   process.exit(process.exitCode || 0);
 })().catch((e) => { console.error('PROBE ERROR', e); process.exit(2); });

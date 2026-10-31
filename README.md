@@ -37,7 +37,7 @@ Honest limits: avatars are hierarchical rigid parts (not a skinned mesh); depth 
 ## Environment variables (all optional unless marked)
 | Group | Variables |
 |---|---|
-| Core | `PORT`, `NODE_ENV=production`, **`SERVER_SECRET` (≥16 chars, required in production)**, `PUBLIC_URL`, `ALLOWED_ORIGINS` (comma list; GitHub Pages origin is built in), `MAX_PLAYERS=150`, `MAX_CONNS`, `MAX_CONNS_PER_IP`, `IDLE_MINUTES`, `VOICE_RANGE`, `GLOBAL_CHAT_COOLDOWN_MS` |
+| Core | `PORT`, `NODE_ENV=production`, **`SERVER_SECRET` (≥32 chars, required in production)**, `PUBLIC_URL`, `ALLOWED_ORIGINS` (comma list; GitHub Pages origin is built in), `MAX_PLAYERS=150`, `MAX_CONNS`, `MAX_CONNS_PER_IP`, `IDLE_MINUTES`, `VOICE_RANGE`, `GLOBAL_CHAT_COOLDOWN_MS` |
 | Database | `DATABASE_URL`, `PG_CA_CERT` / `PG_CA_FILE` (TLS is verified; Supabase root cert), `PGSSL=off` (local), `PGSSL_INSECURE=1` (emergency only), `DB_SCHEMA=showgrounds`, `USE_PGLITE=1`, `PGLITE_DIR` |
 | Abuse limits | `MAX_PROFILES=50000`, `PROFILE_CREATE_PER_HOUR=5` (per IP), `VENDOR_RATE_LIMIT`, `REQUIRE_WALLET_PROOF=1` |
 | Purchases | `MINT_ENABLED=1` to arm, `MINT_NETWORK`, `MINT_MAINNET=1` (second key for mainnet), `VWFEST_MINT`, `VWFEST_DECIMALS`, `RPC_URL` (server, keyed; `SOLANA_RPC_URL` still accepted), `PUBLIC_RPC_URL` (browsers broadcast through it; the server has no tx relay), `MINT_DEV_FEE=0`, `MINT_FEE_USD=5`, `RIDE_MINT_USD`, `DEV_FEE_PCT=10`, `VWFEST_DISCOUNT_PCT=50`, `DEV_WALLET` (**required** for SOL/token payments and the creator fee), `MINT_SLIPPAGE_BPS`, `JUPITER_BASE`, `PAY_TOKENS` |
@@ -47,7 +47,10 @@ Honest limits: avatars are hierarchical rigid parts (not a skinned mesh); depth 
 | Read RPC proxy (`/api/rpc`) | Needs a short-lived token bound to the player's joined WebSocket session (sent in `welcome`, rotated with `{t:'rpctok'}`, dies with the socket); anonymous callers get 401 and use `PUBLIC_RPC_URL`. Budgets: `RPC_SESSION_PER_MIN` (60), `RPC_IP_PER_MIN` (120), `RPC_GLOBAL_PER_MIN` (3000), `RPC_PROXY_PER_MIN` (90, per-IP HTTP limiter); `RPC_TOKEN_TTL_SEC` (600), `RPC_MAX_BATCH` (5), `RPC_MAX_ACCOUNTS` (25, getMultipleAccounts). Read-only method allowlist; the keyed upstream URL is never returned or exposed (`PUBLIC_RPC_URL` carrying an api-key is ignored). |
 | DJ booth | `DJ_SLOT_MIN=15` (or `DJ_SLOT_MS`, 0 = no limit), `DJ_QUEUE_MAX=8`, `DJ_ENABLED=0` to switch off; admins end a set with `POST /api/admin/dj {"action":"release"|"next"|"clear"}` + `x-admin-secret`. Music: CC0 synthesized tracks in `docs/assets/music` (`python3 tools/make-music.py` regenerates them). DJs must play only music they have rights to. |
 | Vendors | `VENDOR_FEE_USD=30`, `VENDOR_DAYS=30`, `VENDOR_BOOTHS=24` (4–24), `VENDOR_IMG_KB=150`, `VENDOR_AUTOHIDE_REPORTS=3`, `VENDOR_PREMOD=1` (recommended), `ADMIN_SECRET` (≥16 chars, enables `/api/admin/vendors`) |
-| Voice | `TURN_URL`, `TURN_SECRET` (or `TURN_USERNAME`/`TURN_CREDENTIAL`). STUN is always used; TURN credentials are only sent over the authenticated WebSocket |
+| Voice | `TURN_URL`, `TURN_SECRET` (>= 16 chars, coturn `use-auth-secret`; optional `TURN_TTL_SEC`, default 900). STUN is always used; TURN credentials are short-lived per-session HMACs, sent over the authenticated WebSocket only after the player turns Voice on. Static `TURN_USERNAME`/`TURN_CREDENTIAL` are no longer used |
+| DJ mic | `DJ_MIC_RANGE` (default 110: only players this close to the stage get the mic audio), `DJ_MIC_MAX_BPS` (default 24000 bytes/s hard cap) |
+| Moderation | `ADMIN_SECRET` (>= 16 chars). `GET/POST /api/admin/mod` (header `x-admin-secret`): `{action: mute\|unmute\|kick\|ban\|unban, pid: <profile id or session id>, minutes}`. Mutes cover chat, voice signaling and the DJ mic; bans block join by profile and by IP. In memory: a restart clears them |
+| Timeouts | `PREJOIN_MS` (default 20000): connections that do not join in time are closed |
 | Test only | `FIXED_SOL_USD`, `DEVNET_TOKENS_PER_USD`, `DEVNET_BURN_TOKENS` |
 
 ## Accounts and one-time setup (what a human must do)

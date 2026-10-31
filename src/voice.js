@@ -12,8 +12,9 @@ export class Voice {
   savePrefs() { try { localStorage.setItem(PREFS_KEY, JSON.stringify(this.prefs)); } catch {} }
   isBlocked(key) { return !!(this.prefs[key] && this.prefs[key].block); }
   audioCtx() { if (!this.ctx) { const AC = window.AudioContext || window.webkitAudioContext; this.ctx = new AC(); } if (this.ctx.state === 'suspended') this.ctx.resume(); return this.ctx; }
-  start() { this.on = true; this.audioCtx(); this.onChange(); }
-  stop() { this.on = false; for (const id of [...this.peers.keys()]) this.drop(id, true); this.disableMic(); this.onChange(); }
+  start() { const was = this.on; this.on = true; this.audioCtx(); if (!was) { this.optIn(); this.iceT = setInterval(() => this.net.json({ t: 'voice', on: true }), 8 * 60000); } this.onChange(); }
+  optIn() { this.net.json({ t: 'voice', on: true }); } // tells the server we want voice: it replies with this session's short-lived relay (TURN) credentials and starts relaying signaling to us
+  stop() { this.on = false; clearInterval(this.iceT); this.net.json({ t: 'voice', on: false }); for (const id of [...this.peers.keys()]) this.drop(id, true); this.disableMic(); this.onChange(); }
   async enableMic() {
     this.err = '';
     try {

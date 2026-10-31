@@ -78,3 +78,4 @@ a{color:var(--acc2)}.tier{display:inline-block;padding:2px 9px;border-radius:999
 .djp .djtrk { text-align: left; padding: 7px 10px; border-radius: 8px; border: 1px solid #ffffff33; background: #ffffff0d; color: inherit; cursor: pointer; } .djp .djtrk.on { border-color: #ff2fd0; background: #ff2fd033; }
 .djp .btn.talk { width: 100%; padding: 14px; touch-action: none; user-select: none; } .djp .btn.on { background: #c0262d; }
 .djp .djvol input[type=range] { flex: 1; min-width: 120px; } .djp .small { font-size: 12px; }
+.buy .brow.addr{flex-wrap:wrap;align-items:center}.buy .brow.addr code{flex:1 1 100%;word-break:break-all;user-select:all;font-size:12px;color:var(--gold)}

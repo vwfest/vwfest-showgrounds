@@ -212,7 +212,7 @@ function bindNet() {
   on('hi', (m) => { state.online = m.online; state.cap = m.cap; state.burns = m.burns; if (world) world.drawBurn(m.burns); hud(); });
   on('full', (m) => { showFull(m); });
   on('joinerr', (m) => { joinMsg(m.why || 'Could not join', true); if (m.err === 'stale') { localStorage.removeItem('vwfest-sg'); state.creds = null; showJoin(true); } });
-  on('welcome', (m) => { setRpcToken(m.rpcToken); onWelcome(m); });
+  on('welcome', (m) => { setRpcToken(m.rpcToken); onWelcome(m); if (voice && voice.on) voice.optIn(); });
   on('rpctok', (m) => setRpcToken(m.rpcToken)); onRpcRefresh(() => { if (net.open && joined) net.json({ t: 'rpctok' }); });
   on('p+', (m) => { if (!state.me || m.id === state.me.id && !joined) return; updateInfo(m); });
   on('p-', (m) => { state.roster.delete(m.id); const e = players.get(m.id); if (e) { scene.remove(e.person.root); scene.remove(e.car); players.delete(m.id); } const pk = parked.get(m.id); if (pk) { scene.remove(pk); parked.delete(m.id); } if (voice) voice.drop(m.id, true); });
@@ -310,7 +310,8 @@ async function boot() {
   voice = new Voice(net, state.cfg); voice.onChange = () => updateVoiceHud(); state.blocked = (k) => voice.isBlocked(k);
   $('#bAvatar').onclick = () => joined && openEditor(); $('#bShop').onclick = () => joined && UI.shopModal(ctx); $('#bGarage').onclick = () => joined && UI.garageModal(ctx); $('#bBurn').onclick = () => UI.burnModal(ctx); $('#bVoice').onclick = () => joined && UI.voiceModal(ctx); $('#bPlayers').onclick = () => joined && UI.playersModal(ctx); $('#bHelp').onclick = () => V.infoModal(ctx); $('#bVendors').onclick = () => V.vendorDirectory(ctx); const lh = $('#howLink'); if (lh) lh.onclick = (e) => { e.preventDefault(); V.infoModal(ctx); }; $('#bSet').onclick = settingsModal; $('#bProfile').onclick = () => joined && net.json({ t: 'profile', sid: state.me.id });
   net.connect(); showJoin(false); requestAnimationFrame(loop);
-  window.__sg = { dj, state, players, get world() { return world; }, L, net, ctx, get me() { return me3; }, cam: () => camera, goto: (x, z) => { L.x = x; L.z = z; }, emote: doEmote, setCam: (y, p) => { camYaw = y; camPitch = p; }, voice: () => voice, scene: () => scene, renderer: () => renderer, gfx: () => gfx, setDist: (d, look) => { camDist = d; camLook = look || 0; } };
+  if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) window.__sg = { // debug/test handle (state holds the profile secret): never on a public origin
+    dj, state, players, get world() { return world; }, L, net, ctx, get me() { return me3; }, cam: () => camera, goto: (x, z) => { L.x = x; L.z = z; }, emote: doEmote, setCam: (y, p) => { camYaw = y; camPitch = p; }, voice: () => voice, scene: () => scene, renderer: () => renderer, gfx: () => gfx, setDist: (d, look) => { camDist = d; camLook = look || 0; } };
   window.__ready = true;
 }
 function settingsModal() {
