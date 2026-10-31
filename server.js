@@ -7,7 +7,7 @@ const http = require('http');
 const path = require('path');
 const crypto = require('crypto');
 require('./lib/secret'); // fails fast in production without SERVER_SECRET
-const session = require('./lib/session');
+const chain = require('./lib/chain'); // Solana payments module (solana/): quotes + on-chain verification (INTERFACES.md §1)
 const walletauth = require('./lib/walletauth');
 const { WebSocketServer } = require('ws');
 const { Hub } = require('./lib/hub');
@@ -36,11 +36,15 @@ const cfg = {
   walkSpeed: 9, carSpeed: 20, idleMs: num(process.env.IDLE_MINUTES, 10) * 60000, globalCooldownMs: num(process.env.GLOBAL_CHAT_COOLDOWN_MS, 4000),
 };
 const publicUrl = (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || `http://127.0.0.1:${PORT}`).replace(/\/$/, '');
+// Env bridge for solana/: our historical names -> its names. Avatar/ride mints are 100% buyback & burn (no creator fee); the fee applies to shop/vendor SOL/token payments only.
+if (process.env.MINT_DEV_FEE === undefined) process.env.MINT_DEV_FEE = '0';
+if (!process.env.RPC_URL && process.env.SOLANA_RPC_URL) process.env.RPC_URL = process.env.SOLANA_RPC_URL;
+if (!process.env.PUBLIC_BASE_URL) process.env.PUBLIC_BASE_URL = publicUrl;
 // ---- avatar-minting config. OFF unless MINT_ENABLED=1 (and, on mainnet, MINT_MAINNET=1 as a second deliberate switch). ----
 const mint = {
-  network: NETWORK, rpcUrl: process.env.SOLANA_RPC_URL || RPC_DEFAULT[NETWORK], mint: process.env.VWFEST_MINT || '', decimals: num(process.env.VWFEST_DECIMALS, 6),
+  network: NETWORK, rpcUrl: process.env.RPC_URL || process.env.SOLANA_RPC_URL || RPC_DEFAULT[NETWORK], mint: process.env.VWFEST_MINT || '', decimals: num(process.env.VWFEST_DECIMALS, 6),
   feeUsd: num(process.env.MINT_FEE_USD, 5), rideUsd: num(process.env.RIDE_MINT_USD, 5), slippageBps: Math.min(Math.max(num(process.env.MINT_SLIPPAGE_BPS, 50), 10), 500),
-  devWallet: /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(process.env.DEV_WALLET || '') ? process.env.DEV_WALLET : '', devFeePct: Math.min(Math.max(num(process.env.DEV_FEE_PCT, 10), 0), 50), discountPct: Math.min(Math.max(num(process.env.VWFEST_DISCOUNT_PCT, 50), 0), 90), devnetTokensPerUsd: num(process.env.DEVNET_TOKENS_PER_USD, 10), fixedSolUsd: num(process.env.FIXED_SOL_USD, 0),
+  devWallet: (() => { const w = process.env.DEV_WALLET || require('./solana/src/config').loadConfig(process.env).devWallet; return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(w || '') ? w : ''; })(), devFeePct: Math.min(Math.max(num(process.env.DEV_FEE_PCT, 10), 0), 50), discountPct: Math.min(Math.max(num(process.env.VWFEST_DISCOUNT_PCT, 50), 0), 90), devnetTokensPerUsd: num(process.env.DEVNET_TOKENS_PER_USD, 10), fixedSolUsd: num(process.env.FIXED_SOL_USD, 0),
   devnetBurn: num(process.env.DEVNET_BURN_TOKENS, 1),
   jupiter: process.env.JUPITER_BASE || 'https://lite-api.jup.ag/swap/v1',
   explorer(id, kind) { const q = NETWORK === 'devnet' ? '?cluster=devnet' : ''; return NETWORK === 'localnet' ? null : `https://solscan.io/${kind}/${id}${q}`; },
@@ -70,7 +74,7 @@ let burnVer = -1;
 // ---- http ----
 const app = express();
 app.set('trust proxy', 1); app.disable('x-powered-by');
-const RPC_HOSTS = ["'self'"];
+const RPC_HOSTS = ["'self'", ...(() => { try { return [new URL(process.env.PUBLIC_RPC_URL || RPC_DEFAULT[NETWORK]).origin]; } catch { return []; } })()];
 const W3A = ['https://*.web3auth.io', 'https://*.web3auth.com', 'https://*.toruslabs.com', 'https://*.metamask.io']; // only allowed when an embedded-wallet client id is configured
 app.use(helmet({
   contentSecurityPolicy: {
@@ -109,13 +113,14 @@ const iceServers = () => {
   return out;
 };
 const shopView = () => SHOP.map((i) => ({ ...i, vwfestUsd: Math.round(i.usd * (1 - mint.discountPct / 100) * 100) / 100 }));
-const payFlags = () => ({ enabled: mint.enabled, reason: mint.reason, network: mint.network, mint: mint.mint, decimals: mint.decimals, feeUsd: mint.feeUsd, rideUsd: mint.rideUsd, slippageBps: mint.slippageBps, discountPct: mint.discountPct, devFeePct: mint.devFeePct, solShopEnabled: !!mint.devWallet, jupiter: mint.jupiter, embedded: mint.embedded, onramp: onramp.providers().map(({ id, name, how }) => ({ id, name, how })), entryUsd: mint.entryUsd, entryMinBurnPct: mint.entryMinBurnPct, payTokens: mint.payTokens, devnetTokensPerUsd: mint.devnetTokensPerUsd, base: publicUrl, vendor: { feeUsd: vcfg.feeUsd, days: vcfg.days, plots: vcfg.plots, imgKb: vcfg.imgKb, maxProducts: vcfg.maxProducts, devFeePct: mint.devFeePct, solAvailable: !!mint.devWallet, premod: vcfg.premod } });
+const PUBLIC_RPC = process.env.PUBLIC_RPC_URL || RPC_DEFAULT[NETWORK]; // what browsers broadcast through (never the keyed server RPC)
+const payFlags = () => ({ publicRpcUrl: PUBLIC_RPC, enabled: mint.enabled, reason: mint.reason, network: mint.network, mint: mint.mint, decimals: mint.decimals, feeUsd: mint.feeUsd, rideUsd: mint.rideUsd, slippageBps: mint.slippageBps, discountPct: mint.discountPct, devFeePct: mint.devFeePct, solShopEnabled: !!mint.devWallet, jupiter: mint.jupiter, embedded: mint.embedded, onramp: onramp.providers().map(({ id, name, how }) => ({ id, name, how })), entryUsd: mint.entryUsd, entryMinBurnPct: mint.entryMinBurnPct, payTokens: mint.payTokens, devnetTokensPerUsd: mint.devnetTokensPerUsd, base: publicUrl, vendor: { feeUsd: vcfg.feeUsd, days: vcfg.days, plots: vcfg.plots, imgKb: vcfg.imgKb, maxProducts: vcfg.maxProducts, devFeePct: mint.devFeePct, solAvailable: !!mint.devWallet, premod: vcfg.premod } });
 app.get('/api/config', (req, res) => res.set('Cache-Control', 'no-store').json({
   ...payFlags(), shop: shopView(), odds: R.TIERS.map((t, i) => ({ tier: t, pct: R.ODDS[i] })), iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }], turn: !!process.env.TURN_URL, /* TURN credentials are only sent over the authenticated WebSocket after join */ voiceRange: VOICE_RANGE, maxPlayers: cfg.maxPlayers,
 }));
 app.get('/api/mint/config', (req, res) => res.set('Cache-Control', 'no-store').json({ ...payFlags(), shop: undefined }));
 app.get('/api/rides', (req, res) => res.set('Cache-Control', 'public, max-age=10').json({ ok: true, count: rides.byId.size, recent: rides.recent(12).map(pubRide) }));
-app.get('/api/mint/price', async (req, res) => { try { const p = await pay.solUsd(); res.set('Cache-Control', 'no-store').json({ ok: true, usd: p.usd, src: p.src, at: p.at }); } catch { res.status(503).json({ ok: false, error: 'Price unavailable' }); } });
+app.get('/api/mint/price', async (req, res) => { try { res.set('Cache-Control', 'no-store').json({ ok: true, usd: await chain.solUsd() }); } catch { res.status(503).json({ ok: false, error: 'Price unavailable' }); } });
 // Fiat on-ramp checkout link for the player's own wallet. Origin-locked + tightly rate-limited; the provider (not us) takes the card and delivers SOL to that address.
 app.post('/api/onramp/session', rateLimit({ windowMs: 60e3, limit: 6, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests' } }), express.json({ limit: '2kb' }), async (req, res) => {
   const o = req.get('origin'); if (!o || !ORIGINS.has(o)) return res.status(403).json({ error: 'forbidden' });
@@ -164,28 +169,17 @@ app.get('/api/admin/vendors/:plot/image/:id', adminLimit, adminAuth, (req, res) 
 app.post('/api/admin/vendors/:plot', adminLimit, adminAuth, express.json({ limit: '1kb' }), async (req, res) => {
   const r = vendors.admin(req.params.plot, req.body && req.body.action, req.body && req.body.days); if (!r.ok) return res.status(400).json(r); await vendors.save(r.booth); broadcastVendors(); console.warn(`[admin] vendor ${req.params.plot}: ${req.body.action}`); res.json({ ok: true, booth: vendors.adminList().find((x) => x.plot === +req.params.plot) });
 });
-// Allow-listed JSON-RPC proxy so the browser never needs a keyed RPC URL. Origin-locked. READ methods are open (per-IP limited by /api limiter);
-// WRITE methods (sendTransaction / simulateTransaction) need a short-lived token issued over the authenticated WebSocket to a joined player
-// (welcome + every quote), are limited per player (RPC_WRITE_PER_MIN, default 20) and per IP (30/min), and must carry a base64 transaction of sane size.
+// READ-ONLY JSON-RPC proxy (hides the keyed server RPC from the browser). By design there is NO way to send or simulate transactions through this server:
+// players broadcast with their own wallet / PUBLIC_RPC_URL (solana/README: "no tx relay"). Origin-locked; /api limiter applies.
 const RPC_READ = new Set(['getLatestBlockhash', 'getBalance', 'getAccountInfo', 'getTokenAccountsByOwner', 'getTokenAccountBalance', 'getMinimumBalanceForRentExemption', 'getFeeForMessage', 'getSignatureStatuses', 'isBlockhashValid', 'getBlockHeight', 'getMultipleAccounts']);
-const RPC_WRITE = new Set(['sendTransaction', 'simulateTransaction']);
 const budgets = new Map();
 const budget = (key, limit, windowMs = 60e3) => { const now = Date.now(); const a = (budgets.get(key) || []).filter((t) => now - t < windowMs); if (a.length >= limit) { budgets.set(key, a); return false; } a.push(now); budgets.set(key, a); return true; };
 setInterval(() => { const now = Date.now(); for (const [k, a] of budgets) if (!a.length || now - a[a.length - 1] > 120e3) budgets.delete(k); }, 60e3).unref();
-const rpcToken = (pid) => session.sign({ k: 'rpc', pid }, 30 * 60e3);
 app.post('/api/rpc', express.json({ limit: '8kb' }), async (req, res) => {
   const o = req.get('origin'); if (!o || !ORIGINS.has(o)) return res.status(403).json({ error: 'forbidden' });
-  const b = req.body; if (!b || typeof b !== 'object' || Array.isArray(b) || !Array.isArray(b.params) || !(RPC_READ.has(b.method) || RPC_WRITE.has(b.method))) return res.status(400).json({ error: 'method not allowed' });
-  let params = b.params;
-  if (RPC_WRITE.has(b.method)) {
-    const t = session.verify(req.get('x-rpc-token'), 'rpc'); if (!t) return res.status(401).json({ error: 'join the world first (missing or expired token)' });
-    if (!budget('rpcw:' + t.pid, num(process.env.RPC_WRITE_PER_MIN, 20)) || !budget('rpcwip:' + req.ip, 30)) return res.status(429).json({ error: 'Too many requests' });
-    if (typeof params[0] !== 'string' || params[0].length > 2400 || !/^[A-Za-z0-9+/=]+$/.test(params[0])) return res.status(400).json({ error: 'bad transaction' });
-    params = [params[0], { ...(params[1] && typeof params[1] === 'object' ? params[1] : {}), encoding: 'base64' }];
-    if (params[1].maxRetries !== undefined) params[1].maxRetries = Math.min(5, Math.max(0, +params[1].maxRetries | 0));
-  } else if (params.length > 4 || JSON.stringify(params).length > 4000) return res.status(400).json({ error: 'bad params' });
+  const b = req.body; if (!b || typeof b !== 'object' || Array.isArray(b) || !Array.isArray(b.params) || !RPC_READ.has(b.method) || b.params.length > 4 || JSON.stringify(b.params).length > 4000) return res.status(400).json({ error: 'method not allowed' });
   try {
-    const r = await fetch(mint.rpcUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: b.id ?? 1, method: b.method, params }), signal: AbortSignal.timeout(15000) });
+    const r = await fetch(mint.rpcUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: b.id ?? 1, method: b.method, params: b.params }), signal: AbortSignal.timeout(15000) });
     res.status(r.status).type('json').send(await r.text());
   } catch { res.status(502).json({ error: 'rpc unavailable' }); }
 });
@@ -215,6 +209,7 @@ app.get('/ride/:file', (req, res) => {
     attributes: [{ trait_type: 'Rarity', value: d.tier }, { trait_type: 'Model', value: d.model }, { trait_type: 'Paint', value: d.paint }, { trait_type: 'Color', value: d.color }, { trait_type: 'Second tone', value: d.second }, { trait_type: 'Wheels', value: d.wheels }, { trait_type: 'Stance', value: d.stance }, { trait_type: 'Lowrider', value: d.lowrider ? 'Yes' : 'No' }, { trait_type: 'Plate', value: d.plate }, { trait_type: 'Plate text', value: 'VWFEST' }, { trait_type: 'Build', value: d.build }, ...d.extras.map((e) => ({ trait_type: 'Extra', value: e })), { trait_type: 'Commit', value: r.commit }],
   }));
 });
+const chainRouter = express.Router(); app.use(chainRouter); // solana/ compat routes (/api/burns, /api/mint/config|price are served by the handlers above first)
 app.use((req, res, next) => (['GET', 'HEAD', 'OPTIONS'].includes(req.method) ? next() : res.status(405).end()));
 app.use(express.static(path.join(__dirname, 'docs'), { maxAge: PROD ? '10m' : 0, index: 'index.html' }));
 app.use((req, res) => res.status(404).type('text').send('Not found'));
@@ -292,7 +287,7 @@ async function handle(c, m) {
       const r = hub.join(c, prof, burns.forProfile(prof.id).length > 0 || rides.forProfile(prof.id).length > 0);
       if (r.full) { hub.json(c, { t: 'full', online: hub.size, cap: cfg.maxPlayers }); return setTimeout(() => c.ws.close(1000, 'full'), 200); }
       if (r.err) return hub.json(c, { t: 'joinerr', err: r.err, why: r.why });
-      clearTimeout(c.joinTimer); setRide(r.p, prof.ride); hub.json(c, vendorMsg()); hub.welcome(r.p, { iceServers: iceServers(), rpcToken: rpcToken(prof.id), cred: created, created: prof.created, inv: inv(r.p), vibe: prof.av.vibe });
+      clearTimeout(c.joinTimer); setRide(r.p, prof.ride); hub.json(c, vendorMsg()); hub.welcome(r.p, { iceServers: iceServers(), cred: created, created: prof.created, inv: inv(r.p), vibe: prof.av.vibe });
       break;
     }
     case 'chat': if (p) hub.onChat(p, m); break;
@@ -337,20 +332,19 @@ async function handle(c, m) {
           if (p.prof.items.has(item.id)) return hub.json(c, { t: 'quoteerr', why: 'You already own this.' });
           if (method === 'sol' && !mint.devWallet) return hub.json(c, { t: 'quoteerr', why: 'Paying in SOL is not available right now. Use $VWFEST.' });
           usd = item.usd; extra = { itemName: item.name };
-        } else if (kind === 'ride') {
-          if (method === 'sol' && !mint.devWallet) return hub.json(c, { t: 'quoteerr', why: 'Paying in SOL is not available right now. Use $VWFEST.' });
-          usd = mint.rideUsd;
+        } else if (kind === 'ride') { // ride mints are 100% buyback & burn like avatars (no creator fee)
+          devPct = 0; usd = mint.rideUsd;
         } else if (kind === 'vendor') { // booth: no token discount (burn the full fee); the creator fee applies only when paying in SOL / other tokens
           if (method === 'sol' && !mint.devWallet && mint.devFeePct > 0) return hub.json(c, { t: 'quoteerr', why: 'Paying in SOL is not available right now. Use $VWFEST.' });
           const cb = vendors.canBuy(p.prof.id, m.plot); if (!cb.ok) return hub.json(c, { t: 'quoteerr', why: cb.why });
           usd = vcfg.feeUsd; discountPct = 0; extra = { plot: cb.plot, mode: cb.mode, days: vcfg.days }; if (cb.mode === 'claim') vendors.hold(cb.plot, p.prof.id);
         } else return;
-        const q = await pay.compute({ usd, method, devWalletOk: !!mint.devWallet, devPct, discountPct });
+        const q = await chain.quote({ kind, usd, method, devWalletOk: !!mint.devWallet, devPct, discountPct, entry });
         if (q.devPct > 0 && !q.devWallet) return hub.json(c, { t: 'quoteerr', why: 'Paying in SOL is not available right now.' });
         if (entry) { q.burnMin = (BigInt(q.burnRaw) * BigInt(mint.entryMinBurnPct) / 100n).toString(); } // Entry: the player burns what the on-ramp delivered minus fees, never less than this share
         const rec = pay.create({ ...q, kind, item: item && item.id, pid: p.prof.id, uri, code, plot: extra.plot });
         if (kind === 'ride') { rec.uri = `${publicUrl}/ride/${rec.id}.json`; extra = { name: 'VW Fest Ride', commit: commitOf(serverSeed(rec.id)) }; }
-        hub.json(c, { t: 'quote', rpcToken: rpcToken(p.prof.id), q: { id: rec.id, kind, item: rec.item, method, usd, paidUsd: q.paidUsd, solUsd: q.solUsd, discountPct: q.discountPct, devPct: q.devPct, swap: q.swap, totalLamports: q.totalLamports, swapLamports: q.swapLamports, devLamports: q.devLamports, devWallet: q.devWallet, burnRaw: q.burnRaw, burnMin: q.burnMin, burnUi: q.burnUi, entry, uri: rec.uri, expires: rec.expires, ...extra } });
+        hub.json(c, { t: 'quote', q: { id: rec.id, kind, item: rec.item, method, usd, paidUsd: q.paidUsd, solUsd: q.solUsd, discountPct: q.discountPct, devPct: q.devPct, swap: q.swap, totalLamports: q.totalLamports, swapLamports: q.swapLamports, devLamports: q.devLamports, devWallet: q.devWallet, burnRaw: q.burnRaw, burnMin: q.burnMin, burnUi: q.burnUi, entry, uri: rec.uri, expires: rec.expires, ...extra } });
       } catch (e) { console.error('quote failed', e.message); hub.json(c, { t: 'quoteerr', why: 'Could not get a price right now. Try again in a moment.' }); }
       break;
     }
@@ -372,10 +366,10 @@ async function handle(c, m) {
       q.busy = true;
       try {
         const kind = q.kind === 'avatar' ? 'mint' : q.kind;
-        const r = await burns.submit({ sig: m.sig, swapSig: m.swapSig, nonce: q.id, nick: p.nick, pid: p.prof.id, kind, item: q.item, rideId: q.kind === 'ride' ? q.id : undefined,
+        const r = await chain.verifyPurchase({ sig: m.sig, swapSig: m.swapSig, nonce: q.id, nick: p.nick, pid: p.prof.id, kind, item: q.item, rideId: q.kind === 'ride' ? q.id : undefined,
           expect: { wallet: REQUIRE_PROOF ? m.wallet : undefined, code: q.code || undefined, uri: q.uri || undefined, burnMin: BigInt(q.burnMin), devMin: BigInt(q.devMin), devWallet: q.devWallet || undefined } });
-        if (!r.ok && !r.dup) return hub.json(c, { t: 'buyres', ok: false, why: r.why, qid: q.id, retry: /not found/i.test(r.why) });
-        if (!r.ok) return hub.json(c, { t: 'buyres', ok: false, why: r.why, qid: q.id });
+        if (!r.ok) return hub.json(c, { t: 'buyres', ok: false, why: r.why, qid: q.id, retry: !r.dup && (r.retry || /not found/i.test(r.why || '')) });
+        burns.record(r.rec); // Burn Tracker ledger (UI feed); the verified, de-duplicated receipt comes from solana/
         q.used = true; const burned = (Number(BigInt(r.rec.amount)) / 10 ** mint.decimals).toLocaleString('en-US', { maximumFractionDigits: 2 });
         if (q.kind === 'avatar') { hub.setMinted(p); hub.sys(`${p.nick} minted their avatar NFT and burned ${burned} $VWFEST 🔥`, 'burn'); }
         else if (q.kind === 'shop') { const g = profiles.grant(p.prof.id, q.item, { sig: m.sig, usd: q.usd, method: q.method, ts: Date.now() }); if (!g.ok && !g.dup) { console.error('shop grant failed after verified burn', m.sig, g.why); return hub.json(c, { t: 'buyres', ok: false, why: 'Your burn is confirmed but the item could not be granted (' + g.why + '). Contact the team with this transaction: ' + m.sig.slice(0, 12) + '…', qid: q.id, final: true }); } const it = SHOP.find((x) => x.id === q.item); hub.sys(`${p.nick} bought ${it ? it.name : 'an item'} and burned ${burned} $VWFEST 🔥`, 'burn'); if (it && !p.prof.equipped[it.slot]) { profiles.equip(p.prof.id, it.slot, it.id); hub.refresh(p); } }
@@ -390,10 +384,16 @@ async function handle(c, m) {
   }
 }
 
+async function init() {
+  await burns.init();
+  await chain.init({ env: process.env, db: require('./lib/db').pool() }); // one shared TLS-verified pg pool; memory-only without DATABASE_URL
+  chain.mountRoutes(chainRouter, { express, rateLimit, allowedOrigins: [...ORIGINS] });
+  await vendors.init(); await rides.init(); await profiles.init();
+}
 if (require.main === module) {
-  burns.init().then(() => vendors.init()).then(() => rides.init()).then(() => profiles.init()).then(() => {
+  init().then(() => {
     server.listen(PORT, '0.0.0.0', () => console.log(`[showgrounds] listening on ${PORT} (cap ${cfg.maxPlayers}, purchases ${mint.enabled ? 'ENABLED on ' + NETWORK : 'off: ' + mint.reason}, SOL shop ${mint.devWallet ? 'on' : 'off (DEV_WALLET unset)'})`));
   });
   process.on('SIGTERM', () => { server.close(); require('./lib/db').end().catch(() => {}); setTimeout(() => process.exit(0), 500).unref(); });
 }
-module.exports = { app, server, hub, burns, mint, cfg, profiles, rides, pay, vendors, vcfg, guideValues, init: async () => { await burns.init(); await vendors.init(); await rides.init(); await profiles.init(); } };
+module.exports = { app, server, hub, burns, mint, cfg, profiles, rides, pay, vendors, vcfg, guideValues, init };

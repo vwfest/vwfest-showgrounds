@@ -48,7 +48,7 @@ class Builder {
     ixs.push(spl.createBurnCheckedInstruction(ata, mint, user, burn, cfg.decimals, [], prog));
     ixs.push(new TransactionInstruction({ programId: new PublicKey(C.MEMO_PROGRAM), keys: [{ pubkey: user, isSigner: true, isWritable: false }], data: Buffer.from(memoFor(q)) }));
     const f = await this.finish({ payer: user, ixs, alts });
-    return { tx: Buffer.from(f.tx.serialize()).toString('base64'), lastValidBlockHeight: f.lastValidBlockHeight, burnRaw: burn.toString(), swap: swapInfo, size: f.size };
+    return { tx: Buffer.from(f.tx.serialize()).toString('base64'), lastValidBlockHeight: f.lastValidBlockHeight, burnRaw: burn.toString(), swap: swapInfo, size: f.size, alts };
   }
   // Mint transaction. `meta` = { name, uri }. Co-signed by the collection authority and the deterministic asset keypair.
   async buildMint({ wallet, kind, assetKey, name, uri }) {

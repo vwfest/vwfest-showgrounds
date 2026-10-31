@@ -11,7 +11,7 @@ async function startValidator() {
   if (process.env.LOCAL_RPC) return { rpc: process.env.LOCAL_RPC, stop() {} };
   if (!fs.existsSync(BIN)) return null;
   const base = 20000 + Math.floor(Math.random() * 20000); const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vwtv-'));
-  const p = spawn(BIN, ['--reset', '--quiet', '--ledger', dir, '--rpc-port', String(base), '--faucet-port', String(base + 1), '--gossip-port', String(base + 2), '--dynamic-port-range', `${base + 10}-${base + 60}`, '--bpf-program', 'CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d', CORE_SO], { stdio: 'ignore' });
+  const p = spawn(BIN, ['--reset', '--quiet', '--ledger', dir, '--rpc-port', String(base), '--faucet-port', String(base + 5), '--gossip-port', String(base + 2), '--dynamic-port-range', `${base + 10}-${base + 60}`, '--bpf-program', 'CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d', CORE_SO], { stdio: 'ignore' });
   const rpc = `http://127.0.0.1:${base}`; const conn = new Connection(rpc, 'confirmed');
   for (let i = 0; i < 90; i++) { try { await conn.getVersion(); await conn.getLatestBlockhash(); break; } catch { await new Promise((r) => setTimeout(r, 1000)); if (i === 89) throw new Error('validator failed to start'); } }
   return { rpc, stop() { p.kill('SIGKILL'); try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} } };

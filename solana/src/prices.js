@@ -7,9 +7,14 @@ const { WSOL } = require('./config');
 const MAX_DEVIATION = 0.25;
 
 async function getJson(url, { headers, fetchImpl = fetch, timeout = 6000 } = {}) {
-  const r = await fetchImpl(url, { headers, signal: AbortSignal.timeout(timeout) });
-  if (!r.ok) throw new Error('http ' + r.status);
-  return r.json();
+  let last;
+  for (let i = 0; i < 3; i++) { // free API tiers rate-limit (429): back off briefly and retry
+    const r = await fetchImpl(url, { headers, signal: AbortSignal.timeout(timeout) });
+    if (r.ok) return r.json();
+    last = new Error('http ' + r.status + ' from ' + new URL(url).host); if (r.status !== 429 && r.status < 500) break;
+    await new Promise((res) => setTimeout(res, 700 * (i + 1)));
+  }
+  throw last;
 }
 
 class Prices {

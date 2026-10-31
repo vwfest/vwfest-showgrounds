@@ -14,18 +14,18 @@ const isSig = (s) => typeof s === 'string' && /^[1-9A-HJ-NP-Za-km-z]{80,90}$/.te
 function inspectPayTx(tx, q, cfg) {
   if (!tx || !tx.meta || !tx.transaction) return { ok: false, retry: true, why: 'Transaction not found yet' };
   if (tx.meta.err) return { ok: false, why: 'Transaction failed on-chain' };
-  const msg = tx.transaction.message; const keys = msg.accountKeys.map((k) => (typeof k === 'string' ? k : k.pubkey));
-  const signerKeys = msg.accountKeys.filter((k) => typeof k !== 'string' && k.signer).map((k) => k.pubkey);
+  const msg = tx.transaction.message; const keys = msg.accountKeys.map((k) => (typeof k === 'string' ? k : String(k.pubkey)));
+  const signerKeys = msg.accountKeys.filter((k) => typeof k !== 'string' && k.signer).map((k) => String(k.pubkey));
   if (keys[0] !== q.wallet || !signerKeys.includes(q.wallet)) return { ok: false, why: 'The transaction was not signed by the quoted wallet' };
   const memoWant = memoFor(q); let memo = null, burn = 0n, dev = 0n, devTok = 0n;
-  const devAta = (mint, prog) => getAssociatedTokenAddressSync(new PublicKey(mint), new PublicKey(q.devWallet), true, new PublicKey(prog)).toBase58();
+  const devAta = (mint, prog) => getAssociatedTokenAddressSync(new PublicKey(mint), new PublicKey(q.devWallet), true, new PublicKey(String(prog))).toBase58();
   for (const ix of msg.instructions) {
     const p = ix.parsed;
     if ((ix.program === 'spl-memo') && typeof p === 'string') memo = p;
     else if (ix.program === 'system' && p && p.type === 'transfer' && q.devWallet && p.info.source === q.wallet && p.info.destination === q.devWallet) dev += BigInt(p.info.lamports);
     else if ((ix.program === 'spl-token' || ix.program === 'spl-token-2022') && p) {
       if (p.type === 'burnChecked' && p.info.mint === cfg.vwfestMint && p.info.authority === q.wallet) burn += BigInt(p.info.tokenAmount.amount);
-      else if (p.type === 'burn' && p.info.mint === cfg.vwfestMint && p.info.authority === q.wallet) burn += BigInt(p.info.amount);
+      // unchecked `burn` is deliberately NOT accepted: only burnChecked (decimals verified by the token program)
       else if (p.type === 'transferChecked' && q.devTokenMint && p.info.mint === q.devTokenMint && p.info.authority === q.wallet && p.info.destination === devAta(q.devTokenMint, ix.programId)) devTok += BigInt(p.info.tokenAmount.amount);
     }
   }
@@ -62,7 +62,7 @@ async function verifyMint({ conn, cfg, kind, asset, wallet, uri, sig, tries = 6,
       if (p.owner !== wallet) return { ok: false, why: 'The NFT is not owned by the paying wallet' };
       if (!p.updateAuthority || p.updateAuthority.type !== 'collection' || p.updateAuthority.address !== col) return { ok: false, why: 'The NFT is not in the expected collection' };
       if (p.uri !== uri) return { ok: false, why: 'The NFT metadata does not match' };
-      if (sig && isSig(sig)) { const tx = await fetchTx(conn, sig, { tries: 2, delayMs: 800 }); if (!tx || tx.meta.err) return { ok: false, retry: true, why: 'Mint transaction not confirmed' }; const k = tx.transaction.message.accountKeys[0]; if ((k.pubkey || k) !== wallet) return { ok: false, why: 'Mint was not signed by the wallet' }; }
+      if (sig && isSig(sig)) { const tx = await fetchTx(conn, sig, { tries: 2, delayMs: 800 }); if (!tx || tx.meta.err) return { ok: false, retry: true, why: 'Mint transaction not confirmed' }; const k = tx.transaction.message.accountKeys[0]; if (String(k.pubkey || k) !== wallet) return { ok: false, why: 'Mint was not signed by the wallet' }; }
       return { ok: true, name: p.name, uri: p.uri };
     }
     if (i < tries - 1) await new Promise((r) => setTimeout(r, delayMs));

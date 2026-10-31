@@ -34,10 +34,11 @@ const NETWORKS = {
 };
 
 function loadConfig(env = process.env) {
-  const network = NETWORKS[env.SOLANA_NETWORK] ? env.SOLANA_NETWORK : 'devnet';
+  const netName = env.SOLANA_NETWORK || env.MINT_NETWORK; // MINT_NETWORK = name used by server.js / INTERFACES.md
+  const network = NETWORKS[netName] ? netName : 'devnet';
   const mainnet = network === 'mainnet-beta';
-  const mainnetArmed = mainnet && flag(env.MAINNET_ARMED, false); // mainnet needs an explicit second switch
-  const vwfestMint = mainnet ? (env.VWFEST_MINT || VWFEST_MINT) : (env.DEVNET_VWFEST_MINT || env.VWFEST_MINT_OVERRIDE || '');
+  const mainnetArmed = mainnet && (flag(env.MAINNET_ARMED, false) || flag(env.MINT_MAINNET, false)); // mainnet needs an explicit second switch
+  const vwfestMint = mainnet ? (env.VWFEST_MINT || VWFEST_MINT) : (env.DEVNET_VWFEST_MINT || env.VWFEST_MINT || '');
   const devWallet = env.DEV_WALLET || DEV_WALLET;
   const authority = parseSecretKey(env.AUTHORITY_SECRET_KEY);
   const serverSecret = env.SERVER_SECRET || '';
@@ -82,6 +83,7 @@ function loadConfig(env = process.env) {
       onramp: flag(env.FEATURE_ONRAMP, true), embeddedWallet: flag(env.FEATURE_EMBEDDED_WALLET, true),
     },
     payTokens: parsePayTokens(env.PAY_TOKENS),
+    metadataHosts: (env.NFT_METADATA_HOSTS || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean), // optional allowlist for server-side NFT metadata fetches
     maxShopUsd: num(env.MAX_SHOP_USD, 100),
     adminSecret: env.ADMIN_SECRET && env.ADMIN_SECRET.length >= 16 ? env.ADMIN_SECRET : '',
     onramp: {

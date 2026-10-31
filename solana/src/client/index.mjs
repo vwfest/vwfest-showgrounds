@@ -2,7 +2,7 @@
 // NON-CUSTODIAL: the wallet adapter signs; this lib audits every transaction against the quote BEFORE the wallet sees it, and broadcasts
 // through the player's own RPC (config.rpcUrl). The server is never asked to send anything.
 import { Connection, VersionedTransaction } from '@solana/web3.js';
-import { auditPayTx, auditMintTx } from '../audit.js';
+import { auditPayTx, auditMintTx, fetchAlts } from '../audit.js';
 
 const b64 = (u8) => { let s = ''; for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]); return btoa(s); };
 const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
@@ -43,6 +43,17 @@ export function discoverWallets(win = globalThis.window) {
 }
 export function detectPhantom(win = globalThis.window) { const p = win && ((win.phantom && win.phantom.solana) || win.solana); return p && p.isPhantom ? phantomAdapter(p) : null; }
 
+// Poll-based confirmation (no websocket needed, works behind any proxy).
+async function waitConfirmed(conn, sig, lastValidBlockHeight, raw) {
+  for (let i = 0; i < 90; i++) {
+    if (raw && i > 0 && i % 3 === 0) { try { await conn.sendRawTransaction(raw, { skipPreflight: true, maxRetries: 0 }); } catch {} } // re-broadcast (same signature, idempotent) until it lands or the blockhash expires
+    const st = (await conn.getSignatureStatuses([sig])).value[0];
+    if (st) { if (st.err) throw new Error('Transaction failed: ' + JSON.stringify(st.err)); if (st.confirmationStatus === 'confirmed' || st.confirmationStatus === 'finalized') return; }
+    if (lastValidBlockHeight && (await conn.getBlockHeight('confirmed')) > lastValidBlockHeight) { const again = (await conn.getSignatureStatuses([sig], { searchTransactionHistory: true })).value[0]; if (again && !again.err) return; throw new Error('Transaction expired before it landed. Nothing was charged; try again.'); }
+    await new Promise((r) => setTimeout(r, 700));
+  }
+  throw new Error('Timed out waiting for confirmation: ' + sig);
+}
 export function createClient({ base = '/api/solana', wallet = null, fetchImpl = (...a) => fetch(...a), connection = null, origin = null } = {}) {
   let cfg = null, token = null, conn = connection; let adapter = wallet;
   const headers = (extra) => ({ 'content-type': 'application/json', ...(token ? { authorization: 'Bearer ' + token } : {}), ...(origin ? { origin } : {}), ...extra });
@@ -64,32 +75,32 @@ export function createClient({ base = '/api/solana', wallet = null, fetchImpl = 
     // o: { kind: 'avatar'|'ride'|'shop'|'vendor', method: 'vwfest'|'sol'|'spl', payTokenMint?, item?, nft? }
     async quote(o) { await api.config(); return must(await call('POST', '/quote', o)).quote; },
     async simulatePay(q) { // works even when mainnet is disarmed: build + audit + simulate, never signs or sends
-      const c = await api.config(); const b = must(await call('POST', '/tx/pay', { quoteId: q.id })); const tx = VersionedTransaction.deserialize(unb64(b.tx)); auditPayTx(tx, b.quote, c);
+      const c = await api.config(); const b = must(await call('POST', '/tx/pay', { quoteId: q.id })); const tx = VersionedTransaction.deserialize(unb64(b.tx)); auditPayTx(tx, b.quote, c, await fetchAlts(conn, tx));
       const sim = await conn.simulateTransaction(tx, { sigVerify: false, replaceRecentBlockhash: true, commitment: 'confirmed' }); return { err: sim.value.err, logs: sim.value.logs, unitsConsumed: sim.value.unitsConsumed };
     },
-    async _signSend(txB64, audit, { onStep } = {}) {
+    async _signSend(txB64, audit, { onStep, lastValidBlockHeight } = {}) {
+      const lvb = lastValidBlockHeight;
       const c = await api.config(); if (c.simulateOnly) throw new Error('Mainnet is not enabled yet (simulate only).');
-      let tx = VersionedTransaction.deserialize(unb64(txB64)); audit(tx);
+      let tx = VersionedTransaction.deserialize(unb64(txB64)); const alts = await fetchAlts(conn, tx); audit(tx, alts);
       onStep && onStep('Waiting for your wallet to approve...');
       const sim = await conn.simulateTransaction(tx, { sigVerify: false, replaceRecentBlockhash: true, commitment: 'confirmed' });
       if (sim.value.err) throw new Error('This would fail on-chain: ' + JSON.stringify(sim.value.err).slice(0, 120));
-      const signed = await adapter.signTransaction(tx); audit(signed); // re-audit what actually comes back from the wallet
+      const signed = await adapter.signTransaction(tx); audit(signed, alts); // re-audit what actually comes back from the wallet
       onStep && onStep('Sending...');
       const sig = await conn.sendRawTransaction(signed.serialize(), { skipPreflight: false, maxRetries: 3 });
-      const lvb = (await conn.getLatestBlockhash('confirmed')).lastValidBlockHeight; const bh = signed.message.recentBlockhash;
-      const res = await conn.confirmTransaction({ signature: sig, blockhash: bh, lastValidBlockHeight: lvb }, 'confirmed'); if (res.value.err) throw new Error('Transaction failed: ' + JSON.stringify(res.value.err));
+      await waitConfirmed(conn, sig, lvb, signed.serialize());
       return sig;
     },
     async pay(q, { nick, onStep } = {}) {
       const c = await api.config(); const b = must(await call('POST', '/tx/pay', { quoteId: q.id })); onStep && onStep('Checking the transaction...');
-      const sig = await api._signSend(b.tx, (tx) => auditPayTx(tx, b.quote, c), { onStep });
+      const sig = await api._signSend(b.tx, (tx, alts) => auditPayTx(tx, b.quote, c, alts), { onStep, lastValidBlockHeight: b.lastValidBlockHeight });
       onStep && onStep('Confirming on-chain...');
       for (let i = 0; i < 6; i++) { const v = await call('POST', '/pay/confirm', { quoteId: q.id, signature: sig, nick }); if (v.ok) return { signature: sig, receipt: v.receipt }; if (!v.retry && !v.pending) throw new Error(v.error || v.why); await new Promise((r) => setTimeout(r, 2000)); }
       throw new Error('Payment sent but not confirmed yet. Reload and retry; your signature: ' + sig);
     },
     async mint(q, { onStep } = {}) {
       const c = await api.config(); const b = must(await call('POST', '/tx/mint', { quoteId: q.id }));
-      const sig = await api._signSend(b.tx, (tx) => auditMintTx(tx, { wallet: adapter.publicKey, asset: b.asset, collection: (q.kind === 'ride' ? c.collections.ride : c.collections.avatar) }), { onStep });
+      const sig = await api._signSend(b.tx, (tx) => auditMintTx(tx, { wallet: adapter.publicKey, asset: b.asset, collection: (q.kind === 'ride' ? c.collections.ride : c.collections.avatar) }), { onStep, lastValidBlockHeight: b.lastValidBlockHeight });
       for (let i = 0; i < 6; i++) { const v = await call('POST', '/mint/confirm', { quoteId: q.id, signature: sig }); if (v.ok) return { signature: sig, asset: v.asset, uri: v.uri, url: v.url }; if (!v.retry && !v.pending) throw new Error(v.error || v.why); await new Promise((r) => setTimeout(r, 2000)); }
       throw new Error('Minted but not confirmed yet; retry. Signature: ' + sig);
     },

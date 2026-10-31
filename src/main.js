@@ -70,7 +70,7 @@ function updateInfo(info) {
 }
 
 // ---------- input ----------
-const keys = new Set(); let camYaw = Math.PI, camPitch = 0.28, camDist = 7.5, joy = { x: 0, y: 0 }, jump = false, chatFocus = false;
+const keys = new Set(); let camYaw = Math.PI, camPitch = 0.28, camDist = 7.5, camLook = 0, joy = { x: 0, y: 0 }, jump = false, chatFocus = false;
 addEventListener('keydown', (e) => { if (chatFocus || e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return; const k = e.key.toLowerCase(); keys.add(k);
   if (k === ' ' || k.startsWith('arrow')) e.preventDefault();
   if (!joined) return; if (k === 'enter') { e.preventDefault(); $('#chatin').focus(); }
@@ -272,7 +272,7 @@ function loop(now) {
     for (const e of players.values()) updateEntity(e, dt, nowT, false);
     for (const [id, c] of parked) { const info = state.roster.get(id); const d = Math.hypot(c.position.x - L.x, c.position.z - L.z); c.visible = d < 110 && !(players.get(id) && (players.get(id).flags & FL.DRIVING)); if (c.userData.hydro && c.visible) hydraulics(c, nowT, 'dip', d < 25); }
     // camera
-    const cd = L.driving ? camDist + 3.5 : camDist; const tx = L.x, tz = L.z, ty = L.y + (L.driving ? 1.3 : 1.55); const cp = Math.cos(camPitch), sp = Math.sin(camPitch);
+    const cd = L.driving ? camDist + 3.5 : camDist; const tx = L.x, tz = L.z, ty = L.y + (L.driving ? 1.3 : (camLook || 1.55)); const cp = Math.cos(camPitch), sp = Math.sin(camPitch);
     if (L.driving && !drag3()) camYaw += (L.heading + Math.PI - camYaw) * Math.min(1, dt * 1.5) * 0;
     camera.position.x += (tx + Math.sin(camYaw) * cd * cp - camera.position.x) * Math.min(1, dt * 12); camera.position.z += (tz + Math.cos(camYaw) * cd * cp - camera.position.z) * Math.min(1, dt * 12); camera.position.y += (ty + sp * cd + 0.3 - camera.position.y) * Math.min(1, dt * 12); camera.lookAt(tx, ty, tz);
     curSpot = nearestSpot(); const pr = $('#prompt'); if (curSpot) { pr.classList.remove('hidden'); pr.textContent = (isTouch ? 'Tap ✋ · ' : 'Press F · ') + curSpot.label; } else pr.classList.add('hidden');
@@ -291,7 +291,7 @@ async function boot() {
   voice = new Voice(net, state.cfg); voice.onChange = () => updateVoiceHud(); state.blocked = (k) => voice.isBlocked(k);
   $('#bAvatar').onclick = () => joined && openEditor(); $('#bShop').onclick = () => joined && UI.shopModal(ctx); $('#bGarage').onclick = () => joined && UI.garageModal(ctx); $('#bBurn').onclick = () => UI.burnModal(ctx); $('#bVoice').onclick = () => joined && UI.voiceModal(ctx); $('#bPlayers').onclick = () => joined && UI.playersModal(ctx); $('#bHelp').onclick = () => V.infoModal(ctx); $('#bVendors').onclick = () => V.vendorDirectory(ctx); const lh = $('#howLink'); if (lh) lh.onclick = (e) => { e.preventDefault(); V.infoModal(ctx); }; $('#bSet').onclick = settingsModal; $('#bProfile').onclick = () => joined && net.json({ t: 'profile', sid: state.me.id });
   net.connect(); showJoin(false); requestAnimationFrame(loop);
-  window.__sg = { state, players, L, net, ctx, get me() { return me3; }, cam: () => camera, goto: (x, z) => { L.x = x; L.z = z; }, emote: doEmote, setCam: (y, p) => { camYaw = y; camPitch = p; }, voice: () => voice, scene: () => scene, renderer: () => renderer, gfx: () => gfx };
+  window.__sg = { state, players, L, net, ctx, get me() { return me3; }, cam: () => camera, goto: (x, z) => { L.x = x; L.z = z; }, emote: doEmote, setCam: (y, p) => { camYaw = y; camPitch = p; }, voice: () => voice, scene: () => scene, renderer: () => renderer, gfx: () => gfx, setDist: (d, look) => { camDist = d; camLook = look || 0; } };
   window.__ready = true;
 }
 function settingsModal() {

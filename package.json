@@ -8,12 +8,14 @@
   "scripts": {
     "build": "node build.cjs",
     "start": "node server.js",
-    "test": "node test/unit.cjs && node test/api.cjs && node test/guide.cjs && node test/security.cjs && node test/e2e.cjs",
+    "test": "node test/unit.cjs && node test/api.cjs && node test/guide.cjs && node test/security.cjs && node test/e2e.cjs && node test/purchase.cjs",
     "test:security": "node test/security.cjs",
     "test:unit": "node test/unit.cjs",
     "test:guide": "node test/guide.cjs",
     "test:load": "node test/load.cjs",
-    "test:e2e": "node test/e2e.cjs"
+    "test:e2e": "node test/e2e.cjs",
+    "test:purchase": "node test/purchase.cjs",
+    "test:solana": "npm --prefix solana test"
   },
   "dependencies": {
     "compression": "^1.8.2",

@@ -79,7 +79,7 @@ class Quotes {
       if (b.priceImpactPct > 0.05) throw new Error('Price impact too high right now. Try later.');
     }
     const id = 'q' + crypto.randomBytes(8).toString('hex'); const now = Date.now();
-    const q = { id, wallet, ref: opts.ref ? String(opts.ref).slice(0, 64) : null, ...b, sources, state: 'open', created: now, expires: now + this.cfg.quoteTtlMs, network: this.cfg.network, nft: opts.nft || null };
+    const q = { id, wallet, item: opts.item ? String(opts.item).slice(0, 48) : null, ref: opts.ref ? String(opts.ref).slice(0, 64) : null, ...b, sources, state: 'open', created: now, expires: now + this.cfg.quoteTtlMs, network: this.cfg.network, nft: opts.nft || null };
     if (this.cfg.kinds[opts.kind].nft === 'ride') q.commit = this.rideSeedOf(id).commit;
     return q;
   }

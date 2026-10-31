@@ -12,8 +12,9 @@ const u64 = (b, o) => Buffer.from(b).readBigUInt64LE(o);
 function decodeTx(txB64) { return VersionedTransaction.deserialize(Buffer.from(txB64, 'base64')); }
 
 // quote: public quote view; cfg: { vwfestMint, devWallet, decimals }; kind: 'pay'
-function auditPayTx(tx, q, cfg) {
+function auditPayTx(tx, q, cfg, alts = []) {
   const m = tx.message; const keys = m.staticAccountKeys.map((k) => k.toBase58());
+  const ak = m.getAccountKeys({ addressLookupTableAccounts: alts }); const keyAt = (i) => { const k = ak.get(i); return k ? k.toBase58() : null; }; // resolves keys that live in address lookup tables
   if (keys[0] !== q.wallet) throw new Error('Transaction fee payer is not your wallet');
   const burnMint = cfg.vwfestMint; let burn = 0n, dev = 0n, devTok = 0n, memoOk = false;
   const memoExpected = 'vwfest:' + q.id + (q.commit ? ':' + q.commit : '');
@@ -21,8 +22,8 @@ function auditPayTx(tx, q, cfg) {
   const wsolAta = getAssociatedTokenAddressSync(new PublicKey(C.WSOL), new PublicKey(q.wallet), true).toBase58();
   const ata = (owner, mint, prog) => getAssociatedTokenAddressSync(new PublicKey(mint), new PublicKey(owner), true, new PublicKey(prog || C.TOKEN_PROGRAM)).toBase58();
   for (const ix of m.compiledInstructions) {
-    const pid = keys[ix.programIdIndex]; if (!pid || !progs.has(pid)) throw new Error('Transaction uses an unexpected program');
-    const d = Buffer.from(ix.data); const acct = (i) => { const idx = ix.accountKeyIndexes[i]; return idx < keys.length ? keys[idx] : null; };
+    const pid = keyAt(ix.programIdIndex); if (!pid || !progs.has(pid)) throw new Error('Transaction uses an unexpected program');
+    const d = Buffer.from(ix.data); const acct = (i) => keyAt(ix.accountKeyIndexes[i]);
     if (pid === C.MEMO_PROGRAM) { if (d.toString('utf8') !== memoExpected) throw new Error('Memo does not match your quote'); memoOk = true; }
     else if (pid === SystemProgram.programId.toBase58()) {
       const kind = d.length >= 4 ? d.readUInt32LE(0) : -1;
@@ -49,6 +50,10 @@ function auditPayTx(tx, q, cfg) {
   if (devTok > BigInt(q.devTokenRaw) * 101n / 100n + 1n) throw new Error('Creator fee (token) is higher than your quote');
   return { burn, dev, devTok };
 }
+// Fetches the lookup tables a v0 transaction references (needed by the audit when Jupiter routes use them).
+async function fetchAlts(conn, tx) {
+  const out = []; for (const l of tx.message.addressTableLookups || []) { const r = await conn.getAddressLookupTable(l.accountKey); if (!r.value) throw new Error('Lookup table not found'); out.push(r.value); } return out;
+}
 // Mint tx: only Core create (+ compute budget) and a memo; payer = wallet; the asset account is the expected one.
 function auditMintTx(tx, { wallet, asset, collection, uriMemo }) {
   const m = tx.message; const keys = m.staticAccountKeys.map((k) => k.toBase58());
@@ -67,4 +72,4 @@ function auditMintTx(tx, { wallet, asset, collection, uriMemo }) {
   if (!created) throw new Error('Mint transaction has no NFT creation');
   return true;
 }
-module.exports = { auditPayTx, auditMintTx, decodeTx };
+module.exports = { auditPayTx, auditMintTx, decodeTx, fetchAlts };

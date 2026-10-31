@@ -3,12 +3,13 @@
   "version": "1.0.0",
   "private": true,
   "description": "Non-custodial Solana payments, burns and NFT minting for VW FEST SHOW GROUNDS",
-  "main": "src/index.js",
+  "main": "index.js",
   "type": "commonjs",
   "engines": { "node": ">=20" },
   "scripts": {
-    "test": "node --test test/",
-    "test:svm": "node --test test/svm.test.js",
+    "test": "node --test --test-force-exit --test-concurrency=1 test/*.test.js",
+    "test:e2e": "node --test --test-force-exit test/e2e.test.js",
+    "test:unit": "node --test test/unit.test.js",
     "mainnet-sim": "node scripts/mainnet-sim.js"
   },
   "dependencies": {

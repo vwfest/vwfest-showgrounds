@@ -15,7 +15,8 @@ const { BurnTracker } = require('./burns');
 const onramp = require('./onramp');
 const audit = require('./audit');
 
-const GRACE_MS = 30 * 60 * 1000; // a signed payment may be confirmed this long after its quote expired
+const GRACE_MS = 30 * 60 * 1000;
+const PAY_TX_LIFETIME_MS = 150 * 1000; // a built tx's blockhash is valid ~60-90 s; after this it can no longer land // a signed payment may be confirmed this long after its quote expired
 const fail = (why, extra = {}) => ({ ok: false, why, ...extra });
 
 class Solana {
@@ -31,7 +32,8 @@ class Solana {
     this.onGrant = opts.onGrant || (() => {}); this.onMinted = opts.onMinted || (() => {});
     this.shopPrice = opts.shopPrice || null; this.rideImage = opts.rideImage || null;
     const secret = cfg.serverSecret;
-    this.seedOf = (id) => { const seed = rides.serverSeed(secret || 'x'.repeat(32), id); return { seed, commit: rides.commitOf(seed) }; };
+    // No fallback secret, ever: commit-reveal and asset addresses must come from the persistent env secret.
+    this.seedOf = (id) => { if (!secret || secret.length < 32) throw new Error('SERVER_SECRET (>=32 chars) is required'); const seed = rides.serverSeed(secret, id); return { seed, commit: rides.commitOf(seed) }; };
     this.quotes = new Quotes({ cfg, store: this.store, prices: this.prices, roller: this.roller, rideSeedOf: this.seedOf });
     this.builder = new Builder({ cfg, conn: this.conn, prices: this.prices, fetchImpl: this.f });
     this.auth = secret && secret.length >= 32 ? new Auth({ store: this.store, secret, allowedDomains: opts.allowedDomains || [] }) : null;
@@ -86,13 +88,26 @@ class Solana {
       nftIn = { fp, fingerprint, attributes, name: nft.cleanText(o.nft.name || 'VW Fest Avatar', 48), image, imageSvg };
     }
     const q = await this.quotes.create({ ...o, usd, nft: nftIn });
-    if (nftIn) { // synchronous reservation: only one wallet can hold a trait set at a time
-      const cur = this.store.get('trait', nftIn.fp);
-      if (cur && cur.exp > Date.now() && cur.wallet !== q.wallet) throw new Error('Someone else is minting this exact avatar right now. Try again in a few minutes.');
-      this.store.set('trait', nftIn.fp, { quoteId: q.id, wallet: q.wallet, exp: q.expires + GRACE_MS });
-    }
+    if (nftIn) this._reserveTrait(nftIn.fp, q); // synchronous (no await between check and write): only one wallet can hold a trait set
     this.store.set('quote', q.id, q);
     return this.quotes.view(q);
+  }
+  // Atomic trait-set reservation. store.reserve() is a synchronous put-if-absent; the only way to take over an existing entry is
+  // (a) it expired, or (b) it is the SAME wallet refreshing its quote. A second wallet can therefore never get a payable quote for a held fingerprint,
+  // so nobody can burn for an avatar that someone else owns the right to mint. Throws (before any payment) when the trait set is not available.
+  _reserveTrait(fp, q) {
+    const rec = { quoteId: q.id, wallet: q.wallet, exp: q.expires + GRACE_MS, paid: false };
+    if (this.store.has('minted', fp)) throw new Error('This avatar has already been minted. Change something to make it unique.');
+    if (this.store.reserve('trait', fp, rec)) return;
+    const cur = this.store.get('trait', fp);
+    if (cur.paid) { if (cur.wallet === q.wallet) throw new Error('You already paid for this avatar: finish minting it.'); throw new Error('This avatar is already taken. Change something to make it unique.'); }
+    if (cur.exp > Date.now() && cur.wallet !== q.wallet) throw new Error('Someone else is minting this exact avatar right now. Try again in a few minutes.');
+    if (cur.wallet === q.wallet && cur.quoteId !== q.id) { // same-wallet refresh: supersede the old quote unless a pay tx for it may still be in flight
+      const old = this.store.get('quote', cur.quoteId);
+      if (old && old.state === 'open' && old.builtAt && Date.now() - old.builtAt < PAY_TX_LIFETIME_MS) throw new Error('You have a payment in progress for this avatar. Finish it (or wait a minute) before requesting a new quote.');
+      if (old && old.state === 'open') { old.state = 'superseded'; this.store.set('quote', old.id, old); }
+    }
+    this.store.set('trait', fp, rec);
   }
   getQuote(id, wallet) { const q = this.store.get('quote', id); return q && (!wallet || q.wallet === wallet) ? q : null; }
 
@@ -102,8 +117,10 @@ class Solana {
     const q = this.getQuote(quoteId, wallet); if (!q) return fail('Unknown quote');
     if (q.state !== 'open') return fail('This quote is already used');
     if (q.expires < Date.now()) return fail('This quote expired. Please request a new one.');
+    if (q.nft) { const r = this.store.get('trait', q.nft.fp); if (!r || r.quoteId !== q.id || r.wallet !== q.wallet) return fail('This avatar quote is no longer reserved for you. Request a new quote.'); }
+    q.builtAt = Date.now(); this.store.set('quote', q.id, q); // blocks a same-wallet refresh from superseding while this tx can still land
     const b = await this.builder.buildPay(q);
-    audit.auditPayTx(audit.decodeTx(b.tx), q, this.cfg); // never hand out a tx that fails our own audit
+    audit.auditPayTx(audit.decodeTx(b.tx), q, this.cfg, b.alts); // never hand out a tx that fails our own audit
     return { ok: true, tx: b.tx, lastValidBlockHeight: b.lastValidBlockHeight, burnRaw: b.burnRaw, swap: b.swap, memo: memoFor(q), quote: this.quotes.view(q) };
   }
   // The NFT mint (second step, after the verified payment). Rent + fee are paid by the player; the authority only co-signs.
@@ -163,6 +180,7 @@ class Solana {
     if (q.state === 'paid') return fail('This quote is already paid');
     if (q.state !== 'open') return fail('Verification in progress', { pending: true });
     if (q.expires + GRACE_MS < Date.now()) return fail('This quote expired');
+    if (q.nft) { const r = this.store.get('trait', q.nft.fp); if (!r || r.quoteId !== q.id || r.wallet !== q.wallet) return fail('This avatar is no longer reserved for this quote.'); }
     this.store.reserve('sig', signature, { quoteId: q.id, state: 'pending', at: Date.now() });
     q.state = 'verifying'; this.store.set('quote', q.id, q);
     const release = () => { this.store.delete('sig', signature); q.state = 'open'; this.store.set('quote', q.id, q); };
@@ -182,7 +200,7 @@ class Solana {
       rideRec = { id: q.id, wallet: q.wallet, seed, commit, sig: signature, reroll: roll.reroll, spec: roll.spec, code: roll.code, attributes: this.roller.attributes(roll.spec), build: roll.spec.serial !== undefined ? roll.spec.serial : undefined, tier: rides.tierName(this.roller, roll.spec), ts: Date.now() };
       this.store.set('ride', q.id, rideRec);
     }
-    if (kindCfg.nft === 'avatar') this.store.set('trait', q.nft.fp, { quoteId: q.id, wallet: q.wallet, exp: Date.now() + 365 * 86400000 * 50 }); // hold forever until minted or never
+    if (kindCfg.nft === 'avatar') this.store.set('trait', q.nft.fp, { quoteId: q.id, wallet: q.wallet, exp: Number.MAX_SAFE_INTEGER, paid: true }); // permanent: paid, waiting for the mint
     this.store.set('quote', q.id, q);
     this.burns.record({ sig: signature, quoteId: q.id, kind: q.kind, item: q.item || null, wallet: q.wallet, amount: v.burn, method: q.method, devLamports: v.devLamports, nick: nick ? nft.cleanText(nick, 14) : null });
     const receipt = { quoteId: q.id, kind: q.kind, item: q.item || null, ref: q.ref, wallet: q.wallet, method: q.method, usd: q.usd, paidUsd: q.paidUsd, burned: v.burn, burnedUi: Number(BigInt(v.burn)) / 10 ** this.cfg.decimals, devLamports: v.devLamports, devTokenRaw: v.devTokenRaw, signature, explorer: this.cfg.explorer(signature, 'tx'), nft: kindCfg.nft ? { kind: kindCfg.nft, status: 'pay-verified' } : null, ride: rideRec ? { tier: rideRec.tier, attributes: rideRec.attributes, commit: rideRec.commit, seed: rideRec.seed, spec: rideRec.spec, reroll: rideRec.reroll } : null, grant: 'pending', ts: Date.now() };
@@ -226,7 +244,7 @@ class Solana {
     if (!this.cfg.features.nftAvatarLookup) return fail('NFT avatars are off');
     const v = await nft.verifyOwnership({ cfg: this.cfg, conn: this.conn, wallet, asset, fetchImpl: this.f }); if (!v) return fail('That NFT is not in your wallet');
     let image = v.image || null;
-    if (!image && v.uri) { try { const r = await this.f(v.uri, { signal: AbortSignal.timeout(8000), redirect: 'error' }); if (r.ok && +(r.headers.get('content-length') || 0) < 200000) { const j = await r.json(); image = nft.safeUrl(j.image || ''); } } catch {} }
+    if (!image && v.uri) { try { const j = await nft.safeGetJson(v.uri, { gateway: this.cfg.storage.gateway, allowHosts: this.cfg.metadataHosts, ...(this.safeFetchOpts || {}) }); image = nft.safeUrl(j && j.image || ''); } catch { /* unreachable / blocked metadata: avatar still works without an image */ } }
     return { ok: true, avatar: { asset: v.asset, name: v.name, image, standard: v.standard, collection: v.collection, verifiedAt: Date.now(), wallet } };
   }
 

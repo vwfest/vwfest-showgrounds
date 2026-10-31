@@ -4,7 +4,7 @@ services:
     name: vwfest-showgrounds
     runtime: node
     plan: free
-    buildCommand: npm ci --omit=dev --ignore-scripts
+    buildCommand: npm ci --omit=dev --ignore-scripts && npm ci --omit=dev --ignore-scripts --prefix solana
     startCommand: node server.js
     healthCheckPath: /healthz
     envVars:
@@ -21,7 +21,10 @@ services:
       - { key: MINT_MAINNET, value: "0" }
       - { key: VWFEST_MINT, value: 9ktd1qdiu9wRFhxHPczWKrKRGmJb9nkanv2Zz27Rpump }
       - { key: DEV_WALLET, sync: false }
-      - { key: SOLANA_RPC_URL, sync: false }
+      - { key: RPC_URL, sync: false }                       # keyed Solana RPC used ONLY by the server (verification, quotes)
+      - { key: PUBLIC_RPC_URL, sync: false }                # RPC the browsers broadcast through (public; no secret in it)
+      - { key: MINT_DEV_FEE, value: "0" }                   # avatar/ride mints: 100% buyback & burn (10% creator fee only on shop/vendor SOL/token payments)
+      - { key: JUPITER_API_KEY, sync: false }               # optional
       - { key: VENDOR_PREMOD, value: "1" }
       - { key: WEB3AUTH_CLIENT_ID, sync: false }
       - { key: MOONPAY_API_KEY, sync: false }

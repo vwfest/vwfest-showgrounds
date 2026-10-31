@@ -1,0 +1,29 @@
+// Purchase flow through the real quote -> proof -> buy path with solana/ (CHAIN_FAKE=1). Derived from security.cjs helpers.
+// Security regression tests: RPC proxy gating (1), concurrent-submit race in the burn ledger (2), shop grant after a verified burn (3),
+// wallet-ownership proof, TURN credentials only over the WebSocket (6), per-IP profile creation limit (10).
+const http = require('http'); const crypto = require('crypto'); const assert = require('assert'); const WebSocket = require('ws');
+const PORT = 3293, UP = 3294, BASE = `http://127.0.0.1:${PORT}`;
+Object.assign(process.env, { SERVER_SECRET: 'security-test-secret-0123456789', PORT: String(PORT), MINT_NETWORK: 'devnet', MINT_ENABLED: '1', CHAIN_FAKE: '1', FIXED_SOL_USD: '150', DEV_WALLET: 'DV4gtG2VpnDtFUVFnnrE5YM3A6LrV5qAcdfaaUwLFRok', VWFEST_MINT: '9ktd1qdiu9wRFhxHPczWKrKRGmJb9nkanv2Zz27Rpump', SOLANA_RPC_URL: `http://127.0.0.1:${UP}`, RPC_WRITE_PER_MIN: '5', PROFILE_CREATE_PER_HOUR: '6', TURN_URL: 'turn:turn.example.com:3478', TURN_SECRET: 'turn-secret-xyz', MAX_CONNS_PER_IP: '100', DEV_WALLET: '11111111111111111111111111111112' });
+const S = require('../server.js'); const { Burns } = require('../lib/burns');
+const seen = []; const upstream = http.createServer((req, res) => { let b = ''; req.on('data', (d) => (b += d)); req.on('end', () => { const j = JSON.parse(b); seen.push(j); res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ jsonrpc: '2.0', id: j.id, result: 'ok' })); }); });
+let n = 0; const t = async (name, f) => { try { await f(); n++; console.log('ok  ', name); } catch (e) { console.error('FAIL', name, e.stack.split('\n').slice(0, 3).join(' | ')); process.exitCode = 1; } };
+const H = { origin: BASE, 'content-type': 'application/json' };
+const rpc = (body, headers = {}) => fetch(BASE + '/api/rpc', { method: 'POST', headers: { ...H, ...headers }, body: JSON.stringify(body) });
+const client = (nick) => new Promise((res, rej) => { const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`, { headers: { origin: BASE } }); const c = { ws, msgs: [], waiters: [] }; ws.on('message', (d, bin) => { if (bin) return; const m = JSON.parse(d); c.msgs.push(m); c.waiters = c.waiters.filter((w) => !(w.t === m.t && (w.f(m), true))); }); c.wait = (t, ms = 4000) => new Promise((r2, j2) => { const old = c.msgs.find((m) => m.t === t && !m._seen); if (old) { old._seen = true; return r2(old); } const to = setTimeout(() => j2(new Error('timeout ' + t)), ms); c.waiters.push({ t, f: (m) => { clearTimeout(to); m._seen = true; r2(m); } }); }); c.send = (o) => ws.send(JSON.stringify(o)); ws.on('open', () => res(c)); ws.on('error', rej); c.nick = nick; });
+const join = async (nick) => { const c = await client(nick); await c.wait('hi'); c.send({ t: 'join', nick }); const w = await Promise.race([c.wait('welcome'), c.wait('joinerr').then((m) => { throw new Error('joinerr ' + m.why); })]); c.welcome = w; return c; };
+const b58 = (buf) => { const A = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'; let x = BigInt('0x' + buf.toString('hex')), s = ''; while (x > 0n) { s = A[Number(x % 58n)] + s; x /= 58n; } for (const v of buf) { if (v === 0) s = '1' + s; else break; } return s; };
+
+(async () => {
+  await S.init(); await new Promise((r) => upstream.listen(UP, '127.0.0.1', r)); await new Promise((r) => S.server.listen(PORT, '127.0.0.1', r));
+  const C = await join('Buyer1'); const pid = C.welcome.pid; const kp = crypto.generateKeyPairSync('ed25519'); const pub = b58(kp.publicKey.export({ format: 'der', type: 'spki' }).subarray(12));
+  const prove = async () => { C.send({ t: 'wauth', pubkey: pub }); const ch = await C.wait('wchal'); C.send({ t: 'wproof', pubkey: pub, nonce: ch.nonce, sig: crypto.sign(null, Buffer.from(ch.message), kp.privateKey).toString('base64') }); assert((await C.wait('wok')).ok); };
+  const ask = async (m) => { await new Promise((r) => setTimeout(r, 1300)); C.send({ t: 'quote', ...m }); const r = await Promise.race([C.wait('quote'), C.wait('quoteerr').then((e) => { throw new Error('quoteerr ' + e.why); })]); return r.q; };
+  const sigs = ['8', '9', 'A', 'B', 'C'].map((c) => c.repeat(88)); let k = 0;
+  const buy = async (q) => { C.send({ t: 'buy', qid: q.id, sig: sigs[k++], wallet: pub }); return C.wait('buyres'); };
+  await prove();
+  await t('avatar mint quote: 100% buyback & burn, no creator fee', async () => { const q = await ask({ kind: 'avatar', method: 'sol' }); assert.strictEqual(q.devPct, 0); assert.strictEqual(q.devLamports, '0'); assert(BigInt(q.totalLamports) > 0n); assert(/^\d+$/.test(q.burnMin)); const r = await buy(q); assert(r.ok, r.why); assert(S.burns.summary().count >= 1, 'recorded in the burn tracker'); });
+  await t('ride mint quote: creator fee 0 too', async () => { const q = await ask({ kind: 'ride', method: 'sol' }); assert.strictEqual(q.devPct, 0); assert.strictEqual(q.devLamports, '0'); const r = await buy(q); assert(r.ok, r.why); });
+  await t('shop quote in SOL: 10% creator fee goes to DEV_WALLET, 90% to burn', async () => { const q = await ask({ kind: 'shop', item: 'halo', method: 'sol' }); assert.strictEqual(q.devPct, 10); assert.strictEqual(q.devWallet, process.env.DEV_WALLET); const total = BigInt(q.totalLamports), dev = BigInt(q.devLamports); assert(dev * 100n >= total * 9n && dev * 100n <= total * 11n, 'dev ~10%: ' + dev + '/' + total); const r = await buy(q); assert(r.ok, r.why); assert(S.profiles.byId.get(pid).items.has('halo')); });
+  await t('mint price endpoint uses solana/ prices', async () => { const j = await (await fetch(BASE + '/api/mint/price')).json(); assert(j.ok && j.usd === 150); });
+  console.log(`all ${n} purchase tests passed`); process.exit(process.exitCode || 0);
+})();

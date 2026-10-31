@@ -5,6 +5,9 @@
 //  * One mint per unique trait set is enforced ON-CHAIN: the asset address is a keypair derived from HMAC(SERVER_SECRET, collection+fingerprint),
 //    so a second mint of the same trait set fails because the account already exists (plus the off-chain reservation for a friendly error).
 const crypto = require('crypto');
+const dns = require('dns');
+const net = require('net');
+const https = require('https');
 const { PublicKey, Keypair, TransactionInstruction, SystemProgram } = require('@solana/web3.js');
 const C = require('./config');
 const CORE = new PublicKey(C.MPL_CORE_PROGRAM);
@@ -60,6 +63,75 @@ function buildMetadata({ kind, cfg, id, name, description, image, attributes, ex
   };
 }
 
+
+// ---------- SSRF-safe fetch of user-controlled metadata URIs (NFT-as-avatar) ----------
+// https only (ipfs:// is mapped to a public gateway), port 443, every address the name resolves to must be public (checked inside the
+// connection's own DNS lookup, so DNS rebinding cannot swap it afterwards), redirects re-validated hop by hop (max 3), 8 s timeout, 200 KB cap,
+// JSON only. Optional host allowlist (NFT_METADATA_HOSTS).
+function isPublicIp(ip) {
+  if (net.isIPv4(ip)) {
+    const [a, b] = ip.split('.').map(Number);
+    if (a === 0 || a === 10 || a === 127 || a >= 224) return false;           // this-net, private, loopback, multicast/reserved
+    if (a === 100 && b >= 64 && b <= 127) return false;                        // CGNAT
+    if (a === 169 && b === 254) return false;                                  // link-local incl. 169.254.169.254 cloud metadata
+    if (a === 172 && b >= 16 && b <= 31) return false; if (a === 192 && b === 168) return false;
+    if (a === 192 && b === 0) return false; if (a === 198 && (b === 18 || b === 19)) return false; // IETF protocol / benchmarking
+    return true;
+  }
+  if (net.isIPv6(ip)) {
+    const l = ip.toLowerCase();
+    const m = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(l); if (m) return isPublicIp(m[1]);
+    const h = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(l); if (h) { const x = parseInt(h[1], 16), y = parseInt(h[2], 16); return isPublicIp(`${x >> 8}.${x & 255}.${y >> 8}.${y & 255}`); }
+    if (l === '::' || l === '::1') return false;
+    if (/^f[cd]/.test(l) || /^fe[89ab]/.test(l) || /^ff/.test(l)) return false; // ULA, link-local, multicast
+    if (l.startsWith('64:ff9b:') || l.startsWith('2001:db8') || l.startsWith('2002:')) return false; // NAT64 / docs / 6to4 (can embed private v4)
+    return true;
+  }
+  return false;
+}
+function pinnedLookup(hostname, options, cb) {
+  dns.lookup(hostname, { all: true, verbatim: true }, (err, addrs) => {
+    if (err) return cb(err);
+    if (!addrs.length || !addrs.every((a) => isPublicIp(a.address))) return cb(Object.assign(new Error('blocked address'), { code: 'EBLOCKED' }));
+    if (options && options.all) return cb(null, addrs); cb(null, addrs[0].address, addrs[0].family);
+  });
+}
+function resolveMetaUrl(u, gateway) {
+  let x; try { x = new URL(u); } catch { throw new Error('bad url'); }
+  if (x.protocol === 'ipfs:') return new URL(`${gateway || 'https://gateway.pinata.cloud'}/ipfs/${(x.hostname + x.pathname).replace(/^\/+/, '')}`);
+  if (x.protocol !== 'https:') throw new Error('https only');
+  return x;
+}
+function checkMetaTarget(x, allowHosts) {
+  if (x.username || x.password) throw new Error('credentials in url');
+  if (x.port && x.port !== '443') throw new Error('port not allowed');
+  const host = x.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (!host || host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) throw new Error('blocked host');
+  if (net.isIP(host) && !isPublicIp(host)) throw new Error('blocked address');
+  if (allowHosts && allowHosts.length && !allowHosts.some((h) => host === h || host.endsWith('.' + h))) throw new Error('host not allowed');
+}
+// opts: { gateway, allowHosts, transport (tests), lookup (tests), maxBytes, timeoutMs, maxRedirects }
+async function safeGetJson(url, opts = {}) {
+  const { gateway, allowHosts, transport = https, lookup = pinnedLookup, maxBytes = 200000, timeoutMs = 8000, maxRedirects = 3 } = opts;
+  let x = resolveMetaUrl(url, gateway);
+  for (let hop = 0; hop <= maxRedirects; hop++) {
+    checkMetaTarget(x, allowHosts);
+    const res = await new Promise((resolve, reject) => {
+      const req = transport.request({ protocol: 'https:', hostname: x.hostname.replace(/^\[|\]$/g, ''), port: 443, path: x.pathname + x.search, method: 'GET', lookup, timeout: timeoutMs, headers: { accept: 'application/json', 'user-agent': 'vwfest-showgrounds' } }, resolve);
+      const t = setTimeout(() => req.destroy(new Error('timeout')), timeoutMs); req.on('close', () => clearTimeout(t));
+      req.on('error', reject); req.on('timeout', () => req.destroy(new Error('timeout'))); req.end();
+    });
+    if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) { res.resume(); x = resolveMetaUrl(new URL(res.headers.location, x).toString(), gateway); continue; }
+    if (res.statusCode !== 200) { res.resume(); throw new Error('http ' + res.statusCode); }
+    if (!/json/i.test(String(res.headers['content-type'] || ''))) { res.resume(); throw new Error('not json'); }
+    if (+(res.headers['content-length'] || 0) > maxBytes) { res.destroy(); throw new Error('too large'); }
+    const chunks = []; let n = 0;
+    await new Promise((resolve, reject) => { res.on('data', (c) => { n += c.length; if (n > maxBytes) { res.destroy(); reject(new Error('too large')); } else chunks.push(c); }); res.on('end', resolve); res.on('error', reject); res.on('aborted', () => reject(new Error('aborted'))); });
+    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  }
+  throw new Error('too many redirects');
+}
+
 // ---- AssetV1 account parsing (Borsh): key u8(1) | owner 32 | update_authority enum(u8 [+32]) | name str | uri str ----
 function parseAsset(data) {
   const b = Buffer.from(data); if (b[0] !== 1) return null;
@@ -105,4 +177,4 @@ async function verifyOwnership({ cfg, conn, wallet, asset, fetchImpl = fetch }) 
     return { asset, name, image, standard: 'LegacyNFT', collection: null };
   } catch { return null; }
 }
-module.exports = { createCollectionIx, createAssetIx, fingerprintOf, assetKeypair, attributesFromTraits, checkSvg, safeUrl, cleanText, buildMetadata, parseAsset, ownedNfts, verifyOwnership, rpcCall, CORE };
+module.exports = { isPublicIp, safeGetJson, pinnedLookup, createCollectionIx, createAssetIx, fingerprintOf, assetKeypair, attributesFromTraits, checkSvg, safeUrl, cleanText, buildMetadata, parseAsset, ownedNfts, verifyOwnership, rpcCall, CORE };

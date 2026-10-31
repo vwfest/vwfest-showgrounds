@@ -41,7 +41,11 @@ async function swapInstructions({ cfg, prices, conn, user, inputMint, amount, ma
   if (!quote || !quote.outAmount) throw new Error('No swap route available right now');
   if (Number(quote.priceImpactPct || 0) > 0.05) throw new Error('Price impact too high right now. Try a smaller amount or later.');
   const headers = { 'content-type': 'application/json', ...(cfg.jupiterApiKey ? { 'x-api-key': cfg.jupiterApiKey } : {}) };
-  const r = await fetchImpl(`${cfg.jupiterBase}/swap/v1/swap-instructions`, { method: 'POST', headers, body: JSON.stringify({ quoteResponse: quote, userPublicKey: user, wrapAndUnwrapSol: true, dynamicComputeUnitLimit: true }), signal: AbortSignal.timeout(10000) });
+  let r;
+  for (let i = 0; i < 3; i++) { // free tiers rate-limit: brief back-off on 429/5xx
+    r = await fetchImpl(`${cfg.jupiterBase}/swap/v1/swap-instructions`, { method: 'POST', headers, body: JSON.stringify({ quoteResponse: quote, userPublicKey: user, wrapAndUnwrapSol: true, dynamicComputeUnitLimit: true }), signal: AbortSignal.timeout(10000) });
+    if (r.ok || (r.status !== 429 && r.status < 500)) break; await new Promise((res) => setTimeout(res, 1200 * (i + 1)));
+  }
   if (!r.ok) throw new Error('Swap service error (' + r.status + ')');
   const j = await r.json(); if (j.error) throw new Error('Swap service: ' + String(j.error).slice(0, 80));
   const list = [...(j.setupInstructions || []), j.swapInstruction, ...(j.cleanupInstruction ? [j.cleanupInstruction] : [])];
