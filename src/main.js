@@ -165,7 +165,8 @@ function say(e, text) { if (!e.person) return; if (e.bubble) { e.person.root.rem
 
 // ---------- interaction ----------
 let curSpot = null;
-function nearestSpot() { let best = null, bd = 1e9; for (const s of world.spots) { const d = Math.hypot(L.x - s.x, L.z - s.z); if (d < s.r && d < bd) { best = s; bd = d; } } return best; }
+// Zones never overlap (test/spots.cjs), but if two ever do: pick the nearest, preferring the one the player is facing (yaw -> direction (sin, cos)).
+function nearestSpot() { let best = null, bs = 1e9; for (const s of world.spots) { const dx = s.x - L.x, dz = s.z - L.z, d = Math.hypot(dx, dz); if (d >= s.r) continue; const face = d > 0.01 ? (Math.sin(L.yaw) * dx + Math.cos(L.yaw) * dz) / d : 0; const sc = d - 1.5 * face; if (sc < bs) { best = s; bs = sc; } } return best; }
 function interact() {
   if (!joined || !curSpot) return; const s = curSpot;
   if (s.game) { window.open(s.game.url, '_blank', 'noopener,noreferrer'); toast(`Opening ${s.game.name} in a new tab…`); }
@@ -292,7 +293,7 @@ async function boot() {
   voice = new Voice(net, state.cfg); voice.onChange = () => updateVoiceHud(); state.blocked = (k) => voice.isBlocked(k);
   $('#bAvatar').onclick = () => joined && openEditor(); $('#bShop').onclick = () => joined && UI.shopModal(ctx); $('#bGarage').onclick = () => joined && UI.garageModal(ctx); $('#bBurn').onclick = () => UI.burnModal(ctx); $('#bVoice').onclick = () => joined && UI.voiceModal(ctx); $('#bPlayers').onclick = () => joined && UI.playersModal(ctx); $('#bHelp').onclick = () => V.infoModal(ctx); $('#bVendors').onclick = () => V.vendorDirectory(ctx); const lh = $('#howLink'); if (lh) lh.onclick = (e) => { e.preventDefault(); V.infoModal(ctx); }; $('#bSet').onclick = settingsModal; $('#bProfile').onclick = () => joined && net.json({ t: 'profile', sid: state.me.id });
   net.connect(); showJoin(false); requestAnimationFrame(loop);
-  window.__sg = { state, players, L, net, ctx, get me() { return me3; }, cam: () => camera, goto: (x, z) => { L.x = x; L.z = z; }, emote: doEmote, setCam: (y, p) => { camYaw = y; camPitch = p; }, voice: () => voice, scene: () => scene, renderer: () => renderer, gfx: () => gfx, setDist: (d, look) => { camDist = d; camLook = look || 0; } };
+  window.__sg = { state, players, get world() { return world; }, L, net, ctx, get me() { return me3; }, cam: () => camera, goto: (x, z) => { L.x = x; L.z = z; }, emote: doEmote, setCam: (y, p) => { camYaw = y; camPitch = p; }, voice: () => voice, scene: () => scene, renderer: () => renderer, gfx: () => gfx, setDist: (d, look) => { camDist = d; camLook = look || 0; } };
   window.__ready = true;
 }
 function settingsModal() {

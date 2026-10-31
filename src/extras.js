@@ -62,7 +62,7 @@ export function buildExtras(scene, api, ctx) {
   };
   out.update([]);
   // ---------- Info Booth ----------
-  { const x = -24, z = 49; const b = new Batch(); b.box(7, 0.25, 5, '#2b2d42', x, 0.13, z); b.box(6.2, 1.1, 1.2, '#f4f1ea', x, 0.8, z + 1.3); b.box(6.4, 0.18, 1.5, '#118ab2', x, 1.4, z + 1.3);
+  { const x = -34, z = 36; const b = new Batch(); // clear of the arcade kiosks (z=52) and the spawn points; zones must not overlap (test/spots.cjs) b.box(7, 0.25, 5, '#2b2d42', x, 0.13, z); b.box(6.2, 1.1, 1.2, '#f4f1ea', x, 0.8, z + 1.3); b.box(6.4, 0.18, 1.5, '#118ab2', x, 1.4, z + 1.3);
     for (const dx of [-3, 3]) for (const dz of [-1.8, 1.8]) b.box(0.18, 3.4, 0.18, '#cfd3da', x + dx, 1.8, z + dz); for (let i = 0; i < 8; i++) b.box(7.4 / 8, 0.08, 4.4, i % 2 ? '#118ab2' : '#f4f1ea', x - 3.7 + (i + 0.5) * (7.4 / 8), 3.55, z);
     b.box(0.35, 8.2, 0.35, '#2b2d42', x - 3.2, 4.1, z - 1.9); b.box(0.35, 8.2, 0.35, '#2b2d42', x + 3.2, 4.1, z - 1.9); b.box(7.4, 0.35, 0.35, '#2b2d42', x, 8.3, z - 1.9);
     for (let k = 0; k < 5; k++) b.box(0.5, 0.35, 0.3, ['#ff6b6b', '#ffd166', '#06d6a0', '#4ea8ff', '#c77dff'][k], x - 2 + k * 1, 1.7, z + 1.3); // brochures
