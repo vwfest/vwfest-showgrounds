@@ -1,6 +1,6 @@
 // Non-custodial purchase builder (lazy chunk). The player's own wallet signs; no project wallet ever holds funds.
 //  tx = [compute budget] + [Jupiter swap SOL -> $VWFEST for the swap share] + [SOL fee to creator wallet, if any] + SPL burn + [Core NFT create] + memo
-import { audit, auditMessage, sameMessage } from './txaudit.mjs';
+import { audit, auditMessage, sameMessage, pinSource } from './txaudit.mjs';
 import { rpcFetch } from './rpc.mjs';
 import { assertTop } from './frame.js';
 import { Connection, PublicKey, Keypair, TransactionInstruction, TransactionMessage, VersionedTransaction, SystemProgram, ComputeBudgetProgram, AddressLookupTableAccount } from '@solana/web3.js';
@@ -16,6 +16,13 @@ function decompile(tx, alts) {
 }
 // Runs on the exact transaction object that is about to be signed (build time AND again right before the wallet prompt, from a fresh decode of its bytes).
 export function auditTx(tx, ctx) { return auditMessage(decompile(tx, ctx.alts), ctx.c); }
+// Defence in depth on top of the instruction audit: Jupiter's route carries ~30 opaque AMM accounts, and none of them may be a token account OWNED BY THE PLAYER except `allowed`
+// (isolated temp account, $VWFEST account, wSOL account). Refuses if the check cannot run.
+export async function assertNoStrayUserTokenAccounts(conn, ixs, user, allowed) {
+  const keys = new Set(); for (const i of ixs) for (const a of i.accounts) keys.add(a.pubkey); for (const x of allowed) keys.delete(x); keys.delete(user.toBase58()); const list = [...keys]; const ub = user.toBytes();
+  for (let o = 0; o < list.length; o += 100) { const infos = await conn.getMultipleAccountsInfo(list.slice(o, o + 100).map((k) => new PublicKey(k)), 'confirmed');
+    for (const info of infos) if (info && (info.owner.equals(TOKEN) || info.owner.equals(TOKEN22)) && info.data.length >= 165 && info.data.subarray(32, 64).every((x, n) => x === ub[n])) throw new Error('Swap route touches another token account of yours. Aborted for your safety.'); }
+}
 const u64 = (n) => { const b = new Uint8Array(8); new DataView(b.buffer).setBigUint64(0, BigInt(n), true); return b; };
 const str = (s) => { const e = new TextEncoder().encode(s); const l = new Uint8Array(4); new DataView(l.buffer).setUint32(0, e.length, true); return [l, e]; };
 const cat = (...a) => { const f = a.flat(); const n = f.reduce((s, x) => s + x.length, 0); const o = new Uint8Array(n); let p = 0; for (const x of f) { o.set(x, p); p += x.length; } return o; };
@@ -33,24 +40,39 @@ async function build({ q, cfg, conn, user, mint, tokenProg, ata, swapLamports, p
   const ixs = []; const alts = []; let burn = BigInt(q.burnRaw), swapInfo = null, simTok = null;
   const budget = ComputeBudgetProgram.setComputeUnitLimit({ units: 600000 });
   const wsolAta = PublicKey.findProgramAddressSync([user.toBytes(), TOKEN.toBytes(), WSOL_MINT.toBytes()], ATA_PROG)[0].toBase58(); let swapCtx = null;
-  const swapIxs = async (qs, maxLamports, maxSwapIn) => {
+  const isoPre = [], isoPost = []; // isolation prelude/postlude for token-funded swaps (see below)
+  // iso (token-funded swaps only): { temp, main, mint, dec, amount, maxRent }. Jupiter's route is rewritten to take its input from the isolated temp account; the player's own token account (main) may appear in no route instruction.
+  const swapIxs = async (qs, maxLamports, maxSwapIn, iso) => {
     const res = await fetch(`${cfg.jupiter}/swap-instructions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ quoteResponse: qs, userPublicKey: user.toBase58(), wrapAndUnwrapSol: true, dynamicComputeUnitLimit: true, dynamicSlippage: false }) });
     if (!res.ok) throw new Error('Swap service error (' + res.status + ')'); const j = await res.json(); if (j.error) throw new Error('Swap service: ' + j.error);
-    const all = [...(j.computeBudgetInstructions || []), ...(j.setupInstructions || []), j.swapInstruction, ...(j.cleanupInstruction ? [j.cleanupInstruction] : [])]; audit(all, maxLamports, { user: user.toBase58(), wsolAta, maxSwapIn }); swapCtx = { maxLamports, maxSwapIn, wsolAta };
+    const swapIx = iso ? pinSource(j.swapInstruction, iso.temp, iso.main) : j.swapInstruction; // the route as Jupiter built it must have used the player's own account; we move it to the isolated one
+    const all = [...(j.computeBudgetInstructions || []), ...(j.setupInstructions || []), swapIx, ...(j.cleanupInstruction ? [j.cleanupInstruction] : [])]; audit(all, maxLamports, { user: user.toBase58(), wsolAta, maxSwapIn, source: iso ? iso.temp : wsolAta, forbid: iso ? [iso.main] : undefined }); swapCtx = { maxLamports, maxSwapIn, wsolAta, iso: iso || null };
+    await assertNoStrayUserTokenAccounts(conn, [swapIx], user, [wsolAta, ata.toBase58(), ...(iso ? [iso.temp] : [])]);
     for (const a of j.addressLookupTableAddresses || []) { const acc = await conn.getAccountInfo(new PublicKey(a)); if (acc) alts.push(new AddressLookupTableAccount({ key: new PublicKey(a), state: AddressLookupTableAccount.deserialize(acc.data) })); }
-    for (const i of j.computeBudgetInstructions || []) ixs.push(ix(i)); for (const i of j.setupInstructions || []) ixs.push(ix(i)); ixs.push(ix(j.swapInstruction)); if (j.cleanupInstruction) ixs.push(ix(j.cleanupInstruction));
+    for (const i of j.computeBudgetInstructions || []) ixs.push(ix(i)); for (const i of isoPre) ixs.push(i); for (const i of j.setupInstructions || []) ixs.push(ix(i)); ixs.push(ix(swapIx)); if (j.cleanupInstruction) ixs.push(ix(j.cleanupInstruction)); for (const i of isoPost) ixs.push(i);
   };
   if (payToken) {
     if (!q.swap) throw new Error('Paying with other tokens needs mainnet liquidity (test networks have none).');
     onStep && onStep(`Getting the best ${payToken.sym} → $VWFEST route from Jupiter…`);
     const target = BigInt(q.burnRaw) * 995n / 1000n; if (target < BigInt(q.burnMin)) throw new Error('Price error. Please start again.');
-    const qs = await jget(`${cfg.jupiter}/quote?inputMint=${payToken.mint}&outputMint=${cfg.mint}&amount=${target}&swapMode=ExactOut&slippageBps=${cfg.slippageBps}&restrictIntermediateTokens=true&maxAccounts=40`);
-    if (BigInt(qs.outAmount) < BigInt(q.burnMin)) throw new Error('Swap route returned too little $VWFEST. Aborted.');
-    const maxIn = BigInt(qs.otherAmountThreshold); const tmint = new PublicKey(payToken.mint); const tinfo = await conn.getAccountInfo(tmint); if (!tinfo) throw new Error(payToken.sym + ' mint not found.');
-    const tprog = tinfo.owner.equals(TOKEN22) ? TOKEN22 : TOKEN; const [tata] = PublicKey.findProgramAddressSync([user.toBytes(), tprog.toBytes(), tmint.toBytes()], ATA_PROG);
+    // 1) price discovery (ExactOut): how much of the token buys the burn amount. 2) the swap itself is ExactIn of exactly that quoted maximum, so the player's exposure is a number we fix up front.
+    const qo = await jget(`${cfg.jupiter}/quote?inputMint=${payToken.mint}&outputMint=${cfg.mint}&amount=${target}&swapMode=ExactOut&slippageBps=${cfg.slippageBps}&restrictIntermediateTokens=true&maxAccounts=40`);
+    const maxIn = BigInt(qo.otherAmountThreshold); if (maxIn <= 0n) throw new Error('Price error. Please start again.');
+    const qs = await jget(`${cfg.jupiter}/quote?inputMint=${payToken.mint}&outputMint=${cfg.mint}&amount=${maxIn}&swapMode=ExactIn&slippageBps=${cfg.slippageBps}&restrictIntermediateTokens=true&maxAccounts=40`);
+    const minOut = BigInt(qs.otherAmountThreshold); if (BigInt(qs.inAmount) !== maxIn || minOut < BigInt(q.burnMin)) throw new Error('Swap route returned too little $VWFEST. Aborted.');
+    const tmint = new PublicKey(payToken.mint); const tinfo = await conn.getAccountInfo(tmint); if (!tinfo) throw new Error(payToken.sym + ' mint not found.');
+    if (!tinfo.owner.equals(TOKEN)) throw new Error(payToken.sym + ' cannot be used to pay (only standard SPL tokens are supported for swaps).');
+    const [tata] = PublicKey.findProgramAddressSync([user.toBytes(), TOKEN.toBytes(), tmint.toBytes()], ATA_PROG);
     const bal = await conn.getTokenAccountBalance(tata).catch(() => null); const have = bal ? BigInt(bal.value.amount) : 0n;
     if (have < maxIn) throw new Error(`You need up to ${Number(maxIn) / 10 ** payToken.dec} ${payToken.sym} in this wallet (you have ${Number(have) / 10 ** payToken.dec}).`);
-    simTok = { addr: tata, before: have, max: maxIn }; await swapIxs(qs, 6000000n, maxIn); burn = target; swapInfo = { expectOut: target, minOut: target, inSym: payToken.sym, maxIn, inDec: payToken.dec };
+    // Isolation: exactly maxIn moves into a temporary account (createAccountWithSeed from the player: no extra signer), the route runs on THAT account only, and it is closed (rent back) afterwards.
+    const rnd = crypto.getRandomValues(new Uint8Array(8)); const seed = Array.from(rnd, (x) => x.toString(16).padStart(2, '0')).join(''); const temp = await PublicKey.createWithSeed(user, seed, TOKEN); const rent = await conn.getMinimumBalanceForRentExemption(165);
+    isoPre.push(SystemProgram.createAccountWithSeed({ fromPubkey: user, newAccountPubkey: temp, basePubkey: user, seed, lamports: rent, space: 165, programId: TOKEN }),
+      new TransactionInstruction({ programId: TOKEN, keys: [{ pubkey: temp, isSigner: false, isWritable: true }, { pubkey: tmint, isSigner: false, isWritable: false }], data: cat([Uint8Array.of(18)], [user.toBytes()]) }), // InitializeAccount3 (owner = the player)
+      new TransactionInstruction({ programId: TOKEN, keys: [{ pubkey: tata, isSigner: false, isWritable: true }, { pubkey: tmint, isSigner: false, isWritable: false }, { pubkey: temp, isSigner: false, isWritable: true }, { pubkey: user, isSigner: true, isWritable: false }], data: cat([Uint8Array.of(12)], u64(maxIn), Uint8Array.of(payToken.dec)) })); // transferChecked: the ONE move of the pay token
+    isoPost.push(new TransactionInstruction({ programId: TOKEN, keys: [{ pubkey: temp, isSigner: false, isWritable: true }, { pubkey: user, isSigner: false, isWritable: true }, { pubkey: user, isSigner: true, isWritable: false }], data: Uint8Array.of(9) })); // closeAccount (balance is 0 after an ExactIn swap), rent back to the player
+    simTok = { addr: tata, before: have, max: maxIn }; await swapIxs(qs, BigInt(rent) + 6000000n, maxIn, { temp: temp.toBase58(), main: tata.toBase58(), mint: payToken.mint, dec: payToken.dec, amount: maxIn, maxRent: BigInt(rent) + 1000n });
+    burn = minOut; swapInfo = { expectOut: BigInt(qs.outAmount), minOut, inSym: payToken.sym, maxIn, inDec: payToken.dec };
   } else if (q.method === 'sol' && q.swap) {
     onStep && onStep('Getting the best $VWFEST route from Jupiter…');
     const sw = swapLamports;

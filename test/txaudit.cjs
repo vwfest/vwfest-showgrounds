@@ -9,7 +9,7 @@ const tIx = (op, accts, extra = []) => ({ programId: TOKEN, accounts: accts.map(
 const sysIx = (kind, lamports, dest = W) => ({ programId: SYS, accounts: [{ pubkey: U }, { pubkey: dest }], data: b64([kind, 0, 0, 0, ...u64(lamports)]) });
 // REAL Jupiter swap-instructions output (lite-api.jup.ag, 2026-10-31): ExactIn 0.05 SOL -> USDC (route), ExactOut USDC -> 10 USDC-equivalent (exact_out_route)
 const REAL_IN = '5RfLl3rjrSoBAAAAsgFkAAGA8PoCAAAAACU+SQAAAAAAZAAA', REAL_OUT = '0DPvl3sr7VwBAAAAEQBkAAGAlpgAAAAAADOlDgAAAAAAZAAA'; // in: 50,000,000 exact | out: quoted input 959,795 @100bps
-const jupIx = (data) => ({ programId: JUP, accounts: [{ pubkey: U }], data });
+const jupIx = (data, src = W) => ({ programId: JUP, accounts: [{ pubkey: TOKEN }, { pubkey: U }, { pubkey: src }], data }); // `route` layout: input account at index 2
 let n = 0; const t = async (name, f) => { try { await f(); n++; console.log('ok  ', name); } catch (e) { console.error('FAIL', name, e.stack.split('\n').slice(0, 3).join(' | ')); process.exitCode = 1; } };
 (async () => {
   const { audit, auditMessage, sameMessage, jupSpend, TOKEN_OK } = await import(pathToFileURL(path.join(__dirname, '..', 'src', 'txaudit.mjs')).href);
@@ -25,12 +25,12 @@ let n = 0; const t = async (name, f) => { try { await f(); n++; console.log('ok 
   await t('unknown program refused', () => { bad(() => audit([{ programId: 'EvilProgram1111111111111111111111111111111', accounts: [], data: b64([0]) }], 0n), /unexpected program/); });
   await t('Jupiter spend bound is read from the REAL instruction data: ExactIn = exact input, ExactOut = quoted input + slippage', () => {
     assert.strictEqual(jupSpend(Buffer.from(REAL_IN, 'base64')), 50000000n); assert.strictEqual(jupSpend(Buffer.from(REAL_OUT, 'base64')), 969393n); // matches Jupiter's otherAmountThreshold 969393
-    audit([jupIx(REAL_IN)], 0n, { user: U, maxSwapIn: 50000000n }); bad(() => audit([jupIx(REAL_IN)], 0n, { user: U, maxSwapIn: 49999999n }), /spend more/);
-    audit([jupIx(REAL_OUT)], 0n, { user: U, maxSwapIn: 969393n }); bad(() => audit([jupIx(REAL_OUT)], 0n, { user: U, maxSwapIn: 969392n }), /spend more/);
-    bad(() => audit([jupIx(REAL_IN)], 0n, { user: U }), /No spend limit/);
+    audit([jupIx(REAL_IN)], 0n, { user: U, maxSwapIn: 50000000n, source: W }); bad(() => audit([jupIx(REAL_IN)], 0n, { user: U, maxSwapIn: 49999999n, source: W }), /spend more/);
+    bad(() => audit([jupIx(REAL_OUT)], 0n, { user: U, maxSwapIn: 969393n, source: W }), /Unrecognised swap route/); // ExactOut routes have no pinned-source layout: no longer accepted (swaps are ExactIn)
+    bad(() => audit([jupIx(REAL_IN)], 0n, { user: U, source: W }), /No spend limit/);
   });
   await t('a tampered route amount, an unknown route type (incl. token-ledger variants) and short data are refused', () => {
-    const d = Buffer.from(REAL_IN, 'base64'); d.writeBigUInt64LE(9000000000n, d.length - 19); bad(() => audit([jupIx(d.toString('base64'))], 0n, { user: U, maxSwapIn: 50000000n }), /spend more/);
+    const d = Buffer.from(REAL_IN, 'base64'); d.writeBigUInt64LE(9000000000n, d.length - 19); bad(() => audit([jupIx(d.toString('base64'))], 0n, { user: U, maxSwapIn: 50000000n, source: W }), /spend more/);
     const l = Buffer.from(REAL_IN, 'base64'); Buffer.from('96564774a75d0e68', 'hex').copy(l, 0); bad(() => jupSpend(l), /Unrecognised swap route/); bad(() => jupSpend(Buffer.alloc(10)), /Unrecognised/); bad(() => jupSpend(Buffer.alloc(40)), /Unrecognised swap route/);
   });
   await t('priority fee ceiling (compute unit price x limit)', () => { const price = (p) => ({ programId: BUD, accounts: [], data: b64([3, ...u64(p)]) }); const lim = { programId: BUD, accounts: [], data: b64([2, 0x40, 0x0d, 0x03, 0]) }; audit([lim, price(100000)], 0n); bad(() => audit([lim, price(50000000)], 0n), /Priority fee/); });
@@ -56,7 +56,7 @@ let n = 0; const t = async (name, f) => { try { await f(); n++; console.log('ok 
     const m = mk(); m.keys.push('Evil11111111111111111111111111111111111111'); m.ixs.push({ p: m.keys.length - 1, a: [], d: Uint8Array.of(1) }); bad(() => auditMessage(m, C), /unexpected program/);
   });
   await t('whole transaction with a Jupiter swap: setup/swap/cleanup audited, spend bounded by the quote, wSOL funding only from the player to their own wSOL account', () => {
-    const sw = { maxLamports: 50000000n + 6000000n, maxSwapIn: 50000000n, wsolAta: W }; const wrap = { p: SYS, a: [U, W], d: Uint8Array.from([2, 0, 0, 0, ...u64(50000000)]) }; const route = { p: JUP, a: [U], d: Buffer.from(REAL_IN, 'base64') }; const sync = { p: TOKEN, a: [W], d: Uint8Array.of(17) };
+    const sw = { maxLamports: 50000000n + 6000000n, maxSwapIn: 50000000n, wsolAta: W }; const wrap = { p: SYS, a: [U, W], d: Uint8Array.from([2, 0, 0, 0, ...u64(50000000)]) }; const route = { p: JUP, a: [TOKEN, U, W], d: Buffer.from(REAL_IN, 'base64') }; const sync = { p: TOKEN, a: [W], d: Uint8Array.of(17) };
     assert(auditMessage(mk([wrap, sync, route]), { ...C, swap: sw })); bad(() => auditMessage(mk([wrap, sync, route]), { ...C, swap: { ...sw, maxSwapIn: 49000000n } }), /spend more/);
     bad(() => auditMessage(mk([{ ...wrap, a: [U, X] }, route]), { ...C, swap: sw }), /Creator fee|somewhere unexpected|unexpected/i); bad(() => auditMessage(mk([route]), C), /Unexpected instructions/);
     bad(() => auditMessage(mk([wrap, { p: TOKEN, a: ['ata', 'tmp', U], d: Uint8Array.from([3, ...u64(5)]) }, route]), { ...C, swap: sw }), /Unexpected token instruction/);
