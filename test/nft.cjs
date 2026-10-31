@@ -43,5 +43,7 @@ const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
     const A2c = await join('Nifty1'.slice(0, 6) + 'x'); assert(S.nftav.saved.has(pid), 'saved by profile id'); A2c.ws.close(); await wait(100);
     const p = [...S.hub.players.values()].find((x) => x.prof.id === pid); assert(!p || p.nft === null || p.nft); // rejoin by profile is covered by restore(); here we just assert persistence record exists
     await wait(1600); S.nftav.clear({ id: 0, prof: { id: pid }, nft: { asset: A1 }, conn: null }); assert(!S.nftav.saved.has(pid)); });
+  await t('init fails soft: a broken/missing Solana dependency disables NFT avatars instead of crashing the server', async () => { const { NftAvatars } = require('../lib/nftavatar'); const chain = require('../lib/chain'); const real = chain.loadConfig; const err = console.error; const logs = []; console.error = (...a) => logs.push(a.join(' ')); chain.loadConfig = () => { throw new Error("Cannot find module '@solana/web3.js'"); };
+    try { const x = new NftAvatars({ hub: S.hub, profiles: S.profiles, env: {} }); await x.init(); assert.strictEqual(x.enabled, false); assert.strictEqual(x.timer, null); await assert.rejects(() => x.list('x'), /not switched on/); } finally { chain.loadConfig = real; console.error = err; } assert(logs.some((l) => /\[nftavatar\] disabled/.test(l))); });
   WA.verify = realVerify; console.log(`all ${n} nft avatar tests passed`); process.exit(process.exitCode || 0);
 })();
