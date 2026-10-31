@@ -1,0 +1,57 @@
+{
+  "_note": "Single source of truth for the in-world Info Booth guide. Every number comes from a {token} that the server fills from its live config (see lib/guide.js), so prices, fees, odds and durations can never go stale. Do NOT type literal prices/percentages/durations here: test/guide.cjs fails if you do.",
+  "sections": [
+    { "id": "start", "icon": "🚀", "title": "Getting started", "blocks": [
+      { "p": "Welcome to the VW FEST SHOW GROUNDS, a free hangout for the $VWFEST community. Up to {maxPlayers} people can be on the grounds at once. No sign-up and no wallet is needed to walk around, chat, play the arcade booths and meet people." },
+      { "ul": ["Pick a nickname and answer the short profile quiz. Your avatar is generated from your answers plus your profile ID, so nobody else looks exactly like you.", "Your profile is saved on this device. Keep your profile ID safe; it is how you get back in.", "A wallet is only needed for optional things: minting NFTs, buying outfits, claiming a vendor booth."] }
+    ] },
+    { "id": "controls", "icon": "🎮", "title": "Controls", "blocks": [
+      { "p": "On a computer:" },
+      { "ul": ["Move: W A S D or arrow keys (hold Shift to run), Space to jump", "Look: drag the mouse, zoom with the scroll wheel", "F: use whatever you are standing next to (booths, tents, this info booth)", "E: get in or out of your VW, A/D to steer, P: park it", "1 to 5: emotes · Enter: chat · V: hold to talk (voice)", "Click another player to see their profile card"] },
+      { "p": "On a phone or tablet:" },
+      { "ul": ["Left thumb: joystick to move · drag anywhere else to look around", "Right side buttons: jump, use (✋) and drive", "Hold the 🎙 button to talk once you have joined voice"] }
+    ] },
+    { "id": "profile", "icon": "🧬", "title": "Profile quiz & unique avatars", "blocks": [
+      { "p": "The quiz sets your body type, skin tone, hair, eyes, facial hair, age vibe, build, height, personality and favorite VW. Your personality also picks your idle animation, walk style, emotes and name-tag color." },
+      { "p": "Tiny details like freckles, tattoos, accessories and outfit patterns are rolled from your profile ID. The server rejects any avatar whose exact combination already exists, and an avatar that has been minted as an NFT is locked to the person who minted it. You can keep customizing in the Avatar editor." }
+    ] },
+    { "id": "chat", "icon": "💬", "title": "Chat, voice & staying safe", "blocks": [
+      { "ul": ["Text chat has two tabs: Nearby (people close to you) and Global. Links and wallet addresses are blocked and bad language is filtered.", "Proximity voice: open 🎙 and join. People within {voiceRange} meters can hear you, getting quieter with distance. Your microphone is never turned on by itself. Hold V (or the on-screen button) to talk.", "You can mute, block or turn down any player, or mute everyone. Click a player to do it.", "Nobody from VW FEST will ever DM you first, ask for your seed phrase, or ask you to send crypto to 'verify' anything."] }
+    ] },
+    { "id": "mint", "icon": "✨", "title": "Minting avatars & cars", "blocks": [
+      { "p": "Avatar NFT: mint your unique avatar for {feeUsd}. One NFT per unique avatar, and the traits are stored in the NFT. Everything you pay (minus network fees) buys back and burns $VWFEST: {avatarBurnPct} goes to the burn." },
+      { "p": "Ride NFT (mystery VW): {rideUsd} per mint. The ride is rolled with commit-reveal randomness: before you pay you see the SHA-256 commitment of a secret seed, and the final ride comes from that seed plus your own transaction signature, so the server cannot rig it. Rarity odds:" },
+      { "odds": true },
+      { "p": "Mythic rides are the LOWRIDERS: candy paint, pinstripes, wire wheels with whitewalls, hydraulics that hop, chrome and a diamond VWFEST plate. Owned rides can be driven and parked on the grounds and show on your profile card." }
+    ] },
+    { "id": "shop", "icon": "👕", "title": "Outfit shop", "blocks": [
+      { "p": "The outfit shop sells {itemCount} cosmetic items from {shopMin} to {shopMax}. Pay with $VWFEST and get {discountPct} OFF the dollar price (the tokens are burned from your wallet). Or pay with SOL: {devFeePct} goes to the creator wallet as a fee and the other {burnPct} buys back and burns $VWFEST." }
+    ] },
+    { "id": "burn", "icon": "🔥", "title": "Buyback & burn, and the Burn Tracker", "blocks": [
+      { "p": "Instead of keeping your payment, the system swaps it for $VWFEST on Jupiter and burns it forever (the token supply shrinks). It all happens inside one transaction that you sign yourself. No project wallet ever holds your money." },
+      { "p": "Every burn is recorded publicly. Walk to the Burn Plaza or press the 🔥 Burns button for the total $VWFEST burned and links to each transaction on Solscan so you can verify it. Payments in SOL, other tokens or by card all end the same way: the amount that is not the {devFeePct} creator fee is burned." }
+    ] },
+    { "id": "vendors", "icon": "🏪", "title": "Vendor booths", "blocks": [
+      { "p": "Vendor Row has {boothCount} booth plots behind the stage. Claim one by buying and burning {vendorFeeUsd} of $VWFEST. A booth stays open for {vendorDays} and can be renewed any time (renewals add {vendorDays} to what is left). There is no {discountPct} token discount on booths; paying in $VWFEST burns the full {vendorFeeUsd}, and the {devFeePct} creator fee applies only when you pay in SOL or another token." },
+      { "ul": ["Customize it: name, banner and logo, up to {maxProducts} product pictures, a description, a link (https only) and tent style and colors.", "Visitors walk up to your booth to see the panel. Links open only after a 'you are leaving the site' warning.", "Images must be JPEGs under {imgKb} KB (the game shrinks them for you). Reports from {reportsToHide} different players hide a booth until a moderator reviews it.", "Vendors are independent and fully responsible for what they sell and say. VW FEST does not sell, endorse or guarantee anything on Vendor Row. Buy at your own risk and never send your seed phrase to anyone."] }
+    ] },
+    { "id": "pay", "icon": "💳", "title": "Paying by card, Google or your own wallet", "blocks": [
+      { "ul": ["Have a Solana wallet (Phantom, Solflare…)? Connect it when you buy. You can pay in SOL, in $VWFEST, or in tokens like USDC and BONK (swapped inside the same transaction).", "No wallet? Use Entry / Mint: sign in with Google and a wallet is created for you that only you control. Then add about {entryUsd} of SOL with a card, Apple Pay or Google Pay through a payment partner, or send crypto from an exchange. You will see exactly what is burned and what the network fee is before you sign anything.", "Card partners may ask you to verify your identity and charge their own fees. Entry / Mint is a purchase of your NFT, not a donation."] }
+    ] },
+    { "id": "wallet", "icon": "🛡️", "title": "Wallet safety tips", "blocks": [
+      { "ul": ["NEVER share your seed phrase or private key. This site will never ask for it.", "Always read what your wallet says before you approve. A real purchase here shows a burn of $VWFEST and, for NFTs, the NFT being created for you.", "Only use the address in your browser bar. Be careful with look-alike sites and anyone sending you links.", "If you use the Google wallet, back it up: Entry / Mint has a 'backup & recovery' section where you can export your key into Phantom or Solflare.", "Nothing here is financial advice. $VWFEST has no promised value."] }
+    ] },
+    { "id": "arcade", "icon": "🕹️", "title": "Arcade game booths", "blocks": [
+      { "p": "Walk up to a game booth and press F to open the game in a new tab. All games are free and use a nickname only:" },
+      { "games": true }
+    ] },
+    { "id": "faq", "icon": "❓", "title": "FAQ", "blocks": [
+      { "q": "Do I need a wallet to play?", "a": "No. Walking around, chat, voice and the arcade are free. You only need a wallet to buy things." },
+      { "q": "Where does my payment go?", "a": "The part that is not the creator fee is swapped for $VWFEST and burned in the same transaction you sign: {avatarBurnPct} for avatar mints and for $VWFEST payments, {burnPct} for SOL or token payments in the shop, rides and booths." },
+      { "q": "Why can't I use my avatar?", "a": "Avatars are unique. If someone minted the exact same look it is locked to them; change one trait in the editor." },
+      { "q": "Why is a purchase disabled?", "a": "Purchases are switched on by the team once everything is ready. When off, everything else still works." },
+      { "q": "How many people fit?", "a": "{maxPlayers} at a time. If the grounds are full you will see a waiting screen; try again in a minute." },
+      { "q": "How do I report a booth or a player?", "a": "Use the Report button on a booth panel. Moderators can hide or remove any booth." }
+    ] }
+  ]
+}

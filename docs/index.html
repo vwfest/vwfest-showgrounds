@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob: https://*.onrender.com https://vwfestmemecoin.com; connect-src 'self' https://*.onrender.com wss://*.onrender.com https://lite-api.jup.ag https://api.coinbase.com; media-src 'self' blob:; worker-src 'self' blob:; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>VW FEST SHOW GROUNDS — free 3D hangout for the $VWFEST community</title>
+<meta name="description" content="Walk the VW FEST SHOW GROUNDS in your browser: air-cooled show cars, a stage, swap meet, arcade booths, chat and proximity voice with up to 150 people. Free, no sign-up.">
+<link rel="icon" href="https://vwfestmemecoin.com/gallery/favicons/favicon.png">
+<link rel="stylesheet" href="style.css?v=1">
+</head>
+<body>
+<canvas id="c" aria-label="VW FEST Show Grounds 3D world"></canvas>
+<div id="join" class="screen"><div class="panel"><div class="logo">$VWFEST <span>SHOW GROUNDS</span></div><div id="joinbody"></div><p class="howlink"><a id="howLink" href="#">ℹ How it works</a></p></div></div>
+<div id="hudwrap" class="hidden">
+  <div id="topbar"><b class="brand">VW FEST SHOW GROUNDS</b><span id="online">0/150 online</span>
+    <span class="btns"><button id="bProfile" title="My profile">🪪</button><button id="bAvatar" title="Avatar editor">🧍 Avatar</button><button id="bVendors" title="Vendor directory">🏪 Vendors</button><button id="bShop" title="Outfit shop">👕 Shop</button><button id="bGarage" title="Garage &amp; showroom">🚗 Garage</button><button id="bBurn" title="Burn Tracker">🔥 Burns</button><button id="bVoice" title="Proximity voice">🎙 voice</button><button id="bPlayers" title="Players">👥</button><button id="bSet" title="Settings">⚙</button><button id="bHelp" title="Help">?</button></span></div>
+  <div id="chat"><div class="tabs"><button data-tab="near" class="on">Nearby</button><button data-tab="all">Global 🌐</button><button id="chatToggle" class="min" title="Hide chat">▾</button></div><div id="chatlog" aria-live="polite"></div><div class="chatrow"><input id="chatin" maxlength="140" placeholder="Say something to people nearby…" autocomplete="off" aria-label="Chat message"><button id="chatsend">➤</button></div></div>
+  <div id="emotes"></div><div id="prompt" class="hidden"></div><div id="dbg"></div>
+  <div id="touch"><div id="joy"><div id="joyk"></div></div><div id="tbtns"><button id="bJump">⤒</button><button id="bAct">✋</button><button id="bDrive">🚗</button><button id="bTalk" class="hidden">🎙</button></div></div>
+</div>
+<div id="modals"></div><div id="toasts"></div>
+<noscript><p style="color:#fff;padding:2rem">This 3D world needs JavaScript.</p></noscript>
+<script src="config.js"></script>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
