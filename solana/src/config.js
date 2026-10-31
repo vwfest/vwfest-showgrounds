@@ -41,7 +41,7 @@ function loadConfig(env = process.env) {
   const vwfestMint = mainnet ? (env.VWFEST_MINT || VWFEST_MINT) : (env.DEVNET_VWFEST_MINT || env.VWFEST_MINT || '');
   const devWallet = env.DEV_WALLET || DEV_WALLET;
   // Mainnet uses its own variable so a devnet deploy can never pick up (or spend from) the mainnet authority key; nothing signs with it unless MAINNET_ARMED + MINT_ENABLED are on.
-  const authority = parseSecretKey(mainnet ? (env.MAINNET_AUTHORITY_SECRET_KEY || env.AUTHORITY_SECRET_KEY) : env.AUTHORITY_SECRET_KEY);
+  const authority = parseSecretKey(mainnet ? env.MAINNET_AUTHORITY_SECRET_KEY : env.AUTHORITY_SECRET_KEY);
   const serverSecret = env.SERVER_SECRET || '';
   const cfg = {
     network, mainnet, mainnetArmed,
@@ -92,7 +92,7 @@ function loadConfig(env = process.env) {
       coinbase: env.CDP_API_KEY_ID && env.CDP_API_KEY_SECRET ? { keyId: env.CDP_API_KEY_ID, secret: env.CDP_API_KEY_SECRET } : null,
       stripe: env.STRIPE_SECRET_KEY ? { secret: env.STRIPE_SECRET_KEY } : null,
     },
-    embedded: env.WEB3AUTH_CLIENT_ID ? { provider: 'web3auth', clientId: env.WEB3AUTH_CLIENT_ID, network: env.WEB3AUTH_NETWORK || (mainnet ? 'sapphire_mainnet' : 'sapphire_devnet') }
+    embedded: env.WEB3AUTH_CLIENT_ID ? { provider: 'web3auth', clientId: env.WEB3AUTH_CLIENT_ID, network: mainnet ? 'sapphire_mainnet' : 'sapphire_devnet' }
       : env.PRIVY_APP_ID ? { provider: 'privy', appId: env.PRIVY_APP_ID, clientId: env.PRIVY_CLIENT_ID || '' } : null,
     privyVerificationKey: env.PRIVY_VERIFICATION_KEY || '',
     explorer(id, kind = 'tx') { const q = network === 'devnet' ? '?cluster=devnet' : ''; return network === 'localnet' ? null : `https://solscan.io/${kind}/${id}${q}`; },

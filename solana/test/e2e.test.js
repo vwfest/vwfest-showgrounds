@@ -140,7 +140,7 @@ test('restart: replay protection + burn tracker + minted traits survive via the 
 });
 
 test('mainnet disarmed: quoting allowed (simulation), confirming/granting refused', async (t) => {
-  const env = testEnv({ SOLANA_NETWORK: 'mainnet-beta', FIXED_SOL_USD: '100' }); const sg = new Solana({ env, prices: { solUsd: async () => ({ usd: 100 }), vwfestUsd: async () => ({ usd: 0.00002 }), tokenUsd: async () => 1, jupQuote: async () => ({ outAmount: '1000000', otherAmountThreshold: '970000', priceImpactPct: '0' }) }, conn: {} });
+  const env0 = testEnv({ SOLANA_NETWORK: 'mainnet-beta', FIXED_SOL_USD: '100' }); const env = { ...env0, MAINNET_AUTHORITY_SECRET_KEY: env0.AUTHORITY_SECRET_KEY }; const sg = new Solana({ env, prices: { solUsd: async () => ({ usd: 100 }), vwfestUsd: async () => ({ usd: 0.00002 }), tokenUsd: async () => 1, jupQuote: async () => ({ outAmount: '1000000', otherAmountThreshold: '970000', priceImpactPct: '0' }) }, conn: {} });
   assert.equal(sg.flags().enabled, false); assert.equal(sg.flags().simulateOnly, true);
   const q = await sg.quote({ wallet: Keypair.generate().publicKey.toBase58(), kind: 'vendor', method: 'vwfest' }); assert.equal(q.paidUsd, 30);
   assert.equal((await sg.confirmPayment({ quoteId: q.id, signature: '1'.repeat(88), wallet: q.wallet })).ok, false);

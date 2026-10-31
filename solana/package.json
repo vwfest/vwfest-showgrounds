@@ -5,7 +5,9 @@
   "description": "Non-custodial Solana payments, burns and NFT minting for VW FEST SHOW GROUNDS",
   "main": "index.js",
   "type": "commonjs",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "test": "node --test --test-force-exit --test-concurrency=1 test/*.test.js",
     "test:e2e": "node --test --test-force-exit test/e2e.test.js",
@@ -19,6 +21,10 @@
     "tweetnacl": "^1.0.3"
   },
   "devDependencies": {
-    "litesvm": "latest"
+    "litesvm": "1.6.1"
+  },
+  "overrides": {
+    "uuid": "^11.1.1",
+    "stream-json": "^3.8.0"
   }
 }
