@@ -493,17 +493,15 @@ async function init() {
   await chain.init({ env: process.env, db: require('./lib/db').pool() }); // one shared TLS-verified pg pool; memory-only without DATABASE_URL
   chain.mountRoutes(chainRouter, { express, rateLimit, allowedOrigins: [...ORIGINS] });
   await vendors.init(); await rides.init(); await profiles.init(); await nftav.init();
-  try { // moderation survives restarts: the same database as the profiles, else MOD_FILE (a path on a persistent disk), else memory only
-    const { dbStore, fileStore } = require('./lib/moderation'); const schema = (process.env.DB_SCHEMA || 'showgrounds').replace(/[^a-z0-9_]/gi, '');
-    const store = profiles.q ? await dbStore(profiles.q, schema).init() : process.env.MOD_FILE ? fileStore(process.env.MOD_FILE) : null;
-    if (store) console.log(`[moderation] ${await mod.attach(store)} active mutes/bans restored (${profiles.q ? 'database' : 'file'})`); else console.warn('[moderation] memory only: mutes and bans are lost on restart (set DATABASE_URL or MOD_FILE)');
-  } catch (e) { console.error('[moderation] persistence unavailable, memory only:', String(e.message).slice(0, 120)); }
+  try { await require('./lib/moderation').setupModeration(mod, { q: profiles.q, env: process.env, schema: process.env.DB_SCHEMA || 'showgrounds', prod: PROD }); } // bans/mutes survive restarts: the profiles database, else MOD_FILE, else memory (production fails closed)
+  catch (e) { if (e && e.fatal) { process.exitCode = 1; throw e; } console.error('[moderation]', e); }
   if (profiles.q) require('./lib/rls').enableRls(profiles.q, (process.env.DB_SCHEMA || 'showgrounds').replace(/[^a-z0-9_]/gi, '')).then((t) => t.length && console.log('[rls] enabled on', t.join(', '))); // best-effort, never blocks boot
 }
 if (require.main === module) {
   init().then(() => {
     server.listen(PORT, '0.0.0.0', () => console.log(`[showgrounds] listening on ${PORT} (cap ${cfg.maxPlayers}, purchases ${mint.enabled ? 'ENABLED on ' + NETWORK : 'off: ' + mint.reason}, SOL shop ${mint.devWallet ? 'on' : 'off (DEV_WALLET unset)'})`));
-  });
+
+  }).catch((e) => { console.error('FATAL: startup failed:', String((e && e.message) || e).slice(0, 200)); process.exit(1); }); // never listen half-configured
   process.on('SIGTERM', () => { server.close(); require('./lib/db').end().catch(() => {}); setTimeout(() => process.exit(0), 500).unref(); });
 }
 module.exports = { rpcGuard, requireProof: () => REQUIRE_PROOF, mod, iceServers, cleanSignal, dj, nftav, app, server, hub, burns, mint, cfg, profiles, rides, pay, vendors, vcfg, guideValues, init };
