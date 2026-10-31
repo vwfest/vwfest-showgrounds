@@ -31,8 +31,9 @@ const num = (v, d) => (v === undefined || v === '' || !Number.isFinite(+v) ? d :
 const PORT = num(process.env.PORT, 3000);
 // ONE network decision shared with solana/ (it reads SOLANA_NETWORK || MINT_NETWORK). They must agree, and a missing/typo'd value falls back to devnet (no real money), never to mainnet.
 const NETS = ['mainnet-beta', 'devnet', 'localnet'];
-if (process.env.SOLANA_NETWORK && process.env.MINT_NETWORK && process.env.SOLANA_NETWORK !== process.env.MINT_NETWORK) { console.error(`FATAL: SOLANA_NETWORK (${process.env.SOLANA_NETWORK}) and MINT_NETWORK (${process.env.MINT_NETWORK}) disagree.`); process.exit(1); }
-const NETWORK = NETS.includes(process.env.SOLANA_NETWORK || process.env.MINT_NETWORK) ? (process.env.SOLANA_NETWORK || process.env.MINT_NETWORK) : 'devnet';
+const DISAGREE = process.env.SOLANA_NETWORK && process.env.MINT_NETWORK && process.env.SOLANA_NETWORK !== process.env.MINT_NETWORK;
+if (DISAGREE) console.error(`[network] SOLANA_NETWORK (${process.env.SOLANA_NETWORK}) and MINT_NETWORK (${process.env.MINT_NETWORK}) disagree: using devnet (no real money) until they match.`);
+const NETWORK = !DISAGREE && NETS.includes(process.env.SOLANA_NETWORK || process.env.MINT_NETWORK) ? (process.env.SOLANA_NETWORK || process.env.MINT_NETWORK) : 'devnet';
 if (!NETS.includes(process.env.SOLANA_NETWORK || process.env.MINT_NETWORK)) console.warn('[network] SOLANA_NETWORK/MINT_NETWORK missing or invalid: using devnet');
 process.env.SOLANA_NETWORK = NETWORK; process.env.MINT_NETWORK = NETWORK;
 const RPC_DEFAULT = { 'mainnet-beta': 'https://api.mainnet-beta.solana.com', devnet: 'https://api.devnet.solana.com', localnet: 'http://127.0.0.1:8899' };
@@ -87,6 +88,7 @@ let burnVer = -1;
 // ---- http ----
 const app = express();
 app.set('trust proxy', 1); app.disable('x-powered-by');
+const { clientIp, useClientIp } = require('./lib/clientip'); useClientIp(app); // real client IP (CF-Connecting-IP) for every per-IP limiter: XFF's last entry is the Cloudflare EDGE, so everyone would share one bucket
 const OWN_WS = (() => { try { const u = new URL(publicUrl); return u.protocol === 'https:' ? ['wss://' + u.host] : []; } catch { return []; } })(); // this server only (was wss://*.onrender.com: any Render app)
 const RPC_HOSTS = ["'self'", ...(() => { try { return [new URL(process.env.PUBLIC_RPC_URL || RPC_DEFAULT[NETWORK]).origin]; } catch { return []; } })()];
 const W3A = ['wss://*.web3auth.io', 'https://*.web3auth.io', 'https://*.web3auth.com', 'https://*.authnetwork.dev', 'https://*.toruslabs.com', 'https://*.tor.us', 'https://*.metamask.io']; // only allowed when an embedded-wallet client id is configured
@@ -235,7 +237,7 @@ app.use((req, res) => res.status(404).type('text').send('Not found'));
 // ---- websocket ----
 const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true, maxPayload: 6144, perMessageDeflate: false });
-const ipOf = (req) => String((req.headers['x-forwarded-for'] || '').split(',').pop().trim() || req.socket.remoteAddress || '?').slice(0, 64);
+const ipOf = (req) => String(clientIp(req) || '?').slice(0, 64);
 server.on('upgrade', (req, socket, head) => {
   const reject = (code, msg) => { socket.write(`HTTP/1.1 ${code} ${msg}\r\nConnection: close\r\n\r\n`); socket.destroy(); };
   let url; try { url = new URL(req.url, 'http://x'); } catch { return reject(400, 'Bad Request'); }
@@ -423,6 +425,7 @@ async function init() {
   await chain.init({ env: process.env, db: require('./lib/db').pool() }); // one shared TLS-verified pg pool; memory-only without DATABASE_URL
   chain.mountRoutes(chainRouter, { express, rateLimit, allowedOrigins: [...ORIGINS] });
   await vendors.init(); await rides.init(); await profiles.init(); await nftav.init();
+  if (profiles.q) require('./lib/rls').enableRls(profiles.q, (process.env.DB_SCHEMA || 'showgrounds').replace(/[^a-z0-9_]/gi, '')).then((t) => t.length && console.log('[rls] enabled on', t.join(', '))); // best-effort, never blocks boot
 }
 if (require.main === module) {
   init().then(() => {

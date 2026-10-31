@@ -3,7 +3,7 @@
 // vendor plot-hold DoS, entry-quote discount abuse, WebSocket floods/garbage, forged logins, admin endpoint, purchase-transaction inspection.
 const path = require('path'); const ROOT = path.join(__dirname, '..');
 const assert = require('assert'); const WebSocket = require('ws');
-const PORT = 3299, BASE = `http://127.0.0.1:${PORT}`;
+const PORT = 3301, BASE = `http://127.0.0.1:${PORT}`;
 Object.assign(process.env, { SERVER_SECRET: 'probe-secret-0123456789-0123456789abcdef', PORT: String(PORT), MINT_NETWORK: 'devnet', MINT_ENABLED: '1', VWFEST_MINT: '9ktd1qdiu9wRFhxHPczWKrKRGmJb9nkanv2Zz27Rpump', DEV_WALLET: 'DV4gtG2VpnDtFUVFnnrE5YM3A6LrV5qAcdfaaUwLFRok', FIXED_SOL_USD: '150', ADMIN_SECRET: 'probe-admin-secret-0123456789', MAX_CONNS_PER_IP: '60', PROFILE_CREATE_PER_HOUR: '500', DJ_SLOT_MS: '60000', SOLANA_RPC_URL: 'http://127.0.0.1:1',  VENDOR_FEE_USD: '30' });
 const S = require('../server.js'); const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const res = []; const rec = (id, sev, name, ok, note = '') => { res.push({ id, sev, name, ok, note }); if (!ok) process.exitCode = 1; console.log(ok ? 'ok  ' : 'FAIL', `[${sev}]`, id, name, ok ? '' : note); };
@@ -74,6 +74,15 @@ const join = async (nick) => { const c = await client(); await c.wait('hi'); c.s
   for (const [name, t, want] of cases) rec('PAY', 'high', 'tx inspection: ' + name, inspect(t, base).ok === want);
   const F = new Facade(); await F.init({ env: { NODE_ENV: 'production', CHAIN_FAKE: '1', MINT_NETWORK: 'devnet', MINT_ENABLED: '1', VWFEST_MINT: MINT, SERVER_SECRET: 'x'.repeat(40) } }); rec('PAY', 'high', 'CHAIN_FAKE is ignored when NODE_ENV=production', F.fake === false);
   const F2 = new Facade(); await F2.init({ env: { CHAIN_FAKE: '1', MINT_NETWORK: 'mainnet-beta', MINT_ENABLED: '1', MINT_MAINNET: '1', VWFEST_MINT: MINT, SERVER_SECRET: 'x'.repeat(40) } }); rec('PAY', 'high', 'CHAIN_FAKE is ignored on mainnet', F2.fake === false);
+  // ---- real client IP behind Cloudflare/Render, RLS helper
+  { const { clientIp } = require('../lib/clientip'); process.env.TRUST_CF = '1'; const rq = (h) => ({ headers: h, socket: { remoteAddress: '10.0.0.1' }, ip: '172.64.0.1' });
+    rec('IP', 'high', 'CF-Connecting-IP is the client address', clientIp(rq({ 'cf-connecting-ip': '203.0.113.7', 'x-forwarded-for': '1.2.3.4, 203.0.113.7, 172.64.0.1' })) === '203.0.113.7');
+    rec('IP', 'high', 'without CF header: entry before the edge, never the (spoofable) first entry', clientIp(rq({ 'x-forwarded-for': '6.6.6.6, 203.0.113.9, 172.64.0.1' })) === '203.0.113.9');
+    rec('IP', 'high', 'spoofed CF header with a non-IP value is ignored', clientIp(rq({ 'cf-connecting-ip': 'evil', 'x-forwarded-for': '203.0.113.9, 172.64.0.1' })) === '203.0.113.9'); delete process.env.TRUST_CF;
+    rec('IP', 'info', 'outside Render/TRUST_CF the socket/req.ip is used and headers are ignored', clientIp(rq({ 'cf-connecting-ip': '203.0.113.7' })) === '172.64.0.1'); }
+  { const { enableRls } = require('../lib/rls'); const ran = []; const done = await enableRls(async (sql) => { ran.push(sql); return { rows: [{ table_name: 'profiles' }, { table_name: 'we"ird' }] }; }, 'showgrounds');
+    rec('RLS', 'medium', 'RLS is enabled (no policies) on every table in the schema, identifiers quoted', done.length === 2 && ran.some((x) => x === 'ALTER TABLE "showgrounds"."profiles" ENABLE ROW LEVEL SECURITY') && ran.some((x) => x.includes('"we""ird"')));
+    const ok = await enableRls(async () => { throw new Error('boom'); }, 'showgrounds'); rec('RLS', 'low', 'RLS failures are non-fatal', Array.isArray(ok) && ok.length === 0); }
   console.log(res.every((r) => r.ok) ? `all ${res.length} audit tests passed` : 'AUDIT TESTS FAILED');
   process.exit(process.exitCode || 0);
 })().catch((e) => { console.error('PROBE ERROR', e); process.exit(2); });
