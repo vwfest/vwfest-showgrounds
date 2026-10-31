@@ -10,6 +10,7 @@ import { $, h, clear, modal, toast, fmt } from './dom.js';
 import { buildQuiz, defaultQuiz, buildEditor } from './editor.js';
 import * as UI from './ui.js';
 import * as V from './vendors.js';
+import { walkAngle, walkDir } from './move.mjs';
 import { FIELDS, VIBES, DEFAULT } from '../shared/traits.js';
 
 const CFG0 = window.SG_CONFIG || {}; const onGh = /github\.io$/.test(location.hostname) || location.protocol === 'file:';
@@ -110,7 +111,7 @@ function step(dt) {
     L.hydro = !!(me3.rd && me3.rd.stance === 4) && space; L.y = 0;
   } else {
     const run = keys.has('shift') ? 1.5 : 1; const sp = (mag > 0.05 ? 5.2 * run : 0);
-    if (mag > 0.05) { const a = Math.atan2(ix, iy) + camYaw + Math.PI; const dirx = Math.sin(a), dirz = Math.cos(a); const nx = L.x + dirx * sp * mag * dt, nz = L.z + dirz * sp * mag * dt; [L.x, L.z] = collide(nx, nz, 0.45); let d = a - L.yaw; d = Math.atan2(Math.sin(d), Math.cos(d)); L.yaw += d * Math.min(1, dt * 12); L.speed = sp * mag; } else L.speed = 0;
+    if (mag > 0.05) { const a = walkAngle(ix, iy, camYaw); const [dirx, dirz] = walkDir(ix, iy, camYaw); const nx = L.x + dirx * sp * mag * dt, nz = L.z + dirz * sp * mag * dt; [L.x, L.z] = collide(nx, nz, 0.45); let d = a - L.yaw; d = Math.atan2(Math.sin(d), Math.cos(d)); L.yaw += d * Math.min(1, dt * 12); L.speed = sp * mag; } else L.speed = 0;
     if (space && !L.air) { L.vy = 6.2; L.air = true; } L.vy -= 17 * dt; L.y += L.vy * dt; if (L.y <= 0) { L.y = 0; L.vy = 0; L.air = false; }
   }
   me3.x = L.x; me3.y = L.y; me3.z = L.z; me3.yaw = L.yaw; me3.tx = L.x; me3.tz = L.z; me3.ty = L.y;
