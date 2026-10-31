@@ -8,7 +8,7 @@
   "scripts": {
     "build": "node build.cjs",
     "start": "node server.js",
-    "test": "node test/unit.cjs && node test/move.cjs && node test/api.cjs && node test/guide.cjs && node test/security.cjs && node test/e2e.cjs && node test/purchase.cjs && node test/spots.cjs && node test/nft.cjs && node test/djmath.cjs && node test/dj.cjs && node test/djclient.cjs && node test/credentials.cjs",
+    "test": "node test/unit.cjs && node test/move.cjs && node test/api.cjs && node test/guide.cjs && node test/security.cjs && node test/e2e.cjs && node test/purchase.cjs && node test/spots.cjs && node test/nft.cjs && node test/audit.cjs && node test/txaudit.cjs && node test/djmath.cjs && node test/dj.cjs && node test/djclient.cjs && node test/credentials.cjs",
     "test:security": "node test/security.cjs",
     "test:unit": "node test/unit.cjs",
     "test:guide": "node test/guide.cjs",

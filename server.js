@@ -29,7 +29,12 @@ const REQUIRE_PROOF = process.env.REQUIRE_WALLET_PROOF !== '0';
 const VOICE_RANGE = Number.isFinite(+process.env.VOICE_RANGE) && +process.env.VOICE_RANGE > 0 ? +process.env.VOICE_RANGE : 15;
 const num = (v, d) => (v === undefined || v === '' || !Number.isFinite(+v) ? d : +v);
 const PORT = num(process.env.PORT, 3000);
-const NETWORK = ['mainnet-beta', 'devnet', 'localnet'].includes(process.env.MINT_NETWORK) ? process.env.MINT_NETWORK : 'mainnet-beta';
+// ONE network decision shared with solana/ (it reads SOLANA_NETWORK || MINT_NETWORK). They must agree, and a missing/typo'd value falls back to devnet (no real money), never to mainnet.
+const NETS = ['mainnet-beta', 'devnet', 'localnet'];
+if (process.env.SOLANA_NETWORK && process.env.MINT_NETWORK && process.env.SOLANA_NETWORK !== process.env.MINT_NETWORK) { console.error(`FATAL: SOLANA_NETWORK (${process.env.SOLANA_NETWORK}) and MINT_NETWORK (${process.env.MINT_NETWORK}) disagree.`); process.exit(1); }
+const NETWORK = NETS.includes(process.env.SOLANA_NETWORK || process.env.MINT_NETWORK) ? (process.env.SOLANA_NETWORK || process.env.MINT_NETWORK) : 'devnet';
+if (!NETS.includes(process.env.SOLANA_NETWORK || process.env.MINT_NETWORK)) console.warn('[network] SOLANA_NETWORK/MINT_NETWORK missing or invalid: using devnet');
+process.env.SOLANA_NETWORK = NETWORK; process.env.MINT_NETWORK = NETWORK;
 const RPC_DEFAULT = { 'mainnet-beta': 'https://api.mainnet-beta.solana.com', devnet: 'https://api.devnet.solana.com', localnet: 'http://127.0.0.1:8899' };
 const cfg = {
   maxPlayers: num(process.env.MAX_PLAYERS, 150), maxConns: num(process.env.MAX_CONNS, 400), maxConnsPerIp: num(process.env.MAX_CONNS_PER_IP, 25),
@@ -48,7 +53,7 @@ if (process.env.WEB3AUTH_CLIENT_ID === 'off') delete process.env.WEB3AUTH_CLIENT
 if (!process.env.PUBLIC_BASE_URL) process.env.PUBLIC_BASE_URL = publicUrl;
 // ---- avatar-minting config. OFF unless MINT_ENABLED=1 (and, on mainnet, MINT_MAINNET=1 as a second deliberate switch). ----
 const mint = {
-  network: NETWORK, rpcUrl: process.env.RPC_URL || process.env.SOLANA_RPC_URL || RPC_DEFAULT[NETWORK], mint: process.env.VWFEST_MINT || '', decimals: num(process.env.VWFEST_DECIMALS, 6),
+  network: NETWORK, rpcUrl: process.env.RPC_URL || process.env.SOLANA_RPC_URL || RPC_DEFAULT[NETWORK], mint: (NETWORK === 'mainnet-beta' ? process.env.VWFEST_MINT : (process.env.DEVNET_VWFEST_MINT || process.env.VWFEST_MINT)) || '', decimals: num(process.env.VWFEST_DECIMALS, 6),
   feeUsd: num(process.env.MINT_FEE_USD, 5), rideUsd: num(process.env.RIDE_MINT_USD, 5), slippageBps: Math.min(Math.max(num(process.env.MINT_SLIPPAGE_BPS, 50), 10), 500),
   devWallet: (() => { const w = process.env.DEV_WALLET || require('./solana/src/config').loadConfig(process.env).devWallet; return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(w || '') ? w : ''; })(), devFeePct: Math.min(Math.max(num(process.env.DEV_FEE_PCT, 10), 0), 50), discountPct: Math.min(Math.max(num(process.env.VWFEST_DISCOUNT_PCT, 50), 0), 90), devnetTokensPerUsd: num(process.env.DEVNET_TOKENS_PER_USD, 10), fixedSolUsd: num(process.env.FIXED_SOL_USD, 0),
   devnetBurn: num(process.env.DEVNET_BURN_TOKENS, 1),
@@ -82,6 +87,7 @@ let burnVer = -1;
 // ---- http ----
 const app = express();
 app.set('trust proxy', 1); app.disable('x-powered-by');
+const OWN_WS = (() => { try { const u = new URL(publicUrl); return u.protocol === 'https:' ? ['wss://' + u.host] : []; } catch { return []; } })(); // this server only (was wss://*.onrender.com: any Render app)
 const RPC_HOSTS = ["'self'", ...(() => { try { return [new URL(process.env.PUBLIC_RPC_URL || RPC_DEFAULT[NETWORK]).origin]; } catch { return []; } })()];
 const W3A = ['wss://*.web3auth.io', 'https://*.web3auth.io', 'https://*.web3auth.com', 'https://*.authnetwork.dev', 'https://*.toruslabs.com', 'https://*.tor.us', 'https://*.metamask.io']; // only allowed when an embedded-wallet client id is configured
 app.use(helmet({
@@ -90,7 +96,7 @@ app.use(helmet({
     directives: {
       defaultSrc: ["'self'"], scriptSrc: ["'self'", "'wasm-unsafe-eval'"], styleSrc: ["'self'"], styleSrcAttr: ["'unsafe-inline'"], // inline style ATTRIBUTES only (the Web3Auth frame sets them); <style> elements stay blocked
        imgSrc: ["'self'", 'data:', 'blob:', 'https://vwfestmemecoin.com'], fontSrc: ["'self'", 'data:'],
-      connectSrc: [...RPC_HOSTS, ...(mint.embedded ? W3A : []), 'wss://*.onrender.com', 'https://lite-api.jup.ag', 'https://api.coinbase.com', ...(PROD ? [] : ['ws://127.0.0.1:*', 'ws://localhost:*'])],
+      connectSrc: [...RPC_HOSTS, ...(mint.embedded ? W3A : []), ...OWN_WS, 'https://lite-api.jup.ag', 'https://api.coinbase.com', ...(PROD ? [] : ['ws://127.0.0.1:*', 'ws://localhost:*'])],
       frameSrc: mint.embedded ? W3A : ["'none'"], workerSrc: ["'self'", 'blob:'], mediaSrc: ["'self'"], objectSrc: ["'none'"], baseUri: ["'none'"], formAction: ["'none'"], frameAncestors: ["'self'", 'https://vwfest.github.io', 'https://vwfestmemecoin.com'],
       upgradeInsecureRequests: PROD ? [] : null,
     },
@@ -186,7 +192,7 @@ const RPC_READ = new Set(['getLatestBlockhash', 'getBalance', 'getAccountInfo', 
 const budgets = new Map();
 const budget = (key, limit, windowMs = 60e3) => { const now = Date.now(); const a = (budgets.get(key) || []).filter((t) => now - t < windowMs); if (a.length >= limit) { budgets.set(key, a); return false; } a.push(now); budgets.set(key, a); return true; };
 setInterval(() => { const now = Date.now(); for (const [k, a] of budgets) if (!a.length || now - a[a.length - 1] > 120e3) budgets.delete(k); }, 60e3).unref();
-app.post('/api/rpc', express.json({ limit: '8kb' }), async (req, res) => {
+app.post('/api/rpc', rateLimit({ windowMs: 60e3, limit: num(process.env.RPC_PROXY_PER_MIN, 90), standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests' } }), express.json({ limit: '8kb' }), async (req, res) => {
   const o = req.get('origin'); if (!o || !ORIGINS.has(o)) return res.status(403).json({ error: 'forbidden' });
   const b = req.body; if (!b || typeof b !== 'object' || Array.isArray(b) || !Array.isArray(b.params) || !RPC_READ.has(b.method) || b.params.length > 4 || JSON.stringify(b.params).length > 4000) return res.status(400).json({ error: 'method not allowed' });
   try {
@@ -354,7 +360,7 @@ async function handle(c, m) {
         if (kind === 'avatar') {
           if (method !== 'sol') return hub.json(c, { t: 'quoteerr', why: 'Avatar minting is paid in SOL (100% is used to buy back and burn $VWFEST).' });
           code = avatar.pack(p.av); if (burns.codes.has(code)) return hub.json(c, { t: 'quoteerr', why: 'This exact avatar has already been minted. Change a trait to mint a new one.' });
-          usd = mint.feeUsd; devPct = 0; uri = `${publicUrl}/nft/${code}.json`; extra = { name: 'VW FEST Avatar', code }; entry = m.entry === true;
+          usd = mint.feeUsd; devPct = 0; uri = `${publicUrl}/nft/${code}.json`; extra = { name: 'VW FEST Avatar', code }; entry = m.entry === true && onramp.providers().length > 0; // the reduced-burn entry quote only exists when an on-ramp can actually deliver the funds (otherwise any client could ask for it)
         } else if (kind === 'shop') {
           item = SHOP.find((x) => x.id === m.item); if (!item) return hub.json(c, { t: 'quoteerr', why: 'Unknown item.' });
           if (p.prof.items.has(item.id)) return hub.json(c, { t: 'quoteerr', why: 'You already own this.' });

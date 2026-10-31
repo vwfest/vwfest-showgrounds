@@ -101,7 +101,8 @@ function bindTouch() {
   base.addEventListener('pointerdown', (e) => { id = e.pointerId; base.setPointerCapture(id); const r = base.getBoundingClientRect(); cx = r.left + r.width / 2; cy = r.top + r.height / 2; mv(e); });
   const mv = (e) => { let dx = (e.clientX - cx) / 50, dy = (e.clientY - cy) / 50; const l = Math.hypot(dx, dy); if (l > 1) { dx /= l; dy /= l; } joy.x = dx; joy.y = dy; knob.style.transform = `translate(${dx * 38}px,${dy * 38}px)`; };
   base.addEventListener('pointermove', (e) => { if (e.pointerId === id) mv(e); }); const end = (e) => { if (e.pointerId === id) { id = null; joy.x = joy.y = 0; knob.style.transform = 'translate(0,0)'; } }; base.addEventListener('pointerup', end); base.addEventListener('pointercancel', end);
-  $('#bJump').addEventListener('pointerdown', () => { jump = true; keys.add(' '); }); $('#bJump').addEventListener('pointerup', () => { keys.delete(' '); }); $('#bAct').addEventListener('click', interact); $('#bDrive').addEventListener('click', toggleDrive);
+  const bj = $('#bJump'); bj.addEventListener('pointerdown', () => { jump = true; keys.add(' '); }); const jend = () => keys.delete(' '); for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) bj.addEventListener(ev, jend); // a cancelled/dragged-off touch must not leave Space stuck down
+  { const bp = h('button', { id: 'bPark', class: 'hidden', title: 'Park your ride here', text: '🅿', onclick: () => togglePark() }); $('#bDrive').after(bp); setInterval(() => bp.classList.toggle('hidden', !(joined && L.driving)), 300); } $('#bAct').addEventListener('click', interact); $('#bDrive').addEventListener('click', toggleDrive);
   const talk = $('#bTalk'); talk.addEventListener('pointerdown', (e) => { e.preventDefault(); voice && voice.ptt(true); talk.classList.add('on'); }); const tend = () => { voice && voice.ptt(false); talk.classList.remove('on'); }; talk.addEventListener('pointerup', tend); talk.addEventListener('pointercancel', tend); talk.addEventListener('pointerleave', tend);
 }
 
@@ -131,7 +132,7 @@ function step(dt) {
 }
 function toggleDrive() {
   if (!joined) return; if (L.driving) { L.driving = false; L.speed = 0; L.x += Math.cos(L.heading) * 2.2; L.z -= Math.sin(L.heading) * 2.2; if (me3.rd) net.json({ t: 'park', on: true }); toast('Exited your VW' + (me3.rd ? ' (parked here)' : '')); }
-  else { L.driving = true; L.heading = L.yaw; L.speed = 0; if (me3.rd) net.json({ t: 'park', on: false }); toast('Driving: W/S gas & brake, A/D steer' + (me3.rd && me3.rd.stance === 4 ? ', hold Space = hydraulics!' : '')); }
+  else { L.driving = true; L.heading = L.yaw; L.speed = 0; if (me3.rd) net.json({ t: 'park', on: false }); toast((matchMedia('(pointer: coarse)').matches ? 'Driving: use the stick to steer, 🅿 to park' : 'Driving: W/S gas & brake, A/D steer') + (me3.rd && me3.rd.stance === 4 ? ', hold Space = hydraulics!' : '')); }
 }
 function togglePark() { if (!L.driving) return; toggleDrive(); }
 function doEmote(i) { if (!joined) return; me3.emote = i; me3.emoteT = 0; net.json({ t: 'emote', id: i }); }

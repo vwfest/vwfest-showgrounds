@@ -1,11 +1,11 @@
 // Non-custodial purchase builder (lazy chunk). The player's own wallet signs; no project wallet ever holds funds.
 //  tx = [compute budget] + [Jupiter swap SOL -> $VWFEST for the swap share] + [SOL fee to creator wallet, if any] + SPL burn + [Core NFT create] + memo
+import { audit, sameMessage } from './txaudit.mjs';
 import { Connection, PublicKey, Keypair, TransactionInstruction, TransactionMessage, VersionedTransaction, SystemProgram, ComputeBudgetProgram, AddressLookupTableAccount } from '@solana/web3.js';
 
 const TOKEN = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'), TOKEN22 = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
 const ATA_PROG = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'), MEMO = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
 const CORE = new PublicKey('CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d'), JUP = 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4', WSOL = 'So11111111111111111111111111111111111111112';
-const ALLOWED = new Set([ComputeBudgetProgram.programId.toBase58(), SystemProgram.programId.toBase58(), TOKEN.toBase58(), TOKEN22.toBase58(), ATA_PROG.toBase58(), JUP]);
 const u64 = (n) => { const b = new Uint8Array(8); new DataView(b.buffer).setBigUint64(0, BigInt(n), true); return b; };
 const str = (s) => { const e = new TextEncoder().encode(s); const l = new Uint8Array(4); new DataView(l.buffer).setUint32(0, e.length, true); return [l, e]; };
 const cat = (...a) => { const f = a.flat(); const n = f.reduce((s, x) => s + x.length, 0); const o = new Uint8Array(n); let p = 0; for (const x of f) { o.set(x, p); p += x.length; } return o; };
@@ -16,26 +16,16 @@ export async function connectWallet() { const p = getProvider(); if (!p) throw n
 const ix = (j) => new TransactionInstruction({ programId: new PublicKey(j.programId), keys: j.accounts.map((a) => ({ pubkey: new PublicKey(a.pubkey), isSigner: a.isSigner, isWritable: a.isWritable })), data: Uint8Array.from(atob(j.data), (c) => c.charCodeAt(0)) });
 async function jget(url) { const r = await fetch(url); if (!r.ok) throw new Error('Price service error (' + r.status + ')'); return r.json(); }
 
-// Audit Jupiter's returned instructions before the wallet ever sees them.
-function audit(list, maxLamports) {
-  let out = 0n;
-  for (const i of list) {
-    if (!ALLOWED.has(i.programId)) throw new Error('Swap route used an unexpected program (' + i.programId.slice(0, 6) + '…). Aborted for your safety.');
-    if (i.programId === SystemProgram.programId.toBase58()) { const d = Uint8Array.from(atob(i.data), (c) => c.charCodeAt(0)); const dv = new DataView(d.buffer); const kind = dv.getUint32(0, true);
-      if (kind === 2) out += dv.getBigUint64(4, true); else if (kind === 0) out += dv.getBigUint64(4, true); else if (kind !== 8 && kind !== 9) throw new Error('Unexpected system instruction in swap route.'); }
-  }
-  if (out > maxLamports) throw new Error('Swap route would move more SOL than quoted. Aborted.');
-}
 // Funding sources: 'sol' (Jupiter ExactIn SOL -> $VWFEST), 'token' (Jupiter ExactOut: any SPL token -> exactly the burn amount), 'direct' ($VWFEST already held / test mode).
 //  opts.sweepLamports: swap this much SOL instead of the quoted amount (Entry flow: burn what the on-ramp delivered, minus fees).
 //  opts.payToken: { mint, sym, dec } to pay with an SPL token instead of SOL (e.g. USDC, BONK).
 async function build({ q, cfg, conn, user, mint, tokenProg, ata, swapLamports, payToken, onStep }) {
   const ixs = []; const alts = []; let burn = BigInt(q.burnRaw), swapInfo = null;
   const budget = ComputeBudgetProgram.setComputeUnitLimit({ units: 600000 });
-  const swapIxs = async (qs, maxLamports) => {
+  const swapIxs = async (qs, maxLamports, maxTokenIn = 0n) => {
     const res = await fetch(`${cfg.jupiter}/swap-instructions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ quoteResponse: qs, userPublicKey: user.toBase58(), wrapAndUnwrapSol: true, dynamicComputeUnitLimit: true, dynamicSlippage: false }) });
     if (!res.ok) throw new Error('Swap service error (' + res.status + ')'); const j = await res.json(); if (j.error) throw new Error('Swap service: ' + j.error);
-    const all = [...(j.computeBudgetInstructions || []), ...(j.setupInstructions || []), j.swapInstruction, ...(j.cleanupInstruction ? [j.cleanupInstruction] : [])]; audit(all, maxLamports);
+    const all = [...(j.computeBudgetInstructions || []), ...(j.setupInstructions || []), j.swapInstruction, ...(j.cleanupInstruction ? [j.cleanupInstruction] : [])]; audit(all, maxLamports, { user: user.toBase58(), maxTokenIn });
     for (const a of j.addressLookupTableAddresses || []) { const acc = await conn.getAccountInfo(new PublicKey(a)); if (acc) alts.push(new AddressLookupTableAccount({ key: new PublicKey(a), state: AddressLookupTableAccount.deserialize(acc.data) })); }
     for (const i of j.computeBudgetInstructions || []) ixs.push(ix(i)); for (const i of j.setupInstructions || []) ixs.push(ix(i)); ixs.push(ix(j.swapInstruction)); if (j.cleanupInstruction) ixs.push(ix(j.cleanupInstruction));
   };
@@ -49,7 +39,7 @@ async function build({ q, cfg, conn, user, mint, tokenProg, ata, swapLamports, p
     const tprog = tinfo.owner.equals(TOKEN22) ? TOKEN22 : TOKEN; const [tata] = PublicKey.findProgramAddressSync([user.toBytes(), tprog.toBytes(), tmint.toBytes()], ATA_PROG);
     const bal = await conn.getTokenAccountBalance(tata).catch(() => null); const have = bal ? BigInt(bal.value.amount) : 0n;
     if (have < maxIn) throw new Error(`You need up to ${Number(maxIn) / 10 ** payToken.dec} ${payToken.sym} in this wallet (you have ${Number(have) / 10 ** payToken.dec}).`);
-    await swapIxs(qs, 6000000n); burn = target; swapInfo = { expectOut: target, minOut: target, inSym: payToken.sym, maxIn, inDec: payToken.dec };
+    await swapIxs(qs, 6000000n, maxIn); burn = target; swapInfo = { expectOut: target, minOut: target, inSym: payToken.sym, maxIn, inDec: payToken.dec };
   } else if (q.method === 'sol' && q.swap) {
     onStep && onStep('Getting the best $VWFEST route from Jupiter…');
     const sw = swapLamports;
@@ -60,7 +50,7 @@ async function build({ q, cfg, conn, user, mint, tokenProg, ata, swapLamports, p
     ixs.push(budget);
     if (q.method === 'vwfest' || !q.swap) { // paying in tokens you already hold (or test-network mode)
       const bal = await conn.getTokenAccountBalance(ata).catch(() => null); const have = bal ? BigInt(bal.value.amount) : 0n;
-      if (have < burn) throw new Error(`You need ${Number(burn) / 10 ** cfg.decimals} $VWFEST in this wallet, but it holds ${Number(have) / 10 ** cfg.decimals}.`);
+      if (have < burn) throw new Error(cfg.network !== 'mainnet-beta' && !q.swap ? `Test network (${cfg.network}): purchases burn TEST $VWFEST (no real money, and no swap exists on a test network). This wallet holds ${Number(have) / 10 ** cfg.decimals} test $VWFEST and needs ${Number(burn) / 10 ** cfg.decimals}. Ask the team for test tokens.` : `You need ${Number(burn) / 10 ** cfg.decimals} $VWFEST in this wallet, but it holds ${Number(have) / 10 ** cfg.decimals}.`);
     }
   }
   if (BigInt(q.devLamports) > 0n) ixs.push(SystemProgram.transfer({ fromPubkey: user, toPubkey: new PublicKey(q.devWallet), lamports: BigInt(q.devLamports) }));
@@ -95,7 +85,9 @@ export async function prepare({ q, cfg, server, pubkey, onStep, payToken, sweep,
 }
 export async function signAndSend(prep, provider, onStep) {
   onStep && onStep('Approve in your wallet…');
-  const signed = await provider.signTransaction(prep.tx); onStep && onStep('Sending…');
+  const signed = await provider.signTransaction(prep.tx);
+  if (!signed || !signed.message || !sameMessage(signed.message.serialize(), prep.tx.message.serialize())) throw new Error('Your wallet returned a different transaction than the one shown. Nothing was sent.'); // re-audit: the signed message must be byte-identical to the audited one
+  onStep && onStep('Sending…');
   const raw = signed.serialize(); const sig = await prep.conn.sendRawTransaction(raw, { skipPreflight: false, maxRetries: 3 });
   onStep && onStep('Confirming on Solana…'); const t0 = Date.now();
   for (;;) {

@@ -90,7 +90,8 @@ export function rideMintDialog(ctx) {
   const { cfg } = ctx; const b = h('div', { class: 'ridemint' });
   b.append(h('p', { text: `Mint a unique VW from the VW Fest Show Grounds Rides collection: model (Beetle, Bus, Karmann Ghia, Thing, Squareback, Baja), paint (candy, metallic, flake, two-tone, patina), wheels, stance and extras. Every ride has a VWFEST plate; some are DIAMOND. The rarest are Mythic LOWRIDERS with candy paint, murals, wire wheels and working hydraulics.` }), h('div', { class: 'row wrap' }, ...cfg.odds.map((o, i) => h('span', { class: 'tier t' + i, text: `${o.tier} ${o.pct}%` }))));
   b.append(h('details', { class: 'small' }, h('summary', { text: 'How the random reveal works (the server can\'t rig it)' }), h('p', { text: 'Before you pay, the server shows a commitment: SHA-256 of a secret seed. Your wallet signature on the mint transaction does not exist until you sign, so nobody can predict it. The ride is rolled from SHA-256(seed + ":" + your transaction signature). After the mint the seed is revealed with the NFT metadata, and anyone can recompute it and check it matches the commitment.' })));
-  b.append(h('div', { class: 'row' }, h('button', { class: 'btn primary', text: `Pay in $VWFEST (${cfg.discountPct}% OFF) · $${(cfg.rideUsd * (1 - cfg.discountPct / 100)).toFixed(2)}`, onclick: () => { ctx.closeTop(); ctx.purchase('ride', { method: 'vwfest' }); } }), h('button', { class: 'btn', text: `Pay in SOL · $${cfg.rideUsd}`, disabled: !cfg.solShopEnabled, onclick: () => { ctx.closeTop(); ctx.purchase('ride', { method: 'sol' }); } })));
+  b.append(h('div', { class: 'row' }, h('button', { class: 'btn primary', text: `Pay in $VWFEST (${cfg.discountPct}% OFF) · $${(cfg.rideUsd * (1 - cfg.discountPct / 100)).toFixed(2)}`, onclick: () => { ctx.closeTop(); ctx.purchase('ride', { method: 'vwfest' }); } }), h('button', { class: 'btn', text: `Pay in SOL · $${cfg.rideUsd}`, disabled: !cfg.enabled, // rides are 100% buyback & burn (no creator fee), so no DEV_WALLET is needed
+ onclick: () => { ctx.closeTop(); ctx.purchase('ride', { method: 'sol' }); } })));
   return modal('🎁 Mint a mystery ride', b);
 }
 export function revealModal(ctx, r) {
@@ -99,13 +100,15 @@ export function revealModal(ctx, r) {
 }
 
 // ---------- purchase flow ----------
-export const waitFor = (ctx, type, ms = 20000) => new Promise((res) => { const prev = ctx.waiters[type] || []; const done = (m) => { clearTimeout(t); res(m); }; const t = setTimeout(() => { ctx.waiters[type] = (ctx.waiters[type] || []).filter((f) => f !== done); res(null); }, ms); ctx.waiters[type] = [...prev, done]; });
+export const waitFor = (ctx, type, ms = 20000) => { let cancel; const p = new Promise((res) => { const prev = ctx.waiters[type] || []; const drop = () => { clearTimeout(t); ctx.waiters[type] = (ctx.waiters[type] || []).filter((f) => f !== done); }; const done = (m) => { clearTimeout(t); res(m); }; const t = setTimeout(() => { drop(); res(null); }, ms); ctx.waiters[type] = [...prev, done]; cancel = () => { drop(); res(null); }; }); p.cancel = cancel; return p; };
+// First of several message types; the losing waiters are removed so they cannot swallow the NEXT message of their type.
+export const waitAny = async (ctx, types, ms = 20000) => { const ps = types.map((t) => waitFor(ctx, t, ms)); try { return await Promise.race(ps); } finally { ps.forEach((p) => p.cancel()); } };
 export async function purchaseFlow(ctx, kind, opts) {
   const { cfg } = ctx; const body = h('div', { class: 'buy' }); const m = modal(opts.title || 'Purchase', body, { sticky: true });
   const say = (t, cls) => { clear(body); body.append(h('p', { class: cls || '', text: t })); };
   if (!cfg.enabled) { say('Purchases are not open yet. Everything you can see here is free to enjoy, and when purchases open, every one burns $VWFEST. Check back soon!'); return; }
   try {
-    say('Getting your price…'); ctx.net.json({ t: 'quote', kind, item: opts.item && opts.item.id, method: opts.method, entry: opts.entry === true, plot: opts.plot }); const w = Promise.race([waitFor(ctx, 'quote'), waitFor(ctx, 'quoteerr')]); const r = await w;
+    say('Getting your price…'); ctx.net.json({ t: 'quote', kind, item: opts.item && opts.item.id, method: opts.method, entry: opts.entry === true, plot: opts.plot }); const r = await waitAny(ctx, ['quote', 'quoteerr']);
     if (!r) return say('The price service did not answer. Try again in a moment.', 'bad'); if (r.t === 'quoteerr') return say(r.why, 'bad'); const q = r.q;
     const pay = await import('./pay.js'); const rows = (items) => items.map(([k, v, c]) => h('div', { class: 'brow ' + (c || '') }, h('span', { text: k }), h('b', { text: v })));
     let payTok = null; const swapL = (prep) => (prep && prep.swapInfo && prep.swapInfo.swapLamports ? prep.swapInfo.swapLamports : BigInt(q.swapLamports));
@@ -140,7 +143,7 @@ export async function purchaseFlow(ctx, kind, opts) {
 
 // 18+ / risk acknowledgement shown before any purchase or card payment.
 function ageGate() {
-  const cb = h('input', { type: 'checkbox' }); const el = h('label', { class: 'agegate' }, cb, h('span', { text: ' I am 18 or older. I understand this is a purchase of a digital collectible (an avatar or ride NFT) that burns $VWFEST: not an investment, with no promise of value or returns, and crypto can lose value.' }));
+  const cb = h('input', { type: 'checkbox' }); const el = h('label', { class: 'agegate' }, cb, h('span', { text: ' I am 18 or older. I understand this is a purchase of a digital item (an avatar or ride NFT, an outfit, or a vendor booth) that burns $VWFEST: not an investment, with no promise of value or returns, and crypto can lose value.' }));
   return { el, on() { if (cb.checked) return true; toast('Please tick the box to confirm first.'); el.classList.add('shake'); setTimeout(() => el.classList.remove('shake'), 600); return false; } };
 }
 // Challenge-response: the server sends a nonce message, the wallet signs it (no funds involved), the server verifies the ed25519 signature.

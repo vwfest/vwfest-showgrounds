@@ -35,7 +35,7 @@ function inspect(tx, { mint, nonce, wallet, devWallet, burnMin, devMin, uri }) {
     else if (String(ix.programId) === C.MPL_CORE_PROGRAM && ix.data) { const c = parseCoreCreate(ix.data); if (c) { asset = String(ix.accounts[0]); createdUri = c.uri; const owner = ix.accounts[4] && String(ix.accounts[4]); ownerOk = !owner || owner === signer || owner === C.MPL_CORE_PROGRAM; } }
   }
   if (burn <= 0n) return { ok: false, why: 'No $VWFEST burn found in that transaction' };
-  if (nonce && !(typeof memo === 'string' && memo.split(':').includes(nonce) && memo.startsWith('vwfest:'))) return { ok: false, why: 'Session code mismatch' };
+  if (nonce && memo !== 'vwfest:' + nonce) return { ok: false, why: 'Session code mismatch' };
   if (burnMin !== undefined && burn < BigInt(burnMin)) return { ok: false, why: 'The burned amount was lower than the quote' };
   if (devMin !== undefined && BigInt(devMin) > 0n && dev < BigInt(devMin)) return { ok: false, why: 'The creator fee in that transaction was lower than the quote' };
   if (uri && (!asset || createdUri !== uri)) return { ok: false, why: 'The NFT in that transaction does not match your quote' };
@@ -50,7 +50,7 @@ class Facade {
     const secretOk = !!cfg.serverSecret && cfg.serverSecret.length >= 32;
     this.enabledFlag = (env.MINT_ENABLED === '1' || env.SOLANA_ENABLED === '1') && C.isKey(cfg.vwfestMint) && secretOk && (!cfg.mainnet || cfg.mainnetArmed);
     this.reason = this.enabledFlag ? null : (!(env.MINT_ENABLED === '1' || env.SOLANA_ENABLED === '1') ? 'off' : !C.isKey(cfg.vwfestMint) ? 'VWFEST_MINT missing' : !secretOk ? 'SERVER_SECRET (>=32 chars) missing' : 'mainnet not armed');
-    this.fake = env.CHAIN_FAKE === '1' && !cfg.mainnet; // test hook: never allowed on mainnet
+    this.fake = env.CHAIN_FAKE === '1' && !cfg.mainnet && env.NODE_ENV !== 'production'; // test hook: never on mainnet and never in production (it would grant purchases without any transaction)
     this.store = await new Store(db ? poolBackend(db, env.DB_SCHEMA || 'showgrounds') : null).init();
     this.conn = conn || new Connection(cfg.rpcUrl, 'confirmed'); this.prices = new Prices(cfg, fetchImpl || fetch); this.f = fetchImpl || fetch;
     this.tracker = new BurnTracker({ store: this.store, cfg });

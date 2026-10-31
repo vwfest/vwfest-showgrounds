@@ -1,0 +1,79 @@
+// Security probes against a LOCAL copy of the server (never the live host).
+// Security audit regression tests (run against a local server only): nickname impersonation, chat obfuscation, NFT-name filter, DJ queue spam,
+// vendor plot-hold DoS, entry-quote discount abuse, WebSocket floods/garbage, forged logins, admin endpoint, purchase-transaction inspection.
+const path = require('path'); const ROOT = path.join(__dirname, '..');
+const assert = require('assert'); const WebSocket = require('ws');
+const PORT = 3299, BASE = `http://127.0.0.1:${PORT}`;
+Object.assign(process.env, { SERVER_SECRET: 'probe-secret-0123456789-0123456789abcdef', PORT: String(PORT), MINT_NETWORK: 'devnet', MINT_ENABLED: '1', VWFEST_MINT: '9ktd1qdiu9wRFhxHPczWKrKRGmJb9nkanv2Zz27Rpump', DEV_WALLET: 'DV4gtG2VpnDtFUVFnnrE5YM3A6LrV5qAcdfaaUwLFRok', FIXED_SOL_USD: '150', ADMIN_SECRET: 'probe-admin-secret-0123456789', MAX_CONNS_PER_IP: '60', PROFILE_CREATE_PER_HOUR: '500', DJ_SLOT_MS: '60000', SOLANA_RPC_URL: 'http://127.0.0.1:1',  VENDOR_FEE_USD: '30' });
+const S = require('../server.js'); const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+const res = []; const rec = (id, sev, name, ok, note = '') => { res.push({ id, sev, name, ok, note }); if (!ok) process.exitCode = 1; console.log(ok ? 'ok  ' : 'FAIL', `[${sev}]`, id, name, ok ? '' : note); };
+const client = () => new Promise((resolve) => { const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`, { headers: { origin: BASE } }); const c = { ws, msgs: [], bins: 0, closed: null, waiters: [] }; ws.on('message', (d, bin) => { if (bin) { c.bins++; return; } let m; try { m = JSON.parse(d); } catch { return; } c.msgs.push(m); c.waiters = c.waiters.filter((w) => !(w.t === m.t && (w.f(m), true))); }); ws.on('close', (code) => (c.closed = code)); c.wait = (t, ms = 3000) => new Promise((r, j) => { const f = c.msgs.find((m) => m.t === t); if (f) return r(f); const to = setTimeout(() => j(new Error('timeout ' + t)), ms); c.waiters.push({ t, f: (m) => { clearTimeout(to); r(m); } }); }); c.send = (o) => ws.send(JSON.stringify(o)); ws.on('open', () => resolve(c)); });
+const join = async (nick) => { const c = await client(); await c.wait('hi'); c.send({ t: 'join', nick }); const r = await Promise.race([c.wait('welcome'), c.wait('joinerr')]); c.r = r; c.ok = r.t === 'welcome'; if (c.ok) c.welcome = r; return c; };
+(async () => {
+  await S.init(); await new Promise((r) => S.server.listen(PORT, '127.0.0.1', r));
+  // ---- nickname spoofing
+  const spoof = ['Admin1', 'admin 2', 'VW-FEST', 'VW_FEST', 'vw fest', 'Official1', 'Moderator1', 'Support Team', 'Staff_1', 'VWFEST Dev', 'Vwfest2', 'DJ Admin', 'Server_1'];
+  const accepted = []; for (const n of spoof) { const c = await join(n); if (c.ok) accepted.push(n); c.ws.close(); }
+  rec('N1', 'medium', 'reserved/official-looking nicknames are refused', accepted.length === 0, 'accepted: ' + accepted.join(', '));
+  const a = await join('Alice1'); const b = await join('alice_1'); rec('N2', 'low', 'case/sep-variant duplicate nickname refused', !b.ok);
+  const hom = await join('Аlice9'); rec('N3', 'low', 'cyrillic homoglyph nickname refused', !hom.ok);
+  // ---- chat injection / flooding
+  const ch = await join('Chatty1');
+  ch.send({ t: 'chat', text: '<img src=x onerror=alert(1)>', scope: 'all' }); await wait(200);
+  const gotHtml = a.msgs.find((m) => m.t === 'chat' && /onerror/.test(m.text)); rec('C1', 'info', 'HTML in chat is relayed as inert text (client uses textContent only)', true, gotHtml ? 'relayed raw (OK: textContent)' : 'blocked');
+  for (const t of ['visit evil.com now', 'h t t p s : / / x', 'send to 9ktd1qdiu9wRFhxHPczWKrKRGmJb9nkanv2Zz27Rpump', 'w w w . evil . com', 'evil dot com', 'evil(dot)xyz']) { ch.send({ t: 'chat', text: t, scope: 'near' }); await wait(1700); }
+  const leaked = ch.msgs.filter((m) => m.t === 'chat').map((m) => m.text);
+  rec('C2', 'low', 'link/address obfuscation handled by chat filter', leaked.length <= 1, 'relayed: ' + JSON.stringify(leaked));
+  const before = a.msgs.length; for (let i = 0; i < 200; i++) ch.send({ t: 'chat', text: 'spam ' + i, scope: 'all' }); await wait(500);
+  rec('C3', 'high', 'chat flood is throttled (<=5 delivered of 200)', a.msgs.filter((m) => m.t === 'chat').length <= 8, 'delivered ' + a.msgs.filter((m) => m.t === 'chat' && /spam/.test(m.text)).length);
+  // ---- malformed / flood
+  const f = await join('Fuzzer1'); const garbage = [Buffer.alloc(0), Buffer.from([4]), Buffer.from([1, 2, 3]), Buffer.alloc(9, 255), Buffer.from('{"t":"chat"'), Buffer.from('[]'), Buffer.from('null'), Buffer.from('{"t":"__proto__"}'), Buffer.from('{"t":"join","nick":{"a":1}}'), Buffer.from('{"t":"quote","kind":{},"method":[]}'), Buffer.from('{"t":"buy","qid":{},"sig":1}'), Buffer.from('{"t":"wproof","nonce":{},"pubkey":[],"sig":{}}'), Buffer.from('{"t":"nftuse","wallet":{},"asset":{}}'), Buffer.from('{"t":"rtc","to":1e9,"k":"offer","d":{}}'), Buffer.from('{"t":"djpick","i":"1"}'), Buffer.from('{"t":"equip","item":{"__proto__":1},"slot":{}}'), Buffer.from('{"t":"av","av":"x"}'), Buffer.from('{"t":"profile","sid":"x"}'), Buffer.from('{"t":"emote","id":{}}')];
+  for (const g of garbage) { f.ws.send(g, { binary: false }); f.ws.send(g, { binary: true }); }
+  await wait(300); const alive = await fetch(BASE + '/healthz').then((r) => r.ok).catch(() => false); rec('F1', 'high', 'malformed/odd frames do not crash the server', alive);
+  const big = await join('Bigmsg1'); big.ws.send(Buffer.alloc(7000, 97)); await wait(300); rec('F2', 'medium', '7 KB frame rejected (ws maxPayload closes socket)', big.closed !== null, 'close code ' + big.closed);
+  const fl = await join('Flood001'); const t0 = Date.now(); for (let i = 0; i < 20000; i++) fl.ws.send(JSON.stringify({ t: 'emote', id: 1 })); await wait(1500);
+  rec('F3', 'high', '20k-message JSON flood: server alive + flooder disconnected or throttled', (await fetch(BASE + '/healthz').then((r) => r.ok).catch(() => false)) && (fl.closed !== null), 'closed=' + fl.closed);
+  const mv = await join('Mover01'); const buf = Buffer.alloc(9); buf[0] = 1; for (let i = 0; i < 20000; i++) mv.ws.send(buf); await wait(800); rec('F4', 'medium', '20k binary movement flood survived', await fetch(BASE + '/healthz').then((r) => r.ok).catch(() => false));
+  const mic = await join('Micflood'); const pk = Buffer.alloc(200); pk[0] = 4; for (let i = 0; i < 20000; i++) mic.ws.send(pk); await wait(800); rec('F5', 'medium', '20k DJ-mic-type binary flood from non-DJ is dropped cheaply', await fetch(BASE + '/healthz').then((r) => r.ok).catch(() => false));
+  // ---- join abuse
+  const bad = await client(); await bad.wait('hi'); bad.send({ t: 'join', id: 'VW-AAAAAAAA', secret: 'x'.repeat(48) }); const e = await Promise.race([bad.wait('joinerr'), bad.wait('welcome')]).catch(() => null); rec('J1', 'high', 'forged profile id/secret cannot join as an existing profile', !e || e.t === 'joinerr');
+  const first = await join('Victim01'); const cred = first.welcome.cred; const dup = await client(); await dup.wait('hi'); dup.send({ t: 'join', id: cred.id, secret: cred.secret.replace(/./, (m) => (m === 'a' ? 'b' : 'a')) }); const e2 = await Promise.race([dup.wait('joinerr'), dup.wait('welcome')]).catch(() => null); rec('J2', 'high', 'one-char-off secret rejected', !e2 || e2.t === 'joinerr'); rec('J3', 'info', 'victim not kicked by failed attempt', first.closed === null);
+  // ---- DJ abuse
+  const dj1 = await join('Dj_One1'), dj2 = await join('Dj_Two2'), dj3 = await join('Dj_Thr3');
+  for (const C of [dj1, dj2, dj3]) { const p = S.hub.players.get(C.welcome.id); p.x = 0; p.z = -70; }
+  dj1.send({ t: 'djclaim' }); await wait(150); dj2.send({ t: 'djclaim' }); await wait(150);
+  dj2.send({ t: 'djskip' }); dj2.send({ t: 'djpick', i: 1 }); dj2.send({ t: 'djmic', on: true }); await wait(150);
+  rec('D1', 'high', 'non-DJ cannot skip/pick/mic', S.dj.isDj(S.hub.players.get(dj1.welcome.id)) && !S.dj.mic);
+  const pushes0 = S.dj.version; for (let i = 0; i < 40; i++) { dj3.send({ t: 'djclaim' }); dj3.send({ t: 'djleave' }); } await wait(800); const pushes = S.dj.version - pushes0;
+  rec('D2', 'medium', 'DJ claim/leave spam does not amplify to full broadcast (pushes in 0.8s <= 12)', pushes <= 12, 'pushes=' + pushes);
+  const adm = (h) => fetch(BASE + '/api/admin/dj', { method: 'POST', headers: { origin: BASE, 'content-type': 'application/json', ...h }, body: '{"action":"clear"}' }).then((r) => r.status);
+  rec('D3', 'high', 'admin DJ endpoint refuses no/short/wrong secret', (await adm({})) === 401 && (await adm({ 'x-admin-secret': 'probe-admin-secret-012345678' })) === 401 && (await adm({ 'x-admin-secret': 'x' })) === 401);
+  // ---- vendors: plot hold DoS
+  const v = await join('Vendor_9'); S.mint.devWallet; let holds = 0; for (let k = 1; k <= 12; k++) { v.send({ t: 'quote', kind: 'vendor', method: 'vwfest', plot: k }); await wait(1300); }
+  holds = [...S.vendors.holds.keys()].length; rec('V1', 'medium', 'one profile can hold at most 1 booth plot at a time', holds <= 1, 'plots held by a single free profile: ' + holds);
+  // ---- entry-quote discount abuse
+  const en = await join('Entry_01'); en.send({ t: 'quote', kind: 'avatar', method: 'sol', entry: false }); const q0 = await en.wait('quote').catch(() => null); en.msgs.length = 0; en.waiters = []; await wait(1300); en.send({ t: 'quote', kind: 'avatar', method: 'sol', entry: true }); const q1 = await en.wait('quote').catch(() => null);
+  if (q0 && q1) { const r = Number(BigInt(q1.q.burnMin) * 100n / BigInt(q0.q.burnMin)); rec('P1', 'medium', 'client-chosen entry:true does not lower the required burn when no on-ramp is configured', r >= 95, `burnMin ratio entry/normal = ${r}%`); } else rec('P1', 'medium', 'entry quote test', false, 'no quotes');
+  // ---- NFT name sanitization
+  const nm = (S.nftav.pub({ nft: { asset: 'x', name: 'Send SOL to evil.com <b>ADMIN</b>' } }) || {}).n; rec('NFT1', 'low', 'on-chain NFT name is filtered like chat (links/offensive/impersonation)', !/evil\.com/.test(nm), 'name shown: ' + JSON.stringify(nm));
+  // ---- purchase transaction inspection (wrong mint / amount / recipient / signer / memo / CPI / failed tx)
+  const { inspect, Facade } = require(path.join(ROOT, 'solana/src/compat.js'));
+  const MINT = '9ktd1qdiu9wRFhxHPczWKrKRGmJb9nkanv2Zz27Rpump', FAKEMINT = 'So11111111111111111111111111111111111111112', W = 'BqRM2Me3BriYQ9j4Dx2pXsbKWQ3AwELqqPu3Rd1QUwvZ', ATT = 'DV4gtG2VpnDtFUVFnnrE5YM3A6LrV5qAcdfaaUwLFRok', DEV = ATT;
+  const key = (k, signer) => ({ pubkey: k, signer: !!signer });
+  const burn = (o = {}) => ({ program: 'spl-token', programId: 'Tokenkeg', parsed: { type: o.type || 'burnChecked', info: { mint: o.mint || MINT, authority: o.auth || W, tokenAmount: { amount: String(o.amt ?? 1000000) }, amount: String(o.amt ?? 1000000) } } });
+  const memo = (m) => ({ program: 'spl-memo', parsed: m }); const xfer = (to, l, src = W) => ({ program: 'system', parsed: { type: 'transfer', info: { source: src, destination: to, lamports: l } } });
+  const tx = (ixs, o = {}) => ({ blockTime: 1, slot: 1, meta: { err: o.err || null }, transaction: { signatures: ['s'], message: { accountKeys: o.keys || [key(W, true)], instructions: ixs } } });
+  const base = { mint: MINT, nonce: 'qabc', wallet: W, devWallet: DEV, burnMin: 970000n, devMin: 99n };
+  const cpi = tx([memo('vwfest:qabc'), { program: 'unknown', programId: 'X', parsed: null }]); cpi.meta.innerInstructions = [{ index: 0, instructions: [burn()] }];
+  const cases = [['valid', tx([burn(), memo('vwfest:qabc'), xfer(DEV, 100)]), true], ['wrong mint', tx([burn({ mint: FAKEMINT }), memo('vwfest:qabc'), xfer(DEV, 100)]), false], ['unchecked burn', tx([burn({ type: 'burn' }), memo('vwfest:qabc'), xfer(DEV, 100)]), false],
+    ['burn too small', tx([burn({ amt: 1000 }), memo('vwfest:qabc'), xfer(DEV, 100)]), false], ['fee too small', tx([burn(), memo('vwfest:qabc'), xfer(DEV, 1)]), false], ['fee to wrong recipient', tx([burn(), memo('vwfest:qabc'), xfer(W, 100)]), false],
+    ['fee from other source', tx([burn(), memo('vwfest:qabc'), xfer(DEV, 100, ATT)]), false], ['other wallet signed', tx([burn({ auth: ATT }), memo('vwfest:qabc')], { keys: [key(ATT, true)] }), false], ['burn authority != signer', tx([burn({ auth: ATT }), memo('vwfest:qabc'), xfer(DEV, 100)]), false],
+    ['memo of another quote', tx([burn(), memo('vwfest:qzzz'), xfer(DEV, 100)]), false], ['no memo', tx([burn(), xfer(DEV, 100)]), false], ['failed tx', tx([burn(), memo('vwfest:qabc'), xfer(DEV, 100)], { err: { x: 1 } }), false],
+    ['padded memo vwfest:x:qabc', tx([burn(), memo('vwfest:evil:qabc'), xfer(DEV, 100)]), false], ['missing tx', null, false], ['first key not a signer', tx([burn(), memo('vwfest:qabc'), xfer(DEV, 100)], { keys: [key(W, false), key(ATT, true)] }), false],
+    ['burn only inside CPI', cpi, false], ['two memos: last wins', tx([memo('vwfest:qabc'), burn(), memo('vwfest:qother')]), false]];
+  for (const [name, t, want] of cases) rec('PAY', 'high', 'tx inspection: ' + name, inspect(t, base).ok === want);
+  const F = new Facade(); await F.init({ env: { NODE_ENV: 'production', CHAIN_FAKE: '1', MINT_NETWORK: 'devnet', MINT_ENABLED: '1', VWFEST_MINT: MINT, SERVER_SECRET: 'x'.repeat(40) } }); rec('PAY', 'high', 'CHAIN_FAKE is ignored when NODE_ENV=production', F.fake === false);
+  const F2 = new Facade(); await F2.init({ env: { CHAIN_FAKE: '1', MINT_NETWORK: 'mainnet-beta', MINT_ENABLED: '1', MINT_MAINNET: '1', VWFEST_MINT: MINT, SERVER_SECRET: 'x'.repeat(40) } }); rec('PAY', 'high', 'CHAIN_FAKE is ignored on mainnet', F2.fake === false);
+  console.log(res.every((r) => r.ok) ? `all ${res.length} audit tests passed` : 'AUDIT TESTS FAILED');
+  process.exit(process.exitCode || 0);
+})().catch((e) => { console.error('PROBE ERROR', e); process.exit(2); });

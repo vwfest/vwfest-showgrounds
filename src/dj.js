@@ -42,7 +42,7 @@ export class DjClient {
     if (this.duck) this.duck.gain.value += ((this.voiceT > 0 ? 0.35 : 1) - this.duck.gain.value) * Math.min(1, dt * 8);
     if (this.voiceT > 0) this.voiceT -= dt;
     let lv = 0, bd = null; if (live && this.an && this.audio && !this.audio.paused && this.gain > 0.01) { this.an.getByteFrequencyData(this.spec); const r = bars(this.spec, 24); lv = r.level * (0.6 + this.gain * 0.6); bd = r.bars; } else if (live && !this.ac) { lv = 0.15 + 0.1 * Math.sin(now / 300); }
-    this.level = lv; this.bands = bd || this.bands; if (!bd) this.bands = this.bands.map((v) => v * 0.9);
+    this.level = lv; if (bd) this.bands = bd; else for (let i = 0; i < this.bands.length; i++) this.bands[i] *= 0.9; // decay in place (no per-frame allocation)
     if (this.panel && now - this.lastDraw > 500) { this.lastDraw = now; this.panel(); }
   }
   // ---- DJ microphone ----
