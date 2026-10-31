@@ -1,7 +1,7 @@
 // Realtime hardening (local server only): DJ mic relay range + byte cap + pre-copy token bucket, TURN only after voice opt-in (per-session HMAC),
 // WebRTC signaling gates (voice on both sides, field allow-list, size/rate), chat/nick filter folding, admin mute/kick/ban, async handler safety, joining guard.
 const assert = require('assert'); const crypto = require('crypto'); const WebSocket = require('ws');
-const PORT = 3302, BASE = `http://127.0.0.1:${PORT}`;
+const PORT = 3362, BASE = `http://127.0.0.1:${PORT}`;
 Object.assign(process.env, { SERVER_SECRET: 'rt-secret-0123456789-0123456789abcdef', PORT: String(PORT), MINT_NETWORK: 'devnet', DJ_SLOT_MS: '60000', ADMIN_SECRET: 'rt-admin-secret-0123456789', TURN_URL: 'turn:turn.example.com:3478', ONRAMP_URL_TEMPLATE: 'https://ramp.example/buy?wallet={address}&amount={usd}&ref={ref}', TURN_SECRET: 'rt-turn-secret-0123456789', TURN_USERNAME: 'static', TURN_CREDENTIAL: 'shared', MAX_CONNS_PER_IP: '200', PROFILE_CREATE_PER_HOUR: '100' });
 const S = require('../server.js'); const { cleanChat, cleanName } = require('../lib/names');
 let n = 0; const t = async (name, f) => { try { await f(); n++; console.log('ok  ', name); } catch (e) { console.error('FAIL', name, e.stack.split('\n').slice(0, 3).join(' | ')); process.exitCode = 1; } };

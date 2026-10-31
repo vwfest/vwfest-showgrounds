@@ -106,5 +106,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     assert(g.charge('s1', 'ip1', 3, 0) && !g.charge('s1', 'ip1', 3, 0)); assert.strictEqual(g.budgets.m.get('ip:ip1').reduce((x, e) => x + e.c, 0), 3, 'failed charge did not touch ip bucket'); assert(g.charge('s1', 'ip1', 3, 61000), 'window slides');
     g.revoke(conn); assert(!g.verify(b.token, 'o', 3000).ok);
   });
+  await t('rotating tokens does NOT multiply the per-session budget (keyed on the player, not the token string)', async () => {
+    const g = new RpcGuard({ perSession: 10, perIp: 1000, global: 1e6, sweep: false }); const conn = { player: { id: 1, prof: { id: 'VW-rot' } }, ws: { readyState: 1 } };
+    const a = g.issue(conn, conn.player, 'o', 0), b = g.issue(conn, conn.player, 'o', 1000); const va = g.verify(a.token, 'o', 1500), vb = g.verify(b.token, 'o', 1500); assert.strictEqual(va.session, vb.session, 'same budget key for both tokens');
+    assert(g.charge(va.session, 'ip', 6, 2000) && !g.charge(vb.session, 'ip', 6, 2000), 'second token shares the first token\'s budget'); g.revoke(conn);
+    const A = await join('Rotator1'); const t1 = A.tok; A.send({ t: 'rpctok' }); const r2 = await A.wait('rpctok'); const t2 = r2.rpcToken && r2.rpcToken.token || r2.rpcToken; assert(t2 && t2 !== t1, 'rotated');
+    let ok = 0; for (let i = 0; i < 10; i++) { for (const tk of [t1, t2]) { const r = await post(bal(i), tk); if (r.status === 200) ok++; } } assert(ok <= 12, 'at most the per-session limit (12) succeeded across two tokens, got ' + ok); A.ws.close();
+  });
+  await t('CSP connect-src is built from the sanitised public RPC (a keyed PUBLIC_RPC_URL never reaches the header)', async () => { const r = await fetch(BASE + '/'); const csp = r.headers.get('content-security-policy') || ''; assert(!csp.includes(KEY) && !csp.includes('api-key') && !csp.includes('127.0.0.1:' + UP), csp); assert(csp.includes('https://api.devnet.solana.com'), csp); });
   console.log(`\nall ${n} rpcguard tests ${process.exitCode ? 'FINISHED WITH FAILURES' : 'passed'}`); S.server.close(); upstream.close(); setTimeout(() => process.exit(process.exitCode || 0), 300);
 })();

@@ -92,7 +92,8 @@ const app = express();
 app.set('trust proxy', 1); app.disable('x-powered-by');
 const { clientIp, useClientIp } = require('./lib/clientip'); useClientIp(app); // real client IP (CF-Connecting-IP) for every per-IP limiter: XFF's last entry is the Cloudflare EDGE, so everyone would share one bucket
 const OWN_WS = (() => { try { const u = new URL(publicUrl); return u.protocol === 'https:' ? ['wss://' + u.host] : []; } catch { return []; } })(); // this server only (was wss://*.onrender.com: any Render app)
-const RPC_HOSTS = ["'self'", ...(() => { try { return [new URL(process.env.PUBLIC_RPC_URL || RPC_DEFAULT[NETWORK]).origin]; } catch { return []; } })()];
+const PUBLIC_RPC = (() => { const u = process.env.PUBLIC_RPC_URL || RPC_DEFAULT[NETWORK]; try { const x = new URL(u); if (x.searchParams.has('api-key') || x.username || x.password || u === mint.rpcUrl && mint.rpcUrl !== RPC_DEFAULT[NETWORK]) return RPC_DEFAULT[NETWORK]; } catch { return RPC_DEFAULT[NETWORK]; } return u; })(); // what browsers broadcast through (never the keyed server RPC)
+const RPC_HOSTS = ["'self'", ...(() => { try { return [new URL(PUBLIC_RPC).origin]; } catch { return []; } })()]; // from the SANITISED public RPC (a keyed PUBLIC_RPC_URL never reaches the CSP)
 const W3A = require('./shared/w3a'); // only allowed when an embedded-wallet client id is configured
 app.use(helmet({
   contentSecurityPolicy: {
@@ -135,7 +136,6 @@ const iceServers = (p, now = Date.now()) => {
   return out;
 };
 const shopView = () => SHOP.map((i) => ({ ...i, vwfestUsd: Math.round(i.usd * (1 - mint.discountPct / 100) * 100) / 100 }));
-const PUBLIC_RPC = (() => { const u = process.env.PUBLIC_RPC_URL || RPC_DEFAULT[NETWORK]; try { const x = new URL(u); if (x.searchParams.has('api-key') || x.username || x.password || u === mint.rpcUrl && mint.rpcUrl !== RPC_DEFAULT[NETWORK]) return RPC_DEFAULT[NETWORK]; } catch { return RPC_DEFAULT[NETWORK]; } return u; })(); // what browsers broadcast through (never the keyed server RPC)
 const payFlags = () => ({ dj: { on: dj.enabled && dj.playlist.length > 0, slotMs: dj.slotMs, queueMax: dj.queueMax }, nftAvatars: nftav.enabled, publicRpcUrl: PUBLIC_RPC, enabled: mint.enabled, reason: mint.reason, network: mint.network, mint: mint.mint, decimals: mint.decimals, feeUsd: mint.feeUsd, rideUsd: mint.rideUsd, slippageBps: mint.slippageBps, discountPct: mint.discountPct, devFeePct: mint.devFeePct, solShopEnabled: !!mint.devWallet, jupiter: mint.jupiter, embedded: mint.embedded, onramp: onramp.providers().map(({ id, name, how }) => ({ id, name, how })), entryUsd: mint.entryUsd, entryMinBurnPct: mint.entryMinBurnPct, payTokens: mint.payTokens, devnetTokensPerUsd: mint.devnetTokensPerUsd, base: publicUrl, vendor: { feeUsd: vcfg.feeUsd, days: vcfg.days, plots: vcfg.plots, imgKb: vcfg.imgKb, maxProducts: vcfg.maxProducts, devFeePct: mint.devFeePct, solAvailable: !!mint.devWallet, premod: vcfg.premod } });
 app.get('/api/config', (req, res) => res.set('Cache-Control', 'no-store').json({
   ...payFlags(), shop: shopView(), odds: R.TIERS.map((t, i) => ({ tier: t, pct: R.ODDS[i] })), iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }], turn: !!process.env.TURN_URL, /* TURN credentials are only sent over the authenticated WebSocket after join */ voiceRange: VOICE_RANGE, maxPlayers: cfg.maxPlayers,
