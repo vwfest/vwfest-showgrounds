@@ -35,7 +35,7 @@ await chain.quote({
   discountPct: number,       // 50 for shop/ride paid in $VWFEST (VWFEST_DISCOUNT_PCT), 0 for vendor/avatar
   devPct: number,            // DEV_FEE_PCT (10) when method==='sol' for shop/ride/vendor; 0 for avatar
   devWalletOk: boolean,
-  entry?: boolean            // "Entry / Mint" flow: client burns what the on-ramp delivered (>= ENTRY_MIN_BURN_PCT of quote)
+  entry?: boolean            // ignored by the server (no entry discount); quotes are always the normal price
 }) // -> { usd, paidUsd, solUsd, discountPct, devPct, swap:boolean, totalLamports, swapLamports, devLamports, devWallet|null,
    //      burnRaw:string, burnMin:string, burnUi:number, devMin:string, ... }   (all bigint amounts as decimal strings)
 chain.solUsd()   // -> number (cached SOL/USD), used by GET /api/mint/price
@@ -124,7 +124,7 @@ Error contract: throw `Error` with a **user-readable** message (shown in a toast
 * **Burn Tracker** panel + world sign: `GET /api/burns` and WS `burn` events.
 
 ## 5. Shared config (single source of truth = `server.js` `mint`/`vcfg`; also rendered into the in-world Info Booth by `lib/guide.js`)
-`MINT_FEE_USD=5` `DEV_FEE_PCT=10` `VWFEST_DISCOUNT_PCT=50` `VENDOR_FEE_USD=30` `VENDOR_DAYS=30` `VENDOR_BOOTHS=24` `ENTRY_ONRAMP_USD` `ENTRY_MIN_BURN_PCT=60`
+`MINT_FEE_USD=5` `DEV_FEE_PCT=10` `VWFEST_DISCOUNT_PCT=50` `VENDOR_FEE_USD=30` `VENDOR_DAYS=30` `VENDOR_BOOTHS=24` `ENTRY_ONRAMP_USD`
 `DEV_WALLET` `VWFEST_MINT=9ktd1qdiu9wRFhxHPczWKrKRGmJb9nkanv2Zz27Rpump` `MINT_NETWORK` `RPC_URL`/`RPC_*` `PAY_TOKENS` `WEB3AUTH_CLIENT_ID` `WEB3AUTH_NETWORK`.
 **If you add or rename a user-visible number, add it to `lib/guide.js values()` and run `npm run test:guide`** — the Info Booth must never go stale.
 
