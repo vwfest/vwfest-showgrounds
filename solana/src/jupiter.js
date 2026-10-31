@@ -7,10 +7,17 @@ const { getAssociatedTokenAddressSync } = require('@solana/spl-token');
 
 const ALLOWED_PROGRAMS = new Set([SystemProgram.programId.toBase58(), ComputeBudgetProgram.programId.toBase58(), C.TOKEN_PROGRAM, C.TOKEN_2022_PROGRAM, C.ATA_PROGRAM, C.JUPITER_PROGRAM]);
 const TOKEN_OK = new Set([1, 9, 16, 17, 18]); // initializeAccount, closeAccount, initializeAccount2, syncNative, initializeAccount3
+// Jupiter v6 route instructions end with [amount u64][quoted amount u64][slippage_bps u16][platform_fee_bps u8]: ExactIn spends exactly `amount`; ExactOut spends at most quoted input + slippage.
+const EXACT_IN = new Set(['e517cb977ae3ad2a', 'c1209b3341d69c81']), EXACT_OUT = new Set(['d033ef977b2bed5c', 'b0d169a89a7d453e']); // route, shared_accounts_route | exact_out_route, shared_accounts_exact_out_route
+function jupSpend(d) {
+  if (d.length < 27) throw new Error('Unrecognised swap instruction. Aborted.'); const h = d.subarray(0, 8).toString('hex'), o = d.length - 19;
+  const a = d.readBigUInt64LE(o), b = d.readBigUInt64LE(o + 8), slip = BigInt(d.readUInt16LE(o + 16));
+  if (EXACT_IN.has(h)) return a; if (EXACT_OUT.has(h)) return b + (b * slip + 9999n) / 10000n; throw new Error('Unrecognised swap route type. Aborted.'); // token-ledger variants are refused too
+}
 const dataOf = (ix) => Buffer.from(ix.data, 'base64');
 
-function auditJupiterIxs(list, { user, maxLamports }) {
-  let lamports = 0n;
+function auditJupiterIxs(list, { user, maxLamports, maxSwapIn }) {
+  let lamports = 0n, spend = 0n;
   const u = new PublicKey(user);
   const wsolAta = getAssociatedTokenAddressSync(new PublicKey(C.WSOL), u, true).toBase58();
   for (const ix of list) {
@@ -26,11 +33,13 @@ function auditJupiterIxs(list, { user, maxLamports }) {
     } else if (ix.programId === C.TOKEN_PROGRAM || ix.programId === C.TOKEN_2022_PROGRAM) {
       if (!TOKEN_OK.has(d[0])) throw new Error('Unexpected token instruction in swap route. Aborted.');
       if (d[0] === 9) { const dest = ix.accounts[1] && ix.accounts[1].pubkey; if (dest !== user) throw new Error('Swap route would close an account to someone else. Aborted.'); }
+    } else if (ix.programId === C.JUPITER_PROGRAM && maxSwapIn !== undefined) { spend += jupSpend(d); // the route's own amount fields bound what it can take from the player (SOL swaps and token swaps alike)
     } else if (ix.programId === C.ATA_PROGRAM) {
       const owner = ix.accounts[2] && ix.accounts[2].pubkey; if (owner !== user) throw new Error('Swap route would create an account for someone else. Aborted.');
     }
   }
   if (lamports > maxLamports) throw new Error('Swap route would move more SOL than quoted. Aborted.');
+  if (maxSwapIn !== undefined && spend > BigInt(maxSwapIn)) throw new Error('Swap route would spend more than quoted. Aborted.');
   return true;
 }
 const toIx = (j) => new TransactionInstruction({ programId: new PublicKey(j.programId), keys: j.accounts.map((a) => ({ pubkey: new PublicKey(a.pubkey), isSigner: a.isSigner, isWritable: a.isWritable })), data: Buffer.from(j.data, 'base64') });
@@ -50,9 +59,9 @@ async function swapInstructions({ cfg, prices, conn, user, inputMint, amount, ma
   const j = await r.json(); if (j.error) throw new Error('Swap service: ' + String(j.error).slice(0, 80));
   const list = [...(j.setupInstructions || []), j.swapInstruction, ...(j.cleanupInstruction ? [j.cleanupInstruction] : [])];
   const budget = j.computeBudgetInstructions || [];
-  auditJupiterIxs([...budget, ...list], { user, maxLamports: maxSolLamports === undefined ? 0n : maxSolLamports });
+  auditJupiterIxs([...budget, ...list], { user, maxLamports: maxSolLamports === undefined ? 0n : maxSolLamports, maxSwapIn: amount });
   const alts = [];
   for (const a of j.addressLookupTableAddresses || []) { const acc = await conn.getAccountInfo(new PublicKey(a)); if (acc) alts.push(new AddressLookupTableAccount({ key: new PublicKey(a), state: AddressLookupTableAccount.deserialize(acc.data) })); }
   return { instructions: list.map(toIx), computeBudget: budget.map(toIx), alts, quote, outAmount: BigInt(quote.outAmount), minOut: BigInt(quote.otherAmountThreshold) };
 }
-module.exports = { auditJupiterIxs, swapInstructions, ALLOWED_PROGRAMS };
+module.exports = { auditJupiterIxs, swapInstructions, jupSpend, ALLOWED_PROGRAMS };

@@ -54,7 +54,7 @@ function auditPayTx(tx, q, cfg, alts = []) {
   }
   if (q.swap) { // HIGH-2: the browser re-runs the same allow-list audit the server ran on Jupiter's instructions, bounded by the quote
     const maxLamports = (q.swapInputMint === C.WSOL ? BigInt(q.swapInRaw) : 0n) + RENT_CUSHION;
-    auditJupiterIxs(jupList, { user: q.wallet, maxLamports });
+    auditJupiterIxs(jupList, { user: q.wallet, maxLamports, maxSwapIn: BigInt(q.swapInRaw) }); // ExactIn: the route may spend exactly the quoted input (SOL via the wSOL account, or the pay-token), whatever the input mint is
     const cap = BigInt(q.devLamports) * 101n / 100n + 1n + maxLamports; // total SOL that may leave the wallet via System transfer/createAccount
     if (sysLamports > cap) throw new Error('Transaction moves more SOL than your quote allows');
   }

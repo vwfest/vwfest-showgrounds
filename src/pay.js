@@ -1,18 +1,27 @@
 // Non-custodial purchase builder (lazy chunk). The player's own wallet signs; no project wallet ever holds funds.
 //  tx = [compute budget] + [Jupiter swap SOL -> $VWFEST for the swap share] + [SOL fee to creator wallet, if any] + SPL burn + [Core NFT create] + memo
-import { audit, sameMessage } from './txaudit.mjs';
+import { audit, auditMessage, sameMessage } from './txaudit.mjs';
 import { rpcFetch } from './rpc.mjs';
+import { assertTop } from './frame.js';
 import { Connection, PublicKey, Keypair, TransactionInstruction, TransactionMessage, VersionedTransaction, SystemProgram, ComputeBudgetProgram, AddressLookupTableAccount } from '@solana/web3.js';
 
 const TOKEN = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'), TOKEN22 = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
 const ATA_PROG = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'), MEMO = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
 const CORE = new PublicKey('CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d'), JUP = 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4', WSOL = 'So11111111111111111111111111111111111111112';
+const WSOL_MINT = new PublicKey(WSOL);
+// Flatten a compiled (v0) transaction for the pure auditor: every account key (lookup tables resolved), each instruction's program/accounts/data.
+function decompile(tx, alts) {
+  const m = tx.message; const ak = m.getAccountKeys({ addressLookupTableAccounts: alts }); const keys = []; for (let i = 0; i < ak.length; i++) keys.push(ak.get(i).toBase58());
+  return { keys, ixs: m.compiledInstructions.map((ix) => ({ p: ix.programIdIndex, a: Array.from(ix.accountKeyIndexes), d: ix.data })), numSigners: m.header.numRequiredSignatures };
+}
+// Runs on the exact transaction object that is about to be signed (build time AND again right before the wallet prompt, from a fresh decode of its bytes).
+export function auditTx(tx, ctx) { return auditMessage(decompile(tx, ctx.alts), ctx.c); }
 const u64 = (n) => { const b = new Uint8Array(8); new DataView(b.buffer).setBigUint64(0, BigInt(n), true); return b; };
 const str = (s) => { const e = new TextEncoder().encode(s); const l = new Uint8Array(4); new DataView(l.buffer).setUint32(0, e.length, true); return [l, e]; };
 const cat = (...a) => { const f = a.flat(); const n = f.reduce((s, x) => s + x.length, 0); const o = new Uint8Array(n); let p = 0; for (const x of f) { o.set(x, p); p += x.length; } return o; };
 
 export function getProvider() { return (window.phantom && window.phantom.solana) || window.solana || window.solflare || null; }
-export async function connectWallet() { const p = getProvider(); if (!p) throw new Error('No Solana wallet found. Install Phantom (phantom.app) and reload.'); const r = await p.connect(); const pk = r && r.publicKey ? r.publicKey : p.publicKey; return { provider: p, pubkey: new PublicKey(pk.toString()) }; }
+export async function connectWallet() { assertTop(); const p = getProvider(); if (!p) throw new Error('No Solana wallet found. Install Phantom (phantom.app) and reload.'); const r = await p.connect(); const pk = r && r.publicKey ? r.publicKey : p.publicKey; return { provider: p, pubkey: new PublicKey(pk.toString()) }; }
 
 const ix = (j) => new TransactionInstruction({ programId: new PublicKey(j.programId), keys: j.accounts.map((a) => ({ pubkey: new PublicKey(a.pubkey), isSigner: a.isSigner, isWritable: a.isWritable })), data: Uint8Array.from(atob(j.data), (c) => c.charCodeAt(0)) });
 async function jget(url) { const r = await fetch(url); if (!r.ok) throw new Error('Price service error (' + r.status + ')'); return r.json(); }
@@ -21,12 +30,13 @@ async function jget(url) { const r = await fetch(url); if (!r.ok) throw new Erro
 //  opts.sweepLamports: swap this much SOL instead of the quoted amount (Entry flow: burn what the on-ramp delivered, minus fees).
 //  opts.payToken: { mint, sym, dec } to pay with an SPL token instead of SOL (e.g. USDC, BONK).
 async function build({ q, cfg, conn, user, mint, tokenProg, ata, swapLamports, payToken, onStep }) {
-  const ixs = []; const alts = []; let burn = BigInt(q.burnRaw), swapInfo = null;
+  const ixs = []; const alts = []; let burn = BigInt(q.burnRaw), swapInfo = null, simTok = null;
   const budget = ComputeBudgetProgram.setComputeUnitLimit({ units: 600000 });
-  const swapIxs = async (qs, maxLamports, maxTokenIn = 0n) => {
+  const wsolAta = PublicKey.findProgramAddressSync([user.toBytes(), TOKEN.toBytes(), WSOL_MINT.toBytes()], ATA_PROG)[0].toBase58(); let swapCtx = null;
+  const swapIxs = async (qs, maxLamports, maxSwapIn) => {
     const res = await fetch(`${cfg.jupiter}/swap-instructions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ quoteResponse: qs, userPublicKey: user.toBase58(), wrapAndUnwrapSol: true, dynamicComputeUnitLimit: true, dynamicSlippage: false }) });
     if (!res.ok) throw new Error('Swap service error (' + res.status + ')'); const j = await res.json(); if (j.error) throw new Error('Swap service: ' + j.error);
-    const all = [...(j.computeBudgetInstructions || []), ...(j.setupInstructions || []), j.swapInstruction, ...(j.cleanupInstruction ? [j.cleanupInstruction] : [])]; audit(all, maxLamports, { user: user.toBase58(), maxTokenIn });
+    const all = [...(j.computeBudgetInstructions || []), ...(j.setupInstructions || []), j.swapInstruction, ...(j.cleanupInstruction ? [j.cleanupInstruction] : [])]; audit(all, maxLamports, { user: user.toBase58(), wsolAta, maxSwapIn }); swapCtx = { maxLamports, maxSwapIn, wsolAta };
     for (const a of j.addressLookupTableAddresses || []) { const acc = await conn.getAccountInfo(new PublicKey(a)); if (acc) alts.push(new AddressLookupTableAccount({ key: new PublicKey(a), state: AddressLookupTableAccount.deserialize(acc.data) })); }
     for (const i of j.computeBudgetInstructions || []) ixs.push(ix(i)); for (const i of j.setupInstructions || []) ixs.push(ix(i)); ixs.push(ix(j.swapInstruction)); if (j.cleanupInstruction) ixs.push(ix(j.cleanupInstruction));
   };
@@ -40,13 +50,13 @@ async function build({ q, cfg, conn, user, mint, tokenProg, ata, swapLamports, p
     const tprog = tinfo.owner.equals(TOKEN22) ? TOKEN22 : TOKEN; const [tata] = PublicKey.findProgramAddressSync([user.toBytes(), tprog.toBytes(), tmint.toBytes()], ATA_PROG);
     const bal = await conn.getTokenAccountBalance(tata).catch(() => null); const have = bal ? BigInt(bal.value.amount) : 0n;
     if (have < maxIn) throw new Error(`You need up to ${Number(maxIn) / 10 ** payToken.dec} ${payToken.sym} in this wallet (you have ${Number(have) / 10 ** payToken.dec}).`);
-    await swapIxs(qs, 6000000n, maxIn); burn = target; swapInfo = { expectOut: target, minOut: target, inSym: payToken.sym, maxIn, inDec: payToken.dec };
+    simTok = { addr: tata, before: have, max: maxIn }; await swapIxs(qs, 6000000n, maxIn); burn = target; swapInfo = { expectOut: target, minOut: target, inSym: payToken.sym, maxIn, inDec: payToken.dec };
   } else if (q.method === 'sol' && q.swap) {
     onStep && onStep('Getting the best $VWFEST route from Jupiter…');
     const sw = swapLamports;
     const qs = await jget(`${cfg.jupiter}/quote?inputMint=${WSOL}&outputMint=${cfg.mint}&amount=${sw}&slippageBps=${cfg.slippageBps}&onlyDirectRoutes=true&restrictIntermediateTokens=true`);
     const minOut = BigInt(qs.otherAmountThreshold); if (minOut < BigInt(q.burnMin)) throw new Error('The $VWFEST price moved, or your wallet holds too little SOL for this purchase. Please start again.');
-    await swapIxs(qs, sw + 6000000n); burn = minOut; swapInfo = { expectOut: BigInt(qs.outAmount), minOut, swapLamports: sw };
+    await swapIxs(qs, sw + 6000000n, sw); burn = minOut; swapInfo = { expectOut: BigInt(qs.outAmount), minOut, swapLamports: sw };
   } else {
     ixs.push(budget);
     if (q.method === 'vwfest' || !q.swap) { // paying in tokens you already hold (or test-network mode)
@@ -55,7 +65,7 @@ async function build({ q, cfg, conn, user, mint, tokenProg, ata, swapLamports, p
     }
   }
   if (BigInt(q.devLamports) > 0n) ixs.push(SystemProgram.transfer({ fromPubkey: user, toPubkey: new PublicKey(q.devWallet), lamports: BigInt(q.devLamports) }));
-  ixs.push(new TransactionInstruction({ programId: tokenProg, keys: [{ pubkey: ata, isSigner: false, isWritable: true }, { pubkey: mint, isSigner: false, isWritable: true }, { pubkey: user, isSigner: true, isWritable: false }], data: cat([Uint8Array.of(8)], u64(burn)) }));
+  ixs.push(new TransactionInstruction({ programId: tokenProg, keys: [{ pubkey: ata, isSigner: false, isWritable: true }, { pubkey: mint, isSigner: false, isWritable: true }, { pubkey: user, isSigner: true, isWritable: false }], data: cat([Uint8Array.of(15)], u64(burn), Uint8Array.of(cfg.decimals)) })); // burnChecked: the only burn the server verifies (and the mint decimals are enforced on-chain)
   let asset = null;
   if (q.uri) { asset = Keypair.generate(); const P = CORE; const none = { pubkey: P, isSigner: false, isWritable: false };
     ixs.push(new TransactionInstruction({ programId: CORE, keys: [{ pubkey: asset.publicKey, isSigner: true, isWritable: true }, none, none, { pubkey: user, isSigner: true, isWritable: true }, none, none, { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, none], data: cat(Uint8Array.of(0, 0), ...str(q.name || 'VW FEST NFT'), ...str(q.uri), Uint8Array.of(0)) })); }
@@ -63,13 +73,17 @@ async function build({ q, cfg, conn, user, mint, tokenProg, ata, swapLamports, p
   onStep && onStep('Checking the transaction…');
   const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash('confirmed');
   const msg = new TransactionMessage({ payerKey: user, recentBlockhash: blockhash, instructions: ixs }).compileToV0Message(alts); const tx = new VersionedTransaction(msg); if (asset) tx.sign([asset]);
+  const auditCtx = { alts, c: { user: user.toBase58(), mint: cfg.mint, decimals: cfg.decimals, burn, memo: 'vwfest:' + q.id, devWallet: BigInt(q.devLamports) > 0n ? q.devWallet : '', devLamports: BigInt(q.devLamports), asset: asset ? asset.publicKey.toBase58() : null, name: q.name || 'VW FEST NFT', uri: q.uri || '', swap: swapCtx } };
+  auditTx(tx, auditCtx); // 1st audit: the compiled transaction, before it is simulated or shown
   const size = tx.serialize().length; if (size > 1232) throw new Error(`Transaction too large (${size} bytes). Try again; the route may have changed.`);
-  const pre = await conn.getBalance(user, 'confirmed'); const sim = await conn.simulateTransaction(tx, { sigVerify: false, replaceRecentBlockhash: true, commitment: 'confirmed', accounts: { encoding: 'base64', addresses: [user.toBase58()] } });
+  const pre = await conn.getBalance(user, 'confirmed'); const sim = await conn.simulateTransaction(tx, { sigVerify: false, replaceRecentBlockhash: true, commitment: 'confirmed', accounts: { encoding: 'base64', addresses: [user.toBase58(), ...(simTok ? [simTok.addr.toBase58()] : [])] } });
   if (sim.value.err) throw new Error('This purchase would fail on-chain: ' + JSON.stringify(sim.value.err).slice(0, 140) + (sim.value.logs ? ' · ' + (sim.value.logs.filter((l) => /error|insufficient|failed/i.test(l)).slice(-1)[0] || '') : ''));
+  if (simTok) { const a1 = sim.value.accounts && sim.value.accounts[1]; if (!a1 || !a1.data) throw new Error('Could not check how much of your token the swap uses. Aborted.'); const raw = Uint8Array.from(atob(a1.data[0]), (c) => c.charCodeAt(0)); const after = new DataView(raw.buffer).getBigUint64(64, true); if (simTok.before - after > simTok.max) throw new Error('Simulation shows the swap taking more of your token than quoted. Aborted.'); } // belt and braces on top of the instruction-data bound
   const post = sim.value.accounts && sim.value.accounts[0] ? sim.value.accounts[0].lamports : null; const spentLamports = post === null ? null : pre - post;
-  return { tx, asset, conn, burn, blockhash, lastValidBlockHeight, swapInfo, spentLamports, size, units: sim.value.unitsConsumed, user, ata, balance: BigInt(pre) };
+  return { auditCtx, tx, asset, conn, burn, blockhash, lastValidBlockHeight, swapInfo, spentLamports, size, units: sim.value.unitsConsumed, user, ata, balance: BigInt(pre) };
 }
 export async function prepare({ q, cfg, server, pubkey, onStep, payToken, sweep, reserveLamports }) {
+  assertTop();
   // The browser talks to the public RPC directly (simulate + broadcast): the game server has no transaction relay by design. Reads could use /api/rpc, but one endpoint keeps it simple.
   const cbase = { commitment: 'confirmed', disableRetryOnRateLimit: true }; // simulate + broadcast MUST go to the public RPC (the proxy is read-only); the proxy (with the session token) is only a fallback for reads when no public RPC is configured
   const conn = cfg.publicRpcUrl ? new Connection(cfg.publicRpcUrl, cbase) : new Connection(server + '/api/rpc', { ...cbase, fetch: rpcFetch });
@@ -86,9 +100,12 @@ export async function prepare({ q, cfg, server, pubkey, onStep, payToken, sweep,
   if (sw === p1.swapInfo.swapLamports) return p1; const p2 = await build({ ...base, swapLamports: sw }); return p2;
 }
 export async function signAndSend(prep, provider, onStep) {
+  assertTop();
   onStep && onStep('Approve in your wallet…');
-  const signed = await provider.signTransaction(prep.tx);
-  if (!signed || !signed.message || !sameMessage(signed.message.serialize(), prep.tx.message.serialize())) throw new Error('Your wallet returned a different transaction than the one shown. Nothing was sent.'); // re-audit: the signed message must be byte-identical to the audited one
+  // Re-audit the EXACT bytes that go to the wallet: decode them afresh, audit that, sign that, and require the wallet to return the same message.
+  const toSign = VersionedTransaction.deserialize(prep.tx.serialize()); auditTx(toSign, prep.auditCtx); const audited = toSign.message.serialize();
+  const signed = await provider.signTransaction(toSign);
+  if (!signed || !signed.message || !sameMessage(signed.message.serialize(), audited)) throw new Error('Your wallet returned a different transaction than the one shown. Nothing was sent.');
   onStep && onStep('Sending…');
   const raw = signed.serialize(); const sig = await prep.conn.sendRawTransaction(raw, { skipPreflight: false, maxRetries: 3 });
   onStep && onStep('Confirming on Solana…'); const t0 = Date.now();
