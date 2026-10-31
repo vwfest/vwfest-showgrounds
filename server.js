@@ -64,7 +64,7 @@ const mint = {
 };
 // Embedded wallet (Google sign-in -> non-custodial Solana wallet) via Web3Auth / MetaMask Embedded Wallets. The client id is public by design.
 mint.embedded = process.env.WEB3AUTH_CLIENT_ID ? { provider: 'web3auth', clientId: process.env.WEB3AUTH_CLIENT_ID, network: NETWORK === 'mainnet-beta' ? 'sapphire_mainnet' : 'sapphire_devnet' } : null; // coupled to the Solana network: a devnet server never talks to the Web3Auth mainnet network (and vice versa)
-mint.entryUsd = num(process.env.ENTRY_ONRAMP_USD, mint.feeUsd); mint.entryMinBurnPct = Math.min(Math.max(num(process.env.ENTRY_MIN_BURN_PCT, 60), 10), 100);
+mint.entryUsd = num(process.env.ENTRY_ONRAMP_USD, mint.feeUsd); mint.entryMinBurnPct = 102; // no entry discount: a card/transfer top-up must cover the full price (+2% for fees); the server quotes the normal burn
 mint.payTokens = (() => { const d = [['USDC', 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 6], ['USDT', 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', 6], ['BONK', 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263', 5], ['JUP', 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN', 6]].map(([sym, mint, dec]) => ({ sym, mint, dec })); try { const e = JSON.parse(process.env.PAY_TOKENS || 'null'); if (Array.isArray(e)) return e.filter((t) => t && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(t.mint) && /^[A-Za-z0-9]{1,10}$/.test(t.sym) && t.dec >= 0 && t.dec <= 12).slice(0, 12); } catch {} return d; })();
 const vcfg = { feeUsd: num(process.env.VENDOR_FEE_USD, 30), days: Math.min(Math.max(Math.round(num(process.env.VENDOR_DAYS, 30)), 1), 365), plots: Math.min(Math.max(Math.round(num(process.env.VENDOR_BOOTHS, 24)), 4), 24), imgKb: Math.min(Math.max(num(process.env.VENDOR_IMG_KB, 150), 20), 400), autoHide: Math.max(Math.round(num(process.env.VENDOR_AUTOHIDE_REPORTS, 3)), 2), premod: process.env.VENDOR_PREMOD === '1', maxProducts: 6 };
 const ADMIN_SECRET = process.env.ADMIN_SECRET && process.env.ADMIN_SECRET.length >= 16 ? process.env.ADMIN_SECRET : '';
@@ -422,7 +422,7 @@ async function handle(c, m) {
         if (kind === 'avatar') {
           if (method !== 'sol') return hub.json(c, { t: 'quoteerr', why: 'Avatar minting is paid in SOL (100% is used to buy back and burn $VWFEST).' });
           code = avatar.pack(p.av); if (burns.codes.has(code)) return hub.json(c, { t: 'quoteerr', why: 'This exact avatar has already been minted. Change a trait to mint a new one.' });
-          usd = mint.feeUsd; devPct = 0; uri = `${publicUrl}/nft/${code}.json`; extra = { name: 'VW FEST Avatar', code }; entry = m.entry === true && onramp.providers().length > 0 && !!p.rampAt && Date.now() - p.rampAt < 3 * 3600e3 && !!p.rampAddr && p.proven && p.proven.get(p.rampAddr) > Date.now(); // the reduced-burn entry quote only exists when an on-ramp can actually deliver the funds (otherwise any client could ask for it)
+          usd = mint.feeUsd; devPct = 0; uri = `${publicUrl}/nft/${code}.json`; extra = { name: 'VW FEST Avatar', code }; /* no entry discount: m.entry is ignored (a session issued is not proof that anything was paid) */
         } else if (kind === 'shop') {
           item = SHOP.find((x) => x.id === m.item); if (!item) return hub.json(c, { t: 'quoteerr', why: 'Unknown item.' });
           if (p.prof.items.has(item.id)) return hub.json(c, { t: 'quoteerr', why: 'You already own this.' });
@@ -437,7 +437,6 @@ async function handle(c, m) {
         } else return;
         const q = await chain.quote({ kind, usd, method, devWalletOk: !!mint.devWallet, devPct, discountPct, entry });
         if (q.devPct > 0 && !q.devWallet) return hub.json(c, { t: 'quoteerr', why: 'Paying in SOL is not available right now.' });
-        if (entry) { q.burnMin = (BigInt(q.burnRaw) * BigInt(mint.entryMinBurnPct) / 100n).toString(); } // Entry: the player burns what the on-ramp delivered minus fees, never less than this share
         const rec = pay.create({ ...q, kind, item: item && item.id, pid: p.prof.id, uri, code, plot: extra.plot });
         if (kind === 'ride') { rec.uri = `${publicUrl}/ride/${rec.id}.json`; extra = { name: 'VW Fest Ride', commit: commitOf(serverSeed(rec.id)) }; }
         hub.json(c, { t: 'quote', q: { id: rec.id, kind, item: rec.item, method, usd, paidUsd: q.paidUsd, solUsd: q.solUsd, discountPct: q.discountPct, devPct: q.devPct, swap: q.swap, totalLamports: q.totalLamports, swapLamports: q.swapLamports, devLamports: q.devLamports, devWallet: q.devWallet, burnRaw: q.burnRaw, burnMin: q.burnMin, burnUi: q.burnUi, entry, uri: rec.uri, expires: rec.expires, ...extra } });

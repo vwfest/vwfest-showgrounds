@@ -2,7 +2,7 @@
 // WebRTC signaling gates (voice on both sides, field allow-list, size/rate), chat/nick filter folding, admin mute/kick/ban, async handler safety, joining guard.
 const assert = require('assert'); const crypto = require('crypto'); const WebSocket = require('ws');
 const PORT = 3362, BASE = `http://127.0.0.1:${PORT}`;
-Object.assign(process.env, { SERVER_SECRET: 'rt-secret-0123456789-0123456789abcdef', PORT: String(PORT), MINT_NETWORK: 'devnet', DJ_SLOT_MS: '60000', ADMIN_SECRET: 'rt-admin-secret-0123456789', TURN_URL: 'turn:turn.example.com:3478', ONRAMP_URL_TEMPLATE: 'https://ramp.example/buy?wallet={address}&amount={usd}&ref={ref}', TURN_SECRET: 'rt-turn-secret-0123456789', TURN_USERNAME: 'static', TURN_CREDENTIAL: 'shared', MAX_CONNS_PER_IP: '200', PROFILE_CREATE_PER_HOUR: '100' });
+Object.assign(process.env, { SERVER_SECRET: 'rt-secret-0123456789-0123456789abcdef', PORT: String(PORT), MINT_NETWORK: 'devnet', MINT_ENABLED: '1', VWFEST_MINT: '9ktd1qdiu9wRFhxHPczWKrKRGmJb9nkanv2Zz27Rpump', DEV_WALLET: 'DV4gtG2VpnDtFUVFnnrE5YM3A6LrV5qAcdfaaUwLFRok', FIXED_SOL_USD: '150', SOLANA_RPC_URL: 'http://127.0.0.1:1', DJ_SLOT_MS: '60000', ADMIN_SECRET: 'rt-admin-secret-0123456789', TURN_URL: 'turn:turn.example.com:3478', ONRAMP_URL_TEMPLATE: 'https://ramp.example/buy?wallet={address}&amount={usd}&ref={ref}', TURN_SECRET: 'rt-turn-secret-0123456789', TURN_USERNAME: 'static', TURN_CREDENTIAL: 'shared', MAX_CONNS_PER_IP: '200', PROFILE_CREATE_PER_HOUR: '100' });
 const S = require('../server.js'); const { cleanChat, cleanName } = require('../lib/names');
 let n = 0; const t = async (name, f) => { try { await f(); n++; console.log('ok  ', name); } catch (e) { console.error('FAIL', name, e.stack.split('\n').slice(0, 3).join(' | ')); process.exitCode = 1; } };
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -91,10 +91,13 @@ process.on('unhandledRejection', (e) => { console.error('UNHANDLED REJECTION', e
     O.send({ t: 'onramp', provider: 'nope', purpose: 'entry' }); assert((await O.wait('onramperr')).why);
   });
   await t('headers: CSP frame-ancestors none (nobody may frame the pages Render serves)', async () => { const r = await fetch(BASE + '/'); const csp = r.headers.get('content-security-policy') || ''; assert(/frame-ancestors 'none'/.test(csp), csp); });
-  await t('entry discount: entry:true is honoured only after the server issued an on-ramp session to this session\'s proven wallet', async () => {
-    const E2 = await join('Entry007'); const ask = async (entry) => { E2.msgs.length = 0; E2.waiters = []; await wait(1300); E2.send({ t: 'quote', kind: 'avatar', method: 'sol', entry }); return Promise.race([E2.wait('quote'), E2.wait('quoteerr')]); };
-    const pl = S.hub.find(E2.welcome.pid); assert(!pl.rampAt); const q = await ask(true); if (q.t === 'quote') assert(!q.q.entry, 'no discount without an on-ramp session'); else assert(q.t === 'quoteerr'); // (purchases may be disabled in this test env: then there is no quote at all)
-    assert(!(S.hub.find(E2.welcome.pid).rampAt), 'still no session');
+  await t('entry discount is GONE: even with a proven wallet AND an on-ramp session issued (nothing paid), entry:true gets the normal price; the quote carries no entry flag', async () => {
+    const nacl = require('tweetnacl'); const bs58 = require('bs58').default || require('bs58'); const kp = nacl.sign.keyPair(); const pk = bs58.encode(kp.publicKey);
+    const E2 = await join('Entry007'); E2.send({ t: 'wauth', pubkey: pk }); const ch = await E2.wait('wchal'); E2.send({ t: 'wproof', pubkey: pk, nonce: ch.nonce, sig: Buffer.from(nacl.sign.detached(Buffer.from(ch.message), kp.secretKey)).toString('base64') }); assert((await E2.wait('wok')).ok);
+    E2.send({ t: 'onramp', provider: 'custom', purpose: 'entry' }); assert((await E2.wait('onrampres')).url, 'the server issued an on-ramp session (this is all the old discount checked for)'); assert(S.hub.find(E2.welcome.pid).rampAt, 'session recorded');
+    const ask = async (entry) => { E2.msgs.length = 0; E2.waiters = []; await wait(1300); E2.send({ t: 'quote', kind: 'avatar', method: 'sol', entry }); return Promise.race([E2.wait('quote'), E2.wait('quoteerr')]); };
+    const q0 = await ask(false), q1 = await ask(true); assert.strictEqual(q0.t, 'quote', 'quotes must be available in this test: ' + JSON.stringify(q0)); assert.strictEqual(q1.t, 'quote');
+    assert(!q1.q.entry, 'no entry flag on the quote'); assert.strictEqual(q1.q.burnMin, q0.q.burnMin, 'identical required burn with or without entry:true'); assert.strictEqual(q1.q.burnRaw, q0.q.burnRaw);
   });
   await t('headers: Permissions-Policy locks camera/geolocation/payment/usb..., microphone only for self', async () => { const r = await fetch(BASE + '/healthz'); const pp = r.headers.get('permissions-policy') || ''; assert(/camera=\(\)/.test(pp) && /geolocation=\(\)/.test(pp) && /payment=\(\)/.test(pp) && /microphone=\(self\)/.test(pp) && /usb=\(\)/.test(pp), pp); });
   await t('client source guards: __sg only on localhost, framed pages refuse wallet/pay UI, creator-fee address shown in full with a copy button, no key export in signing', () => {
