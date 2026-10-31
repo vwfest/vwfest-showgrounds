@@ -8,7 +8,7 @@
   "scripts": {
     "build": "node build.cjs",
     "start": "node server.js",
-    "test": "node test/unit.cjs && node test/move.cjs && node test/api.cjs && node test/guide.cjs && node test/security.cjs && node test/e2e.cjs && node test/purchase.cjs && node test/spots.cjs",
+    "test": "node test/unit.cjs && node test/move.cjs && node test/api.cjs && node test/guide.cjs && node test/security.cjs && node test/e2e.cjs && node test/purchase.cjs && node test/spots.cjs && node test/nft.cjs",
     "test:security": "node test/security.cjs",
     "test:unit": "node test/unit.cjs",
     "test:guide": "node test/guide.cjs",
@@ -17,7 +17,8 @@
     "test:purchase": "node test/purchase.cjs",
     "test:solana": "npm --prefix solana test",
     "test:move": "node test/move.cjs",
-    "test:spots": "node test/spots.cjs"
+    "test:spots": "node test/spots.cjs",
+    "test:nft": "node test/nft.cjs"
   },
   "dependencies": {
     "compression": "^1.8.2",

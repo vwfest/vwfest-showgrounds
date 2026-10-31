@@ -11,6 +11,8 @@ import { buildQuiz, defaultQuiz, buildEditor } from './editor.js';
 import * as UI from './ui.js';
 import * as V from './vendors.js';
 import { walkAngle, walkDir } from './move.mjs';
+import { attachNft, animateNft } from './nftgfx.js';
+import { nftAvatarModal } from './nftui.js';
 import { FIELDS, VIBES, DEFAULT } from '../shared/traits.js';
 
 const CFG0 = window.SG_CONFIG || {}; const onGh = /github\.io$/.test(location.hostname) || location.protocol === 'file:';
@@ -28,7 +30,7 @@ let voice = null, scene, renderer, camera, world, sky, me3 = null, joined = fals
 const ctx = { net, server: SERVER, state, waiters, get cfg() { return state.cfg; }, get voice() { return voice; }, pack: (av) => UI.packAv(av, FIELDS), closeTop() { const m = $('#modals').lastElementChild; if (m) m.remove(); }, openEditor: () => openEditor(), entry: (o) => UI.entryModal(ctx, o), purchase: (kind, o) => UI.purchaseFlow(ctx, kind, { ...o, title: kind === 'ride' ? '🎁 Mystery ride' : kind === 'shop' ? o.item.name : 'Mint avatar NFT' }), voiceChanged: () => updateVoiceHud(), shopRedraw: null, garageRedraw: null };
 const on = (t, f) => { const prev = net.on[t]; net.on[t] = (m) => { if (prev) prev(m); f(m); }; };
 // resolve waiters
-for (const t of ['quote', 'quoteerr', 'buyres', 'wchal', 'wok']) on(t, (m) => { const w = waiters[t]; if (w && w.length) { waiters[t] = []; w.forEach((f) => f(m)); } });
+for (const t of ['quote', 'quoteerr', 'buyres', 'wchal', 'wok', 'nfts', 'nftres']) on(t, (m) => { const w = waiters[t]; if (w && w.length) { waiters[t] = []; w.forEach((f) => f(m)); } });
 
 // ---------- renderer / scene ----------
 let gfx = null;
@@ -46,7 +48,7 @@ addEventListener('resize', () => renderer && resize());
 
 // ---------- entities ----------
 function spawnEntity(info, self) {
-  const e = { id: info.id, key: nickKey(info.nick), nick: info.nick, av: info.av, eq: info.eq || {}, m: !!info.m, rd: info.rd || null, pk: info.pk || null, vibe: info.av.vibe, x: 0, y: 0, z: 0, yaw: 0, tx: 0, ty: 0, tz: 0, tyaw: 0, flags: 0, vis: false, self: !!self, speed: 0, walkT: 0, emote: 0, emoteT: 0, lastPos: null, car: null, person: null, tag: null, bubble: null, bubbleT: 0, mic: null, dist: 0, hop: 'dip' };
+  const e = { id: info.id, key: nickKey(info.nick), nick: info.nick, av: info.av, eq: info.eq || {}, m: !!info.m, rd: info.rd || null, pk: info.pk || null, nf: info.nf || null, vibe: info.av.vibe, x: 0, y: 0, z: 0, yaw: 0, tx: 0, ty: 0, tz: 0, tyaw: 0, flags: 0, vis: false, self: !!self, speed: 0, walkT: 0, emote: 0, emoteT: 0, lastPos: null, car: null, person: null, tag: null, bubble: null, bubbleT: 0, mic: null, dist: 0, hop: 'dip' };
   build(e); return e;
 }
 function build(e) {
@@ -54,8 +56,8 @@ function build(e) {
   if (e.car) scene.remove(e.car);
   e.person = buildPerson(e.av, e.eq); e.person.root.visible = false; scene.add(e.person.root);
   const spec = e.rd ? rideSpec(e.rd) : avatarCarSpec(e.av); e.carSpec = spec; e.car = carFor(spec); e.car.visible = false; scene.add(e.car);
-  if (e.tag) { e.person.root.remove(e.tag); } e.tag = makeTag(e.nick, e.vibe, e.m); e.tag.position.y = 2.05; e.person.root.add(e.tag);
-  if (!e.mic) { e.mic = makeMic(); } e.mic.visible = false; e.mic.position.y = 2.45; e.person.root.add(e.mic);
+  if (e.tag) { e.person.root.remove(e.tag); } e.tag = makeTag(e.nick, e.vibe, e.m, e.nf && e.nf.n); e.tag.position.y = e.nf ? 2.13 : 2.05; e.person.root.add(e.tag);
+  if (!e.mic) { e.mic = makeMic(); } e.mic.visible = false; e.mic.position.y = e.nf ? 2.55 : 2.45; e.person.root.add(e.mic); attachNft(e.person, e.av, e.nf, SERVER);
   // parked ride
 }
 function setParked(e) {
@@ -64,9 +66,9 @@ function setParked(e) {
 }
 function updateInfo(info) {
   const old = state.roster.get(info.id); const e = players.get(info.id);
-  const rec = { id: info.id, nick: info.nick, av: info.av, eq: info.eq || {}, m: info.m, rd: info.rd || null, pk: info.pk || null }; state.roster.set(info.id, rec);
-  if (info.id === state.me.id) { Object.assign(state.me, rec); if (me3) { me3.av = rec.av; me3.eq = rec.eq; me3.m = !!rec.m; me3.rd = rec.rd; me3.pk = rec.pk; me3.vibe = rec.av.vibe; build(me3); setParked(me3); } return; }
-  if (e) { const changed = JSON.stringify([e.av, e.eq, e.m, e.rd]) !== JSON.stringify([rec.av, rec.eq, !!rec.m, rec.rd]); Object.assign(e, { av: rec.av, eq: rec.eq, m: !!rec.m, rd: rec.rd, pk: rec.pk, vibe: rec.av.vibe }); if (changed) build(e); }
+  const rec = { id: info.id, nick: info.nick, av: info.av, eq: info.eq || {}, m: info.m, rd: info.rd || null, pk: info.pk || null, nf: info.nf || null }; state.roster.set(info.id, rec);
+  if (info.id === state.me.id) { Object.assign(state.me, rec); if (me3) { me3.av = rec.av; me3.eq = rec.eq; me3.m = !!rec.m; me3.rd = rec.rd; me3.pk = rec.pk; me3.nf = rec.nf; me3.vibe = rec.av.vibe; build(me3); setParked(me3); } return; }
+  if (e) { const changed = JSON.stringify([e.av, e.eq, e.m, e.rd, e.nf]) !== JSON.stringify([rec.av, rec.eq, !!rec.m, rec.rd, rec.nf]); Object.assign(e, { av: rec.av, eq: rec.eq, m: !!rec.m, rd: rec.rd, nf: rec.nf, pk: rec.pk, vibe: rec.av.vibe }); if (changed) build(e); }
   setParked(e || { id: info.id, ...rec });
 }
 
@@ -154,7 +156,7 @@ function updateEntity(e, dt, t, self) {
   const driving = !!(e.flags & FL.DRIVING); const camd = Math.hypot(e.x - camera.position.x, e.z - camera.position.z); e.dist = camd;
   const show = camd < 100; e.person.root.visible = show && !driving; e.car.visible = show && driving;
   e.person.root.position.set(e.x, e.y, e.z); e.person.root.rotation.y = e.yaw; e.car.position.set(e.x, 0, e.z); e.car.rotation.y = e.yaw;
-  if (e.person.root.visible) { setLOD(e.person, camd > 42 && !self); pose(e, dt, t, e.speed > 0.7); }
+  if (e.person.root.visible) { setLOD(e.person, camd > 42 && !self); pose(e, dt, t, e.speed > 0.7); animateNft(e.person, t, e.id, camd < 60); }
   const tagOn = camd < 38 || self; if (e.tag.visible !== tagOn) e.tag.visible = tagOn;
   if (e.car.visible && e.car.userData.hydro) hydraulics(e.car, t, 'hop', self ? L.hydro : !!(e.flags & FL.AIR));
   if (e.bubble) { e.bubbleT -= dt; if (e.bubbleT <= 0) { e.person.root.remove(e.bubble); e.bubble.material.map.dispose(); e.bubble.material.dispose(); e.bubble = null; } }
@@ -207,6 +209,7 @@ function bindNet() {
   on('sys', (m) => { state.online = m.online; hud(); if (m.kind !== 'leave') addChat({ text: m.text, kind: m.kind }); });
   on('chaterr', (m) => toast(m.why)); on('toast', (m) => toast(m.text));
   on('emote', (m) => { const e = m.id === state.me.id ? null : players.get(m.id); if (e) { e.emote = m.e; e.emoteT = 0; } });
+  on('nft', (m) => { const nf = m.nf || null; const rec = m.id === state.me.id ? state.me : state.roster.get(m.id); if (rec) rec.nf = nf; const e = m.id === state.me.id ? me3 : players.get(m.id); if (e) { e.nf = nf; build(e); } });
   on('corr', (m) => { L.x = m.x; L.y = m.y; L.z = m.z; L.speed = 0; });
   on('kick', (m) => { net.noReconnect = true; showKicked(m.why); });
   on('vendors', (m) => { state.vendors = m.list; state.vendorPlots = m.plots; world && world.extras && world.extras.update(m.list); if (ctx.vendorRedraw) ctx.vendorRedraw(); });
@@ -254,7 +257,7 @@ function openEditor() {
   const body = h('div', { class: 'editor' }); const sig = state.me.av;
   buildEditor(body, state.me.av, state.me.eq, state.me.av, (av) => new Promise((res) => { waiters.avres = [...(waiters.avres || []), (m) => { if (m.ok) { state.me.av = m.av; } res(m); }]; net.json({ t: 'av', av }); setTimeout(() => res({ ok: false, why: 'No answer from the server' }), 8000); }));
   const mod = modal('🧍 Avatar editor', body, { cls: 'wide' });
-  const mint = h('div', { class: 'row' }, h('button', { class: 'btn', text: '✨ Mint this avatar as an NFT ($' + (state.cfg ? state.cfg.feeUsd : 5) + ' · burns $VWFEST)', onclick: () => { mod.close(); ctx.purchase('avatar', { method: 'sol' }); } }), h('button', { class: 'btn', text: '🎟 No wallet? Entry / Mint with Google + card', onclick: () => { mod.close(); UI.entryModal(ctx); } })); body.append(mint);
+  const mint = h('div', { class: 'row' }, h('button', { class: 'btn', text: '✨ Mint this avatar as an NFT ($' + (state.cfg ? state.cfg.feeUsd : 5) + ' · burns $VWFEST)', onclick: () => { mod.close(); ctx.purchase('avatar', { method: 'sol' }); } }), h('button', { class: 'btn', text: '🎟 No wallet? Entry / Mint with Google + card', onclick: () => { mod.close(); UI.entryModal(ctx); } })); body.append(mint); if (state.cfg && state.cfg.nftAvatars) body.append(h('div', { class: 'row' }, h('button', { class: 'btn', text: state.me && state.me.nf ? '🖼 Change / remove my NFT avatar' : '🖼 Use an NFT I already own (free)', onclick: () => { mod.close(); nftAvatarModal(ctx); } })));
 }
 function helpModal() {
   modal('Welcome to the VW FEST SHOW GROUNDS', h('div', { class: 'help' }, h('p', { text: 'A free hangout for the $VWFEST community: stroll the show field, check out the cars, visit the Arcade booths and say hi.' }), h('ul', {}, h('li', { text: 'Move: WASD / arrows (Shift to run) · Space: jump · drag to look · scroll to zoom' }), h('li', { text: 'F: use a booth / tent · E: drive your VW (A/D steer) · P: park · 1-5: emotes' }), h('li', { text: 'Click a player to open their profile card' }), h('li', { text: 'Enter: chat (Nearby or Global). Voice: open 🎙 and join; hold V to talk' }), h('li', { text: 'Mobile: left stick to move, buttons on the right' })), h('p', { class: 'muted', text: 'Shop, rides and NFT minting are optional. A wallet is only needed for those, and every purchase burns $VWFEST.' })));

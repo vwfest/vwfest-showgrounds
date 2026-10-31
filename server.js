@@ -7,7 +7,7 @@ const http = require('http');
 const path = require('path');
 const crypto = require('crypto');
 require('./lib/secret'); // fails fast in production without SERVER_SECRET
-const chain = require('./lib/chain'); // Solana payments module (solana/): quotes + on-chain verification (INTERFACES.md §1)
+const chain = require('./lib/chain'); const { NftAvatars } = require('./lib/nftavatar'); // Solana payments module (solana/): quotes + on-chain verification (INTERFACES.md §1)
 const walletauth = require('./lib/walletauth');
 const { WebSocketServer } = require('ws');
 const { Hub } = require('./lib/hub');
@@ -64,6 +64,7 @@ if (!PROD) { ORIGINS.add(`http://127.0.0.1:${PORT}`); ORIGINS.add(`http://localh
 const hub = new Hub(cfg);
 const burns = new Burns({ network: NETWORK, mint: mint.mint, decimals: mint.decimals, rpcUrl: mint.rpcUrl, explorer: mint.explorer.bind(mint), base: publicUrl });
 const profiles = new Profiles((code) => burns.mintedBy(code));
+const nftav = new NftAvatars({ hub, profiles, env: process.env, publicUrl: publicUrl, db: (sql, params) => { if (!profiles.q) throw new Error('no db'); return profiles.q(sql, params); } });
 const rides = new Rides();
 const pay = new Pay(mint);
 const SHOP = catalog();
@@ -114,7 +115,7 @@ const iceServers = () => {
 };
 const shopView = () => SHOP.map((i) => ({ ...i, vwfestUsd: Math.round(i.usd * (1 - mint.discountPct / 100) * 100) / 100 }));
 const PUBLIC_RPC = process.env.PUBLIC_RPC_URL || RPC_DEFAULT[NETWORK]; // what browsers broadcast through (never the keyed server RPC)
-const payFlags = () => ({ publicRpcUrl: PUBLIC_RPC, enabled: mint.enabled, reason: mint.reason, network: mint.network, mint: mint.mint, decimals: mint.decimals, feeUsd: mint.feeUsd, rideUsd: mint.rideUsd, slippageBps: mint.slippageBps, discountPct: mint.discountPct, devFeePct: mint.devFeePct, solShopEnabled: !!mint.devWallet, jupiter: mint.jupiter, embedded: mint.embedded, onramp: onramp.providers().map(({ id, name, how }) => ({ id, name, how })), entryUsd: mint.entryUsd, entryMinBurnPct: mint.entryMinBurnPct, payTokens: mint.payTokens, devnetTokensPerUsd: mint.devnetTokensPerUsd, base: publicUrl, vendor: { feeUsd: vcfg.feeUsd, days: vcfg.days, plots: vcfg.plots, imgKb: vcfg.imgKb, maxProducts: vcfg.maxProducts, devFeePct: mint.devFeePct, solAvailable: !!mint.devWallet, premod: vcfg.premod } });
+const payFlags = () => ({ nftAvatars: nftav.enabled, publicRpcUrl: PUBLIC_RPC, enabled: mint.enabled, reason: mint.reason, network: mint.network, mint: mint.mint, decimals: mint.decimals, feeUsd: mint.feeUsd, rideUsd: mint.rideUsd, slippageBps: mint.slippageBps, discountPct: mint.discountPct, devFeePct: mint.devFeePct, solShopEnabled: !!mint.devWallet, jupiter: mint.jupiter, embedded: mint.embedded, onramp: onramp.providers().map(({ id, name, how }) => ({ id, name, how })), entryUsd: mint.entryUsd, entryMinBurnPct: mint.entryMinBurnPct, payTokens: mint.payTokens, devnetTokensPerUsd: mint.devnetTokensPerUsd, base: publicUrl, vendor: { feeUsd: vcfg.feeUsd, days: vcfg.days, plots: vcfg.plots, imgKb: vcfg.imgKb, maxProducts: vcfg.maxProducts, devFeePct: mint.devFeePct, solAvailable: !!mint.devWallet, premod: vcfg.premod } });
 app.get('/api/config', (req, res) => res.set('Cache-Control', 'no-store').json({
   ...payFlags(), shop: shopView(), odds: R.TIERS.map((t, i) => ({ tier: t, pct: R.ODDS[i] })), iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }], turn: !!process.env.TURN_URL, /* TURN credentials are only sent over the authenticated WebSocket after join */ voiceRange: VOICE_RANGE, maxPlayers: cfg.maxPlayers,
 }));
@@ -186,6 +187,7 @@ app.post('/api/rpc', express.json({ limit: '8kb' }), async (req, res) => {
 // NFT metadata. Avatars are stateless: the code in the URL *is* the trait set. Rides are served from the reveal record (placeholder until the mint confirms).
 const pubRide = (r) => ({ id: r.id, code: r.code, spec: r.spec, desc: R.describe(r.spec), asset: r.asset, sig: r.sig, url: mint.explorer(r.sig, 'tx'), assetUrl: r.asset ? mint.explorer(r.asset, 'address') : null, ts: r.ts, commit: r.commit, seed: r.seed, reroll: r.reroll });
 const nftHead = (res) => res.set('Access-Control-Allow-Origin', '*');
+nftav.mount(app, (req, res, next) => next());
 app.get('/nft/:file', (req, res) => {
   const m = /^([A-Za-z0-9_-]+)\.(json|svg)$/.exec(req.params.file); const a = m && avatar.unpack(m[1]);
   if (!a) return res.status(404).type('text').send('Not found');
@@ -266,7 +268,7 @@ setInterval(() => { if (burns.version !== burnVer) { burnVer = burns.version; hu
 const ownedItems = (prof) => [...prof.items.keys()];
 const profileCard = (q) => {
   const prof = q.prof;
-  return { t: 'profile', sid: q.id, pid: prof.id, nick: prof.nick, av: prof.av, eq: prof.equipped || {}, created: prof.created, online: true, minted: burns.forProfile(prof.id), rides: rides.forProfile(prof.id).map(pubRide), items: prof.items.size };
+  return { t: 'profile', sid: q.id, pid: prof.id, nick: prof.nick, av: prof.av, eq: prof.equipped || {}, created: prof.created, online: true, minted: burns.forProfile(prof.id), rides: rides.forProfile(prof.id).map(pubRide), items: prof.items.size, nf: q.nft ? { a: q.nft.asset, n: q.nft.name } : undefined };
 };
 const inv = (p) => ({ t: 'inv', items: ownedItems(p.prof), equipped: p.prof.equipped || {}, rides: rides.forProfile(p.prof.id).map(pubRide), ride: p.prof.ride || null });
 const setRide = (p, id) => { const r = id ? rides.byId.get(id) : null; p.prof.ride = r && r.pid === p.prof.id ? id : null; p.rd = p.prof.ride ? r.spec : null; if (!p.rd) p.park = null; };
@@ -287,11 +289,19 @@ async function handle(c, m) {
       const r = hub.join(c, prof, burns.forProfile(prof.id).length > 0 || rides.forProfile(prof.id).length > 0);
       if (r.full) { hub.json(c, { t: 'full', online: hub.size, cap: cfg.maxPlayers }); return setTimeout(() => c.ws.close(1000, 'full'), 200); }
       if (r.err) return hub.json(c, { t: 'joinerr', err: r.err, why: r.why });
-      clearTimeout(c.joinTimer); setRide(r.p, prof.ride); hub.json(c, vendorMsg()); hub.welcome(r.p, { iceServers: iceServers(), cred: created, created: prof.created, inv: inv(r.p), vibe: prof.av.vibe });
+      clearTimeout(c.joinTimer); setRide(r.p, prof.ride); hub.json(c, vendorMsg()); nftav.restore && setTimeout(() => nftav.restore(r.p), 50); hub.welcome(r.p, { iceServers: iceServers(), cred: created, created: prof.created, inv: inv(r.p), vibe: prof.av.vibe });
       break;
     }
     case 'chat': if (p) hub.onChat(p, m); break;
     case 'emote': if (p) hub.onEmote(p, m.id); break;
+    case 'nfts': case 'nftuse': case 'nftclear': { // use-my-NFT avatar: wallet must have signed our challenge in this session (wauth/wproof)
+      if (!p) return; const now = Date.now(); if (now - (p.lastNft || 0) < 1500) return hub.json(c, { t: 'nftres', ok: false, why: 'Slow down a little.' }); p.lastNft = now;
+      if (m.t === 'nftclear') { nftav.clear(p); return hub.json(c, { t: 'nftres', ok: true, nf: null }); }
+      const proven = typeof m.wallet === 'string' && p.proven && p.proven.get(m.wallet) > now; if (!proven) return hub.json(c, { t: 'nftres', ok: false, needProof: true, why: 'Verify your wallet first (free signature).' });
+      (async () => { try {
+        if (m.t === 'nfts') { const r = await nftav.list(m.wallet); hub.json(c, { t: 'nfts', ok: true, items: r.items, truncated: r.truncated }); }
+        else { const r = await nftav.use(p, m.wallet, String(m.asset || '')); hub.json(c, { t: 'nftres', ...r }); }
+      } catch (e) { hub.json(c, { t: m.t === 'nfts' ? 'nfts' : 'nftres', ok: false, why: /switched on/.test(e.message) ? e.message : 'Could not read that wallet right now. Try again in a minute.' }); } })(); break; }
     case 'av': { // avatar editor save: validated, and an exact duplicate of another profile's (or a minted) trait set is rejected
       if (!p || Date.now() - (p.lastAv || 0) < 800) return; p.lastAv = Date.now();
       const r = profiles.setAvatar(p.prof.id, m.av);
@@ -388,7 +398,7 @@ async function init() {
   await burns.init();
   await chain.init({ env: process.env, db: require('./lib/db').pool() }); // one shared TLS-verified pg pool; memory-only without DATABASE_URL
   chain.mountRoutes(chainRouter, { express, rateLimit, allowedOrigins: [...ORIGINS] });
-  await vendors.init(); await rides.init(); await profiles.init();
+  await vendors.init(); await rides.init(); await profiles.init(); await nftav.init();
 }
 if (require.main === module) {
   init().then(() => {
@@ -396,4 +406,4 @@ if (require.main === module) {
   });
   process.on('SIGTERM', () => { server.close(); require('./lib/db').end().catch(() => {}); setTimeout(() => process.exit(0), 500).unref(); });
 }
-module.exports = { app, server, hub, burns, mint, cfg, profiles, rides, pay, vendors, vcfg, guideValues, init };
+module.exports = { nftav, app, server, hub, burns, mint, cfg, profiles, rides, pay, vendors, vcfg, guideValues, init };

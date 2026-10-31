@@ -138,13 +138,15 @@ export function setLOD(p, far) { for (const mm of p.nearMeshes) mm.visible = !fa
 // ---- sprites ----
 const texCache = new Map();
 function tex(key, draw, w, h) { let t = texCache.get(key); if (t) return t; const cv = document.createElement('canvas'); cv.width = w; cv.height = h; draw(cv.getContext('2d'), w, h); t = cTex(cv); texCache.set(key, t); if (texCache.size > 300) { const k = texCache.keys().next().value; texCache.get(k).dispose(); texCache.delete(k); } return t; }
-export function makeTag(nick, vibe, minted) {
-  const v = VIBES[vibe] || VIBES[0]; const t = tex('tag:' + nick + vibe + minted, (x, w, h) => {
-    x.font = '700 30px Arial, sans-serif'; const label = (minted ? '★ ' : '') + nick; const tw = Math.min(w - 40, x.measureText(label).width) + 30;
-    x.fillStyle = 'rgba(10,8,24,.72)'; const L = (w - tw) / 2; x.beginPath(); x.roundRect(L, 6, tw, h - 12, 18); x.fill(); x.strokeStyle = v.color; x.lineWidth = 3; x.stroke();
-    x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillStyle = minted ? '#ffd166' : v.color; x.fillText(label, w / 2, h / 2 + 1, w - 50);
-  }, 320, 56);
-  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthWrite: false, transparent: true, fog: false })); sp.scale.set(1.5, 0.26, 1); sp.renderOrder = 10; return sp;
+export function makeTag(nick, vibe, minted, nftName) {
+  const two = !!nftName; const H = two ? 88 : 56; const v = VIBES[vibe] || VIBES[0]; const t = tex('tag:' + nick + vibe + minted + (nftName || ''), (x, w, h) => {
+    x.font = '700 30px Arial, sans-serif'; const label = (minted || two ? '★ ' : '') + nick; let tw = Math.min(w - 40, x.measureText(label).width) + 30;
+    const sub = two ? 'NFT \u2713 ' + String(nftName).slice(0, 26) : ''; if (two) { x.font = '600 20px Arial, sans-serif'; tw = Math.max(tw, Math.min(w - 20, x.measureText(sub).width + 34)); }
+    x.fillStyle = 'rgba(10,8,24,.72)'; const L = (w - tw) / 2; x.beginPath(); x.roundRect(L, 6, tw, h - 12, 18); x.fill(); x.strokeStyle = two ? '#ffd166' : v.color; x.lineWidth = 3; x.stroke();
+    x.textAlign = 'center'; x.textBaseline = 'middle'; x.font = '700 30px Arial, sans-serif'; x.fillStyle = minted || two ? '#ffd166' : v.color; x.fillText(label, w / 2, two ? 30 : h / 2 + 1, w - 50);
+    if (two) { x.font = '600 20px Arial, sans-serif'; x.fillStyle = '#9fe8ff'; x.fillText(sub, w / 2, 63, w - 40); }
+  }, 320, H);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthWrite: false, transparent: true, fog: false })); sp.scale.set(1.5, 0.26 * H / 56, 1); sp.renderOrder = 10; return sp;
 }
 export function makeBubble(text) {
   const lines = []; let cur = ''; for (const w of text.split(' ')) { if ((cur + ' ' + w).length > 26) { lines.push(cur); cur = w; } else cur = cur ? cur + ' ' + w : w; } if (cur) lines.push(cur); const L = lines.slice(0, 4);

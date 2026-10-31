@@ -1,6 +1,8 @@
 # What's New
 
 ## 2026-10-31
+- Use an NFT you already own as your avatar: verified on-chain, shown on your chest and in a gold frame above your head, re-checked regularly (free, no burn).
+- Fixed walking: forward/back and left/right were mirrored on keyboard and joystick. The Info Booth moved clear of the arcade kiosks.
 - Info Booth at the entrance with this guide, always generated from the live prices, fees and odds.
 - Vendor Row: claim a booth for {vendorFeeUsd} and customize it.
 - Entry / Mint: sign in with Google, pay by card, mint your avatar without owning a wallet.

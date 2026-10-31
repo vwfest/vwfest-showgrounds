@@ -15,6 +15,7 @@ export function profileCardModal(ctx, m) {
   body.append(h('img', { class: 'portrait', src: `${ctx.server}/nft/${ctx.pack(m.av)}.svg`, alt: `${m.nick}'s avatar`, width: 160, height: 160 }));
   const info = h('div', { class: 'pinfo' }, h('h3', { text: m.nick }), h('div', { class: 'badge', text: `${v.icon} ${v.name}` }), h('div', { class: 'muted', text: `Profile ${m.pid}` }), h('div', { class: 'muted', text: 'Joined ' + new Date(m.created).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) }));
   if (m.minted && m.minted.length) { const mm = h('div', { class: 'minted' }, h('b', { text: '★ Minted avatar NFT' })); for (const x of m.minted.slice(0, 3)) mm.append(h('div', { class: 'small' }, link(x.assetUrl || x.url, x.asset ? 'View NFT ↗' : 'View mint tx ↗'))); info.append(mm); }
+  if (m.nf) info.append(h('div', { class: 'minted' }, h('img', { src: `${ctx.server}/api/nft-img/${m.nf.a}`, alt: m.nf.n, width: 56, height: 56, referrerpolicy: 'no-referrer', style: { borderRadius: '8px', float: 'left', marginRight: '8px' } }), h('b', { text: '🖼 NFT avatar ✓ verified' }), h('div', { class: 'small', text: m.nf.n })));
   if (m.items) info.append(h('div', { class: 'muted', text: `👕 ${m.items} shop item${m.items > 1 ? 's' : ''} owned` }));
   body.append(info);
   if (m.rides && m.rides.length) { const g = h('div', { class: 'ridegrid' }); for (const r of m.rides.slice(0, 6)) g.append(h('div', { class: 'ridemini' }, h('img', { src: `${ctx.server}/ride/${r.id}.svg`, alt: r.desc.model, width: 96, height: 96 }), tierChip(r.spec.tier), h('div', { class: 'small', text: r.desc.model + (r.desc.lowrider ? ' · LOWRIDER' : '') }))); body.append(h('div', { class: 'wide' }, h('b', { text: '🚗 Rides' }), g)); }
@@ -98,7 +99,7 @@ export function revealModal(ctx, r) {
 }
 
 // ---------- purchase flow ----------
-const waitFor = (ctx, type, ms = 20000) => new Promise((res) => { const prev = ctx.waiters[type] || []; const done = (m) => { clearTimeout(t); res(m); }; const t = setTimeout(() => { ctx.waiters[type] = (ctx.waiters[type] || []).filter((f) => f !== done); res(null); }, ms); ctx.waiters[type] = [...prev, done]; });
+export const waitFor = (ctx, type, ms = 20000) => new Promise((res) => { const prev = ctx.waiters[type] || []; const done = (m) => { clearTimeout(t); res(m); }; const t = setTimeout(() => { ctx.waiters[type] = (ctx.waiters[type] || []).filter((f) => f !== done); res(null); }, ms); ctx.waiters[type] = [...prev, done]; });
 export async function purchaseFlow(ctx, kind, opts) {
   const { cfg } = ctx; const body = h('div', { class: 'buy' }); const m = modal(opts.title || 'Purchase', body, { sticky: true });
   const say = (t, cls) => { clear(body); body.append(h('p', { class: cls || '', text: t })); };
@@ -143,7 +144,7 @@ function ageGate() {
   return { el, on() { if (cb.checked) return true; toast('Please tick the box to confirm first.'); el.classList.add('shake'); setTimeout(() => el.classList.remove('shake'), 600); return false; } };
 }
 // Challenge-response: the server sends a nonce message, the wallet signs it (no funds involved), the server verifies the ed25519 signature.
-async function proveWallet(ctx, wallet) {
+export async function proveWallet(ctx, wallet) {
   const pk = wallet.pubkey.toBase58(); ctx.net.json({ t: 'wauth', pubkey: pk }); const ch = await waitFor(ctx, 'wchal', 10000); if (!ch || ch.pubkey !== pk) throw new Error('Could not start wallet verification. Try again.');
   if (!wallet.provider.signMessage) throw new Error('This wallet cannot sign a verification message. Try Phantom, Solflare or Backpack.');
   const { signText } = await import('./wallet.js'); const sig = await signText(wallet.provider, ch.message); ctx.net.json({ t: 'wproof', pubkey: pk, nonce: ch.nonce, sig }); const ok = await waitFor(ctx, 'wok', 10000); if (!ok || !ok.ok) throw new Error((ok && ok.why) || 'Wallet verification failed.');
