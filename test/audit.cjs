@@ -3,7 +3,7 @@
 // vendor plot-hold DoS, entry-quote discount abuse, WebSocket floods/garbage, forged logins, admin endpoint, purchase-transaction inspection.
 const path = require('path'); const ROOT = path.join(__dirname, '..');
 const assert = require('assert'); const WebSocket = require('ws');
-const PORT = 3301, BASE = `http://127.0.0.1:${PORT}`;
+const PORT = 3361, BASE = `http://127.0.0.1:${PORT}`;
 Object.assign(process.env, { SERVER_SECRET: 'probe-secret-0123456789-0123456789abcdef', PORT: String(PORT), MINT_NETWORK: 'devnet', MINT_ENABLED: '1', VWFEST_MINT: '9ktd1qdiu9wRFhxHPczWKrKRGmJb9nkanv2Zz27Rpump', DEV_WALLET: 'DV4gtG2VpnDtFUVFnnrE5YM3A6LrV5qAcdfaaUwLFRok', FIXED_SOL_USD: '150', ADMIN_SECRET: 'probe-admin-secret-0123456789', MAX_CONNS_PER_IP: '60', PROFILE_CREATE_PER_HOUR: '500', DJ_SLOT_MS: '60000', SOLANA_RPC_URL: 'http://127.0.0.1:1',  VENDOR_FEE_USD: '30' });
 const S = require('../server.js'); const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const res = []; const rec = (id, sev, name, ok, note = '') => { res.push({ id, sev, name, ok, note }); if (!ok) process.exitCode = 1; console.log(ok ? 'ok  ' : 'FAIL', `[${sev}]`, id, name, ok ? '' : note); };
@@ -79,6 +79,10 @@ const join = async (nick) => { const c = await client(); await c.wait('hi'); c.s
     rec('IP', 'high', 'CF-Connecting-IP is the client address', clientIp(rq({ 'cf-connecting-ip': '203.0.113.7', 'x-forwarded-for': '1.2.3.4, 203.0.113.7, 172.64.0.1' })) === '203.0.113.7');
     rec('IP', 'high', 'without CF header: entry before the edge, never the (spoofable) first entry', clientIp(rq({ 'x-forwarded-for': '6.6.6.6, 203.0.113.9, 172.64.0.1' })) === '203.0.113.9');
     rec('IP', 'high', 'spoofed CF header with a non-IP value is ignored', clientIp(rq({ 'cf-connecting-ip': 'evil', 'x-forwarded-for': '203.0.113.9, 172.64.0.1' })) === '203.0.113.9'); delete process.env.TRUST_CF;
+    process.env.TRUST_CF = '1'; const { isCloudflare } = require('../lib/clientip');
+    rec('IP', 'high', 'CF-Connecting-IP is NOT trusted when the connection did not come from a Cloudflare range (direct hit on the origin)', clientIp(rq({ 'cf-connecting-ip': '6.6.6.6', 'x-forwarded-for': '7.7.7.7, 198.51.100.20' })) === '198.51.100.20' && clientIp(rq({ 'cf-connecting-ip': '6.6.6.6' })) === '10.0.0.1');
+    rec('IP', 'high', 'Cloudflare range check (v4 edges, v6 edges, v4-mapped, neighbours outside the ranges)', isCloudflare('172.64.0.1') && isCloudflare('104.16.5.5') && isCloudflare('2606:4700::1') && isCloudflare('::ffff:162.158.1.1') && isCloudflare('172.71.255.255') && !isCloudflare('172.72.0.0') && !isCloudflare('198.51.100.20') && !isCloudflare('2606:4701::1') && !isCloudflare('8.8.8.8') && !isCloudflare('garbage'));
+    rec('IP', 'high', 'a Cloudflare-edge IPv6 peer is honoured the same way', clientIp(rq({ 'cf-connecting-ip': '203.0.113.7', 'x-forwarded-for': '1.1.1.1, 2606:4700:10::1' })) === '203.0.113.7'); delete process.env.TRUST_CF;
     rec('IP', 'info', 'outside Render/TRUST_CF the socket/req.ip is used and headers are ignored', clientIp(rq({ 'cf-connecting-ip': '203.0.113.7' })) === '172.64.0.1'); }
   { const { enableRls } = require('../lib/rls'); const ran = []; const done = await enableRls(async (sql) => { ran.push(sql); return { rows: [{ table_name: 'profiles' }, { table_name: 'we"ird' }] }; }, 'showgrounds');
     rec('RLS', 'medium', 'RLS is enabled (no policies) on every table in the schema, identifiers quoted', done.length === 2 && ran.some((x) => x === 'ALTER TABLE "showgrounds"."profiles" ENABLE ROW LEVEL SECURITY') && ran.some((x) => x.includes('"we""ird"')));
