@@ -7,14 +7,14 @@ const S = require('../server.js'); const { Burns } = require('../lib/burns');
 const seen = []; const upstream = http.createServer((req, res) => { let b = ''; req.on('data', (d) => (b += d)); req.on('end', () => { const j = JSON.parse(b); seen.push(j); res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ jsonrpc: '2.0', id: j.id, result: 'ok' })); }); });
 let n = 0; const t = async (name, f) => { try { await f(); n++; console.log('ok  ', name); } catch (e) { console.error('FAIL', name, e.stack.split('\n').slice(0, 3).join(' | ')); process.exitCode = 1; } };
 const H = { origin: BASE, 'content-type': 'application/json' };
-const rpc = (body, headers = {}) => fetch(BASE + '/api/rpc', { method: 'POST', headers: { ...H, ...headers }, body: JSON.stringify(body) });
+let TOK = ''; const rpc = (body, headers = {}) => fetch(BASE + '/api/rpc', { method: 'POST', headers: { ...H, ...(TOK ? { 'x-rpc-token': TOK } : {}), ...headers }, body: JSON.stringify(body) });
 const client = (nick) => new Promise((res, rej) => { const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`, { headers: { origin: BASE } }); const c = { ws, msgs: [], waiters: [] }; ws.on('message', (d, bin) => { if (bin) return; const m = JSON.parse(d); c.msgs.push(m); c.waiters = c.waiters.filter((w) => !(w.t === m.t && (w.f(m), true))); }); c.wait = (t, ms = 4000) => new Promise((r2, j2) => { const old = c.msgs.find((m) => m.t === t && !m._seen); if (old) { old._seen = true; return r2(old); } const to = setTimeout(() => j2(new Error('timeout ' + t)), ms); c.waiters.push({ t, f: (m) => { clearTimeout(to); m._seen = true; r2(m); } }); }); c.send = (o) => ws.send(JSON.stringify(o)); ws.on('open', () => res(c)); ws.on('error', rej); c.nick = nick; });
 const join = async (nick) => { const c = await client(nick); await c.wait('hi'); c.send({ t: 'join', nick }); const w = await Promise.race([c.wait('welcome'), c.wait('joinerr').then((m) => { throw new Error('joinerr ' + m.why); })]); c.welcome = w; return c; };
 const b58 = (buf) => { const A = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'; let x = BigInt('0x' + buf.toString('hex')), s = ''; while (x > 0n) { s = A[Number(x % 58n)] + s; x /= 58n; } for (const v of buf) { if (v === 0) s = '1' + s; else break; } return s; };
 
 (async () => {
   await S.init(); await new Promise((r) => upstream.listen(UP, '127.0.0.1', r)); await new Promise((r) => S.server.listen(PORT, '127.0.0.1', r));
-  const A = await join('Alice1');
+  const A = await join('Alice1'); TOK = A.welcome.rpcToken.token;
   await t('(1) RPC proxy: read methods work, unknown methods are refused, bad origin refused', async () => {
     let r = await rpc({ method: 'getBalance', params: ['x'], id: 1 }); assert.strictEqual(r.status, 200);
     r = await rpc({ method: 'requestAirdrop', params: ['x', 1], id: 2 }); assert.strictEqual(r.status, 400);
@@ -23,9 +23,9 @@ const b58 = (buf) => { const A = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmn
   });
   await t('(1) RPC proxy is READ-ONLY: sendTransaction / simulateTransaction / requestAirdrop are refused outright and never reach the node', async () => {
     const tx = Buffer.alloc(300, 7).toString('base64'); const before = seen.length;
-    for (const m of ['sendTransaction', 'simulateTransaction', 'requestAirdrop', 'sendRawTransaction']) { let r = await rpc({ method: m, params: [tx], id: 1 }); assert.strictEqual(r.status, 400, m); r = await rpc({ method: m, params: [tx], id: 1 }, { 'x-rpc-token': 'anything' }); assert.strictEqual(r.status, 400, m + ' with a token'); }
+    for (const m of ['sendTransaction', 'simulateTransaction', 'requestAirdrop', 'sendRawTransaction']) { let r = await rpc({ method: m, params: [tx], id: 1 }); assert.strictEqual(r.status, 400, m); r = await rpc({ method: m, params: [tx], id: 1 }); assert.strictEqual(r.status, 400, m + ' with a valid token'); }
     for (const p of ['/api/tx/send', '/api/relay', '/api/solana/tx/send', '/api/solana/relay']) { const r = await fetch(BASE + p, { method: 'POST', headers: H, body: '{}' }); assert([404, 405].includes(r.status), p + ' -> ' + r.status); }
-    assert.strictEqual(seen.length, before, 'nothing reached the RPC node'); assert(!A.welcome.rpcToken, 'no relay tokens are issued');
+    assert.strictEqual(seen.length, before, 'nothing reached the RPC node'); assert(A.welcome.rpcToken && A.welcome.rpcToken.token, 'a session-bound READ token is issued over the WS only (never a relay)'); assert(!JSON.stringify(await (await fetch(BASE + '/api/config')).json()).includes(TOK), 'token not in /api/config');
     const cfg = await (await fetch(BASE + '/api/config')).json(); assert(cfg.publicRpcUrl, 'clients are told which public RPC to broadcast through');
   });
   await t('(6) TURN credentials are not in /api/config; they arrive over the authenticated WebSocket', async () => {

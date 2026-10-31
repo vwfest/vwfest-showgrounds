@@ -5,6 +5,7 @@ import { Gfx, TIERS, detectTier } from './gfx.js';
 import { buildPerson, setLOD, makeTag, makeBubble, makeMic } from './people.js';
 import { carFor, avatarCarSpec, rideSpec, hydraulics, PLATE_UNI } from './cars.js';
 import { Net, decodeSnapshot } from './net.js';
+import { setRpcToken, onRpcRefresh, clearRpcToken } from './rpc.mjs';
 import { Voice } from './voice.js';
 import { $, h, clear, modal, toast, fmt } from './dom.js';
 import { buildQuiz, defaultQuiz, buildEditor } from './editor.js';
@@ -211,7 +212,8 @@ function bindNet() {
   on('hi', (m) => { state.online = m.online; state.cap = m.cap; state.burns = m.burns; if (world) world.drawBurn(m.burns); hud(); });
   on('full', (m) => { showFull(m); });
   on('joinerr', (m) => { joinMsg(m.why || 'Could not join', true); if (m.err === 'stale') { localStorage.removeItem('vwfest-sg'); state.creds = null; showJoin(true); } });
-  on('welcome', (m) => onWelcome(m));
+  on('welcome', (m) => { setRpcToken(m.rpcToken); onWelcome(m); });
+  on('rpctok', (m) => setRpcToken(m.rpcToken)); onRpcRefresh(() => { if (net.open && joined) net.json({ t: 'rpctok' }); });
   on('p+', (m) => { if (!state.me || m.id === state.me.id && !joined) return; updateInfo(m); });
   on('p-', (m) => { state.roster.delete(m.id); const e = players.get(m.id); if (e) { scene.remove(e.person.root); scene.remove(e.car); players.delete(m.id); } const pk = parked.get(m.id); if (pk) { scene.remove(pk); parked.delete(m.id); } if (voice) voice.drop(m.id, true); });
   on('dj', (m) => dj.onState(m)); on('djh', () => { if (world.stage) world.stage.fx.flash = 1; });
@@ -231,7 +233,7 @@ function bindNet() {
   on('profile', (m) => UI.profileCardModal(ctx, m));
   on('avres', (m) => { /* handled by editor promise */ if (waiters.avres) { const w = waiters.avres; waiters.avres = []; w.forEach((f) => f(m)); } });
   on('rtc', (m) => { if (voice) voice.onSignal(m, players, { x: L.x, z: L.z, id: state.me.id }); });
-  on('close', (m) => { if (joined && !net.noReconnect) { joinMsg('Connection lost, reconnecting…', true); joined = false; $('#hudwrap').classList.add('dim'); } });
+  on('close', (m) => { clearRpcToken(); if (joined && !net.noReconnect) { joinMsg('Connection lost, reconnecting…', true); joined = false; $('#hudwrap').classList.add('dim'); } });
   on('open', () => { if (state.me && state.creds && !joined) { net.json({ t: 'join', id: state.creds.id, secret: state.creds.secret, nick: state.creds.nick }); } });
 }
 function onWelcome(m) {

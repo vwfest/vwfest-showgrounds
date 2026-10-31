@@ -1,6 +1,7 @@
 // Non-custodial purchase builder (lazy chunk). The player's own wallet signs; no project wallet ever holds funds.
 //  tx = [compute budget] + [Jupiter swap SOL -> $VWFEST for the swap share] + [SOL fee to creator wallet, if any] + SPL burn + [Core NFT create] + memo
 import { audit, sameMessage } from './txaudit.mjs';
+import { rpcFetch } from './rpc.mjs';
 import { Connection, PublicKey, Keypair, TransactionInstruction, TransactionMessage, VersionedTransaction, SystemProgram, ComputeBudgetProgram, AddressLookupTableAccount } from '@solana/web3.js';
 
 const TOKEN = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'), TOKEN22 = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
@@ -70,7 +71,8 @@ async function build({ q, cfg, conn, user, mint, tokenProg, ata, swapLamports, p
 }
 export async function prepare({ q, cfg, server, pubkey, onStep, payToken, sweep, reserveLamports }) {
   // The browser talks to the public RPC directly (simulate + broadcast): the game server has no transaction relay by design. Reads could use /api/rpc, but one endpoint keeps it simple.
-  const conn = new Connection(cfg.publicRpcUrl || (server + '/api/rpc'), { commitment: 'confirmed', disableRetryOnRateLimit: true });
+  const cbase = { commitment: 'confirmed', disableRetryOnRateLimit: true }; // simulate + broadcast MUST go to the public RPC (the proxy is read-only); the proxy (with the session token) is only a fallback for reads when no public RPC is configured
+  const conn = cfg.publicRpcUrl ? new Connection(cfg.publicRpcUrl, cbase) : new Connection(server + '/api/rpc', { ...cbase, fetch: rpcFetch });
   const mint = new PublicKey(cfg.mint), user = pubkey; const mintInfo = await conn.getAccountInfo(mint); if (!mintInfo) throw new Error('$VWFEST mint not found on this network.');
   const tokenProg = mintInfo.owner.equals(TOKEN22) ? TOKEN22 : TOKEN;
   const [ata] = PublicKey.findProgramAddressSync([user.toBytes(), tokenProg.toBytes(), mint.toBytes()], ATA_PROG);

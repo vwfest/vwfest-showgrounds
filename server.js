@@ -130,7 +130,7 @@ const iceServers = () => {
   return out;
 };
 const shopView = () => SHOP.map((i) => ({ ...i, vwfestUsd: Math.round(i.usd * (1 - mint.discountPct / 100) * 100) / 100 }));
-const PUBLIC_RPC = process.env.PUBLIC_RPC_URL || RPC_DEFAULT[NETWORK]; // what browsers broadcast through (never the keyed server RPC)
+const PUBLIC_RPC = (() => { const u = process.env.PUBLIC_RPC_URL || RPC_DEFAULT[NETWORK]; try { const x = new URL(u); if (x.searchParams.has('api-key') || x.username || x.password || u === mint.rpcUrl && mint.rpcUrl !== RPC_DEFAULT[NETWORK]) return RPC_DEFAULT[NETWORK]; } catch { return RPC_DEFAULT[NETWORK]; } return u; })(); // what browsers broadcast through (never the keyed server RPC)
 const payFlags = () => ({ dj: { on: dj.enabled && dj.playlist.length > 0, slotMs: dj.slotMs, queueMax: dj.queueMax }, nftAvatars: nftav.enabled, publicRpcUrl: PUBLIC_RPC, enabled: mint.enabled, reason: mint.reason, network: mint.network, mint: mint.mint, decimals: mint.decimals, feeUsd: mint.feeUsd, rideUsd: mint.rideUsd, slippageBps: mint.slippageBps, discountPct: mint.discountPct, devFeePct: mint.devFeePct, solShopEnabled: !!mint.devWallet, jupiter: mint.jupiter, embedded: mint.embedded, onramp: onramp.providers().map(({ id, name, how }) => ({ id, name, how })), entryUsd: mint.entryUsd, entryMinBurnPct: mint.entryMinBurnPct, payTokens: mint.payTokens, devnetTokensPerUsd: mint.devnetTokensPerUsd, base: publicUrl, vendor: { feeUsd: vcfg.feeUsd, days: vcfg.days, plots: vcfg.plots, imgKb: vcfg.imgKb, maxProducts: vcfg.maxProducts, devFeePct: mint.devFeePct, solAvailable: !!mint.devWallet, premod: vcfg.premod } });
 app.get('/api/config', (req, res) => res.set('Cache-Control', 'no-store').json({
   ...payFlags(), shop: shopView(), odds: R.TIERS.map((t, i) => ({ tier: t, pct: R.ODDS[i] })), iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }], turn: !!process.env.TURN_URL, /* TURN credentials are only sent over the authenticated WebSocket after join */ voiceRange: VOICE_RANGE, maxPlayers: cfg.maxPlayers,
@@ -190,16 +190,30 @@ app.post('/api/admin/vendors/:plot', adminLimit, adminAuth, express.json({ limit
 });
 // READ-ONLY JSON-RPC proxy (hides the keyed server RPC from the browser). By design there is NO way to send or simulate transactions through this server:
 // players broadcast with their own wallet / PUBLIC_RPC_URL (solana/README: "no tx relay"). Origin-locked; /api limiter applies.
-const RPC_READ = new Set(['getLatestBlockhash', 'getBalance', 'getAccountInfo', 'getTokenAccountsByOwner', 'getTokenAccountBalance', 'getMinimumBalanceForRentExemption', 'getFeeForMessage', 'getSignatureStatuses', 'isBlockhashValid', 'getBlockHeight', 'getMultipleAccounts']);
-const budgets = new Map();
+// Session-bound: only a player with a live, JOINED game socket holds a token (issued over the WS in `welcome`, rotated via {t:'rpctok'}, short-lived, bound to pid/sid and the joining Origin, revoked when the socket closes).
+// Public/anonymous callers get 401 and use PUBLIC_RPC_URL directly (the client falls back to it). Budgets: per session, per IP and global; batches and getMultipleAccounts key counts are capped (lib/rpcguard.js).
+const { RpcGuard } = require('./lib/rpcguard');
+const rpcGuard = new RpcGuard({ ttlSec: num(process.env.RPC_TOKEN_TTL_SEC, 600), perSession: num(process.env.RPC_SESSION_PER_MIN, 60), perIp: num(process.env.RPC_IP_PER_MIN, 120), global: num(process.env.RPC_GLOBAL_PER_MIN, 3000), maxBatch: num(process.env.RPC_MAX_BATCH, 5), maxKeys: num(process.env.RPC_MAX_ACCOUNTS, 25) });
+const budgets = new Map(); // (profile creation etc.)
 const budget = (key, limit, windowMs = 60e3) => { const now = Date.now(); const a = (budgets.get(key) || []).filter((t) => now - t < windowMs); if (a.length >= limit) { budgets.set(key, a); return false; } a.push(now); budgets.set(key, a); return true; };
 setInterval(() => { const now = Date.now(); for (const [k, a] of budgets) if (!a.length || now - a[a.length - 1] > 120e3) budgets.delete(k); }, 60e3).unref();
+const RPC_KEY = (() => { try { return new URL(mint.rpcUrl).searchParams.get('api-key') || ''; } catch { return ''; } })();
+const scrubRpc = (t) => { let o = String(t).split(mint.rpcUrl).join('***'); if (RPC_KEY) o = o.split(RPC_KEY).join('***'); return o; }; // the keyed URL / key never leaves the server, even inside an upstream error body
+const rpcUp = async (it) => {
+  const r = await fetch(mint.rpcUrl, { method: 'POST', redirect: 'error', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: it.id, method: it.method, params: it.params }), signal: AbortSignal.timeout(15000) });
+  if (!r.ok) return { status: r.status === 429 ? 503 : 502 };
+  const t = await r.text(); if (t.length > 4e6) return { status: 502 }; return { status: 200, text: scrubRpc(t) };
+};
 app.post('/api/rpc', rateLimit({ windowMs: 60e3, limit: num(process.env.RPC_PROXY_PER_MIN, 90), standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests' } }), express.json({ limit: '8kb' }), async (req, res) => {
+  res.set('Cache-Control', 'no-store');
   const o = req.get('origin'); if (!o || !ORIGINS.has(o)) return res.status(403).json({ error: 'forbidden' });
-  const b = req.body; if (!b || typeof b !== 'object' || Array.isArray(b) || !Array.isArray(b.params) || !RPC_READ.has(b.method) || b.params.length > 4 || JSON.stringify(b.params).length > 4000) return res.status(400).json({ error: 'method not allowed' });
+  const v = rpcGuard.verify(String(req.get('x-rpc-token') || ''), o); if (!v.ok) return res.status(v.status).json({ error: v.error });
+  const pr = rpcGuard.parse(req.body); if (!pr.ok) return res.status(pr.status).json({ error: pr.error });
+  if (!rpcGuard.charge(v.session, ipOf(req), pr.cost)) return res.status(429).json({ error: 'Too many requests' });
   try {
-    const r = await fetch(mint.rpcUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: b.id ?? 1, method: b.method, params: b.params }), signal: AbortSignal.timeout(15000) });
-    res.status(r.status).type('json').send(await r.text());
+    if (!Array.isArray(req.body)) { const r = await rpcUp(pr.items[0]); return r.text ? res.status(200).type('json').send(r.text) : res.status(r.status).json({ error: 'rpc unavailable' }); }
+    const rs = await Promise.all(pr.items.map((it) => rpcUp(it))); if (rs.some((r) => !r.text)) return res.status(502).json({ error: 'rpc unavailable' });
+    res.type('json').send('[' + rs.map((r) => r.text).join(',') + ']');
   } catch { res.status(502).json({ error: 'rpc unavailable' }); }
 });
 // NFT metadata. Avatars are stateless: the code in the URL *is* the trait set. Rides are served from the reveal record (placeholder until the mint confirms).
@@ -245,10 +259,10 @@ server.on('upgrade', (req, socket, head) => {
   const origin = req.headers.origin; if (!origin || !ORIGINS.has(origin)) return reject(403, 'Forbidden');
   const ip = ipOf(req);
   if (conns.size >= cfg.maxConns || (ipCount.get(ip) || 0) >= cfg.maxConnsPerIp) return reject(429, 'Too Many Requests');
-  wss.handleUpgrade(req, socket, head, (ws) => onConnect(ws, ip));
+  wss.handleUpgrade(req, socket, head, (ws) => onConnect(ws, ip, origin));
 });
-function onConnect(ws, ip) {
-  const c = { ws, ip, player: null, tokens: 30, last: Date.now(), mv: 30, mvLast: Date.now(), strikes: 0, alive: true, burning: false, lastBurn: 0, joinTimer: null, rtc: 60, rtcLast: Date.now() };
+function onConnect(ws, ip, origin) {
+  const c = { ws, ip, origin, player: null, tokens: 30, last: Date.now(), mv: 30, mvLast: Date.now(), strikes: 0, alive: true, burning: false, lastBurn: 0, joinTimer: null, rtc: 60, rtcLast: Date.now() };
   conns.add(c); ipCount.set(ip, (ipCount.get(ip) || 0) + 1);
   c.joinTimer = setTimeout(() => { if (!c.player) ws.close(1000, 'join timeout'); }, 30000);
   hub.json(c, { t: 'hi', online: hub.size, cap: cfg.maxPlayers, full: hub.size >= cfg.maxPlayers, burns: burns.summary(), mint: { enabled: mint.enabled } });
@@ -275,7 +289,7 @@ function onConnect(ws, ip) {
     }
     try { handle(c, m); } catch (e) { console.error('handler error', e); }
   });
-  ws.on('close', () => { clearTimeout(c.joinTimer); conns.delete(c); const n = (ipCount.get(ip) || 1) - 1; if (n <= 0) ipCount.delete(ip); else ipCount.set(ip, n); if (c.player) hub.leave(c.player); });
+  ws.on('close', () => { clearTimeout(c.joinTimer); rpcGuard.revoke(c); conns.delete(c); const n = (ipCount.get(ip) || 1) - 1; if (n <= 0) ipCount.delete(ip); else ipCount.set(ip, n); if (c.player) hub.leave(c.player); });
   ws.on('error', () => {});
 }
 setInterval(() => { for (const c of conns) { if (!c.alive) { c.ws.terminate(); continue; } c.alive = false; try { c.ws.ping(); } catch {} } }, 20000).unref();
@@ -309,9 +323,10 @@ async function handle(c, m) {
       const r = hub.join(c, prof, burns.forProfile(prof.id).length > 0 || rides.forProfile(prof.id).length > 0);
       if (r.full) { hub.json(c, { t: 'full', online: hub.size, cap: cfg.maxPlayers }); return setTimeout(() => c.ws.close(1000, 'full'), 200); }
       if (r.err) return hub.json(c, { t: 'joinerr', err: r.err, why: r.why });
-      clearTimeout(c.joinTimer); setRide(r.p, prof.ride); hub.json(c, vendorMsg()); nftav.restore && setTimeout(() => nftav.restore(r.p), 50); setTimeout(() => dj.hello(r.p), 80); hub.welcome(r.p, { iceServers: iceServers(), cred: created, created: prof.created, inv: inv(r.p), vibe: prof.av.vibe });
+      clearTimeout(c.joinTimer); setRide(r.p, prof.ride); hub.json(c, vendorMsg()); nftav.restore && setTimeout(() => nftav.restore(r.p), 50); setTimeout(() => dj.hello(r.p), 80); hub.welcome(r.p, { rpcToken: rpcGuard.issue(c, r.p, c.origin), iceServers: iceServers(), cred: created, created: prof.created, inv: inv(r.p), vibe: prof.av.vibe });
       break;
     }
+    case 'rpctok': { if (!p) return; const now = Date.now(); if (now - (p.lastRpcTok || 0) < 5000) return; p.lastRpcTok = now; hub.json(c, { t: 'rpctok', rpcToken: rpcGuard.issue(c, p, c.origin) }); break; } // rotate before expiry (client refreshes at ~60% of ttl)
     case 'chat': if (p) hub.onChat(p, m); break;
     case 'emote': if (p) hub.onEmote(p, m.id); break;
     case 'djclaim': { if (!p) return; const r = dj.claim(p); hub.json(c, { t: 'djres', ...r }); break; }
@@ -433,4 +448,4 @@ if (require.main === module) {
   });
   process.on('SIGTERM', () => { server.close(); require('./lib/db').end().catch(() => {}); setTimeout(() => process.exit(0), 500).unref(); });
 }
-module.exports = { dj, nftav, app, server, hub, burns, mint, cfg, profiles, rides, pay, vendors, vcfg, guideValues, init };
+module.exports = { rpcGuard, dj, nftav, app, server, hub, burns, mint, cfg, profiles, rides, pay, vendors, vcfg, guideValues, init };
