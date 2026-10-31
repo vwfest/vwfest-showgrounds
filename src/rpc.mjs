@@ -13,13 +13,14 @@ export const getRpcToken = () => token;
 // web3.js `fetch` option: adds the current token to every proxied call (rotates transparently). On 401/429 the token is dropped, a fresh one is requested over the socket and the call is retried ONCE;
 // if that still fails (or no token arrives) the same read goes to the public RPC so UI reads (entry modal balance polling etc.) never break.
 const send = (url, init, tok) => fetch(url, { ...init, headers: { ...(init.headers || {}), ...(tok ? { 'x-rpc-token': tok } : {}) } });
-const nextToken = (ms) => new Promise((res) => { if (!ask) return res(''); const t = setTimeout(() => { waiters = waiters.filter((f) => f !== done); res(''); }, ms); const done = (tok) => { clearTimeout(t); res(tok); }; waiters.push(done); try { ask(); } catch { res(''); } });
+const nextToken = (ms) => new Promise((res) => { if (!ask) return res(''); let t = 0; const done = (tok) => { clearTimeout(t); waiters = waiters.filter((f) => f !== done); res(tok); }; t = setTimeout(() => done(''), ms); waiters.push(done); try { ask(); } catch { done(''); } }); // every exit clears its own timer
 export const setRotateWaitMs = (ms) => { waitMs = ms; }; let waitMs = 4000;
+const drop = (tok) => { if (tok && token === tok) { token = ''; clearTimeout(timer); timer = 0; } }; // forget a token the server rejected, together with its refresh timer (only if nobody replaced it meanwhile)
 export async function rpcFetch(url, init = {}) {
   const sent = token; let r = await send(url, init, sent); if (r.status !== 401 && r.status !== 429) return r;
-  if (token && token !== sent) { r = await send(url, init, token); if (r.status !== 401 && r.status !== 429) return r; } // another request already rotated the token while this one was in flight: use it, never clear it
-  const spent = token; if (token === sent) token = ''; clearTimeout(timer); // drop the rejected token (only if nobody replaced it meanwhile)
-  const fresh = await nextToken(waitMs); if (fresh && fresh !== sent && fresh !== spent) { r = await send(url, init, fresh); if (r.status !== 401 && r.status !== 429) return r; }
+  if (token && token !== sent) { const t2 = token; r = await send(url, init, t2); if (r.status !== 401 && r.status !== 429) return r; drop(t2); } // another request already rotated the token while this one was in flight: use it; if it is rejected too, drop it
+  drop(sent);
+  const fresh = await nextToken(waitMs); if (fresh && fresh !== sent) { r = await send(url, init, fresh); if (r.status !== 401 && r.status !== 429) return r; drop(fresh); } // a rotation that is still rejected must not stay armed (no stale token, no refresh timer left running)
   return pubUrl ? send(pubUrl, init, '') : r; // fail over to the public RPC
 }
 // Connection for READS: the server proxy when we hold a token, else the public RPC.

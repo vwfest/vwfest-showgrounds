@@ -19,5 +19,15 @@ const assert = require('assert');
     log.length = 0; R.onRpcRefresh(() => {}); behave = 'race'; R.setRpcToken('old'); r = await c2.o.fetch(c2.url, {}); assert(!r.pub && r.tok === 'newer', 'a 401 for a token that was already rotated retries with the newer one (and never clears it)'); assert.deepStrictEqual(log.map((x) => x.tok), ['old', 'newer']); r = await c2.o.fetch(c2.url, {}); assert.strictEqual(r.tok, 'newer', 'the newer token survived');
     log.length = 0; R.clearRpcToken(); R.onRpcRefresh(() => {}); behave = '401'; R.setRpcToken('x'); r = await c2.o.fetch(c2.url, {}); assert(r.pub, 'no token arrives within the wait -> public RPC');
   }
+  { // no timer is left running after any failure path (a rejected token must not keep a refresh timer armed, nor a stale token in use)
+    const live = new Set(); const st = global.setTimeout, ct = global.clearTimeout; global.setTimeout = (f, ms, ...a) => { const h = st(() => { live.delete(h); f(...a); }, ms); live.add(h); return h; }; global.clearTimeout = (h) => { live.delete(h); ct(h); };
+    const wait = (ms) => new Promise((r) => st(r, ms)); const tokOf = () => R.getRpcToken(); global.fetch = async (u, i) => { if (u === cfg.publicRpcUrl) return { ok: true, status: 200, pub: true }; return { status: 401 }; };
+    R.setRpcToken('seed'); const conn = R.readConnection(Conn, 'https://srv', cfg); R.setRotateWaitMs(300); let seq2 = 0;
+    R.clearRpcToken(); live.clear(); R.onRpcRefresh(() => { st(() => R.setRpcToken('again-' + ++seq2), 10); }); R.setRpcToken('bad0'); live.clear();
+    let r = await conn.o.fetch(conn.url, {}); await wait(60); assert(r.pub, 'fell back to the public RPC'); assert.strictEqual(tokOf(), '', 'the rejected rotation is not left armed'); assert.strictEqual(live.size, 0, 'no refresh timer survives a persistent 401 (' + live.size + ' live)');
+    R.onRpcRefresh(() => { throw new Error('socket closed'); }); R.setRpcToken('bad1'); live.clear(); r = await conn.o.fetch(conn.url, {}); await wait(30); assert(r.pub); assert.strictEqual(live.size, 0, 'the wait timer is cleared even when asking for a token throws (' + live.size + ' live)');
+    R.onRpcRefresh(() => {}); R.setRpcToken('bad2'); live.clear(); r = await conn.o.fetch(conn.url, {}); await wait(30); assert(r.pub); assert.strictEqual(live.size, 0, 'and when no token ever arrives');
+    global.setTimeout = st; global.clearTimeout = ct;
+  }
   console.log('ok   rpc client: token attach / rotate / refresh / public fallback'); process.exit(0);
 })().catch((e) => { console.error('FAIL', e.stack); process.exit(1); });
