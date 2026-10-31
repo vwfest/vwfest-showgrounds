@@ -16,9 +16,10 @@ const send = (url, init, tok) => fetch(url, { ...init, headers: { ...(init.heade
 const nextToken = (ms) => new Promise((res) => { if (!ask) return res(''); const t = setTimeout(() => { waiters = waiters.filter((f) => f !== done); res(''); }, ms); const done = (tok) => { clearTimeout(t); res(tok); }; waiters.push(done); try { ask(); } catch { res(''); } });
 export const setRotateWaitMs = (ms) => { waitMs = ms; }; let waitMs = 4000;
 export async function rpcFetch(url, init = {}) {
-  let r = await send(url, init, token); if (r.status !== 401 && r.status !== 429) return r;
-  const bad = token; if (token === bad) token = ''; clearTimeout(timer); // drop the rejected token
-  const fresh = await nextToken(waitMs); if (fresh && fresh !== bad) { r = await send(url, init, fresh); if (r.status !== 401 && r.status !== 429) return r; }
+  const sent = token; let r = await send(url, init, sent); if (r.status !== 401 && r.status !== 429) return r;
+  if (token && token !== sent) { r = await send(url, init, token); if (r.status !== 401 && r.status !== 429) return r; } // another request already rotated the token while this one was in flight: use it, never clear it
+  const spent = token; if (token === sent) token = ''; clearTimeout(timer); // drop the rejected token (only if nobody replaced it meanwhile)
+  const fresh = await nextToken(waitMs); if (fresh && fresh !== sent && fresh !== spent) { r = await send(url, init, fresh); if (r.status !== 401 && r.status !== 429) return r; }
   return pubUrl ? send(pubUrl, init, '') : r; // fail over to the public RPC
 }
 // Connection for READS: the server proxy when we hold a token, else the public RPC.
