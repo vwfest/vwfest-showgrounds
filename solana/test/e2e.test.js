@@ -146,3 +146,27 @@ test('mainnet disarmed: quoting allowed (simulation), confirming/granting refuse
   assert.equal((await sg.confirmPayment({ quoteId: q.id, signature: '1'.repeat(88), wallet: q.wallet })).ok, false);
   await assert.rejects(sg.buildMint({ quoteId: q.id, wallet: q.wallet }), /not armed|simulate/i);
 });
+
+test('SECURITY e2e: concurrent avatar quotes (one wallet wins), same-wallet refresh, in-flight pay protection, no stranded burn, logout', async (t) => {
+  if (skip) return t.skip('no solana-test-validator');
+  const post = (path_, body, tok) => fetch(ctx.base + path_, { method: 'POST', headers: { 'content-type': 'application/json', origin: ORIGIN, authorization: 'Bearer ' + tok }, body: JSON.stringify(body) }).then((r) => r.json());
+  const { client: ac, w: aw } = ctx.alice, { client: bc } = ctx.bob; const nftIn = (n) => ({ traits: traits(n), imageSvg: SVG(n) });
+  // 1. alice and bob race for the same trait set over HTTP: exactly one gets a quote
+  const race = await Promise.allSettled([ac.quote({ kind: 'avatar', method: 'vwfest', nft: nftIn('RACE') }), bc.quote({ kind: 'avatar', method: 'vwfest', nft: nftIn('RACE') })]);
+  assert.equal(race.filter((r) => r.status === 'fulfilled').length, 1, 'exactly one wallet can hold the trait set'); const loser = race.find((r) => r.status === 'rejected'); assert.match(String(loser.reason.message || loser.reason), /Someone else is minting/);
+  const winnerIsAlice = race[0].status === 'fulfilled'; const W = winnerIsAlice ? ctx.alice : ctx.bob; const L = winnerIsAlice ? ctx.bob : ctx.alice; const q1 = (race[0].status === 'fulfilled' ? race[0] : race[1]).value;
+  // the loser can never get a payable tx/confirm for that trait set (they have no quote); the winner's quote is bound to the winner
+  assert.equal((await post('/tx/pay', { quoteId: q1.id }, L.client.token)).ok, false);
+  // 2. same-wallet refresh works and supersedes the old open quote (which then cannot be paid)
+  const q2 = await W.client.quote({ kind: 'avatar', method: 'vwfest', nft: nftIn('RACE') }); assert.notEqual(q2.id, q1.id);
+  const stale = await post('/tx/pay', { quoteId: q1.id }, W.client.token); assert.equal(stale.ok, false, 'superseded quote cannot be paid'); assert.match(stale.why || stale.error, /replaced by a newer/);
+  // 3. pay tx built for q2 -> a refresh is refused while it can still land (no stranded burn)
+  const built = await post('/tx/pay', { quoteId: q2.id }, W.client.token); assert.equal(built.ok, true);
+  await assert.rejects(W.client.quote({ kind: 'avatar', method: 'vwfest', nft: nftIn('RACE') }), /payment in progress/);
+  // and the other wallet still cannot take it
+  await assert.rejects(L.client.quote({ kind: 'avatar', method: 'vwfest', nft: nftIn('RACE') }), /Someone else is minting/);
+  // 4. logout revokes the session token server-side
+  const tok = W.client.token; assert.equal((await fetch(ctx.base + '/nfts', { headers: { authorization: 'Bearer ' + tok, origin: ORIGIN } })).status !== 401, true);
+  assert.equal(await W.client.logout(), true);
+  const after = await fetch(ctx.base + '/nfts', { headers: { authorization: 'Bearer ' + tok, origin: ORIGIN } }); assert.equal(after.status, 401, 'revoked token refused');
+});

@@ -29,6 +29,8 @@ function createRouter({ solana, express, rateLimit, allowedOrigins = [], refOf }
   r.post('/auth/challenge', sameOrigin, lim(20), json(1), (req, res) => safe(res, async () => { const o = new URL(req.get('origin')); nostore(res).json({ ok: true, ...solana.challenge(String(req.body.wallet || ''), o.host) }); }));
   r.post('/auth/verify', sameOrigin, lim(20), json(2), (req, res) => { const b = req.body || {}; const v = solana.signIn({ wallet: String(b.wallet || ''), nonce: String(b.nonce || ''), signature: String(b.signature || '') }); nostore(res).status(v.ok ? 200 : 401).json(v.ok ? { ok: true, wallet: v.wallet, token: v.token } : { ok: false, error: v.why }); });
 
+  r.post('/auth/logout', sameOrigin, authed, lim(20), json(1), (req, res) => { const m = /^Bearer (.+)$/.exec(req.get('authorization') || ''); solana.logout(m[1]); nostore(res).json({ ok: true }); });
+
   r.post('/quote', sameOrigin, authed, lim(30), json(170), (req, res) => safe(res, async () => {
     const b = req.body || {}; const o = { wallet: req.wallet, kind: String(b.kind), method: String(b.method), payTokenMint: b.payTokenMint ? String(b.payTokenMint) : undefined, ref: refOf ? refOf(req) : undefined, item: b.item ? String(b.item) : undefined, nft: b.nft };
     if (o.kind === 'shop' && !solana.shopPrice) throw new Error('Shop is not configured');

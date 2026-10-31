@@ -11,13 +11,16 @@ services:
       - { key: NODE_ENV, value: production }
       - { key: SERVER_SECRET, generateValue: true }        # required in production (lib/secret.js)
       - { key: ADMIN_SECRET, generateValue: true }         # vendor moderation endpoint
+      - { key: NODE_VERSION, value: "20" }
       - { key: PUBLIC_URL, value: https://vwfest-showgrounds.onrender.com }
       - { key: ALLOWED_ORIGINS, value: "https://vwfest.github.io" }
       - { key: MAX_PLAYERS, value: "150" }
       - { key: DATABASE_URL, sync: false }                 # Supabase Postgres connection string (schema `showgrounds` is created automatically)
-      - { key: PG_CA_CERT, sync: false }                   # Supabase "Server root certificate" PEM (TLS is verified)
+      - { key: PG_CA_FILE, value: certs/supabase-prod-ca-2021.crt }   # Supabase root CA (public, committed); TLS is verified
+      - { key: DB_SCHEMA, value: showgrounds }
+      - { key: SOLANA_NETWORK, value: devnet }
       - { key: MINT_ENABLED, value: "0" }                  # purchases stay OFF until you arm them
-      - { key: MINT_NETWORK, value: mainnet-beta }
+      - { key: MINT_NETWORK, value: devnet }
       - { key: MINT_MAINNET, value: "0" }
       - { key: VWFEST_MINT, value: 9ktd1qdiu9wRFhxHPczWKrKRGmJb9nkanv2Zz27Rpump }
       - { key: DEV_WALLET, sync: false }

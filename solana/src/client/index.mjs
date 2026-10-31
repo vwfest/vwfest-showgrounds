@@ -100,7 +100,7 @@ export function createClient({ base = '/api/solana', wallet = null, fetchImpl = 
     },
     async mint(q, { onStep } = {}) {
       const c = await api.config(); const b = must(await call('POST', '/tx/mint', { quoteId: q.id }));
-      const sig = await api._signSend(b.tx, (tx) => auditMintTx(tx, { wallet: adapter.publicKey, asset: b.asset, collection: (q.kind === 'ride' ? c.collections.ride : c.collections.avatar) }), { onStep, lastValidBlockHeight: b.lastValidBlockHeight });
+      const sig = await api._signSend(b.tx, (tx) => auditMintTx(tx, { wallet: adapter.publicKey, asset: b.asset, collection: (q.kind === 'ride' ? c.collections.ride : c.collections.avatar), name: b.name, uri: b.uri }), { onStep, lastValidBlockHeight: b.lastValidBlockHeight });
       for (let i = 0; i < 6; i++) { const v = await call('POST', '/mint/confirm', { quoteId: q.id, signature: sig }); if (v.ok) return { signature: sig, asset: v.asset, uri: v.uri, url: v.url }; if (!v.retry && !v.pending) throw new Error(v.error || v.why); await new Promise((r) => setTimeout(r, 2000)); }
       throw new Error('Minted but not confirmed yet; retry. Signature: ' + sig);
     },
@@ -111,6 +111,7 @@ export function createClient({ base = '/api/solana', wallet = null, fetchImpl = 
       if (q.kind === 'avatar' || q.kind === 'ride') m = await api.mint(q, { onStep });
       return { quote: q, payment: p, mint: m, receipt: p.receipt };
     },
+    async logout() { const j = await call('POST', '/auth/logout', {}); token = null; return j.ok !== false; },
     async listNfts() { return must(await call('GET', '/nfts')); },
     async useNft(asset) { return must(await call('POST', '/nft/use', { asset })).avatar; },
     async burns(limit = 15) { return must(await call('GET', '/burns?limit=' + limit)); },

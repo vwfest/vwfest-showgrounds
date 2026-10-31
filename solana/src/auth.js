@@ -45,10 +45,17 @@ class Auth {
   }
   issue(wallet) { const body = b64u(JSON.stringify({ w: wallet, exp: this.now() + SESSION_TTL, n: crypto.randomBytes(6).toString('hex') })); return body + '.' + this.mac(body); }
   mac(body) { return crypto.createHmac('sha256', this.secret).update('session:' + body).digest('base64url'); }
-  session(token) {
+  // Logout / revocation: the token's random id goes on a denylist until the token would have expired anyway (persisted via the store).
+  revoke(token) {
+    const s = this._parse(token); if (!s) return false;
+    const t = this.now(); for (const [k, exp] of this.store.entries('revoked')) if (exp < t) this.store.delete('revoked', k);
+    this.store.set('revoked', s.n, s.exp); return true;
+  }
+  _parse(token) {
     if (typeof token !== 'string' || token.length > 400) return null; const [body, mac] = token.split('.'); if (!body || !mac) return null;
     const want = Buffer.from(this.mac(body)), got = Buffer.from(mac); if (want.length !== got.length || !crypto.timingSafeEqual(want, got)) return null;
-    try { const s = JSON.parse(Buffer.from(body, 'base64url').toString()); return s.exp > this.now() && C.isKey(s.w) ? { wallet: s.w, exp: s.exp } : null; } catch { return null; }
+    try { const s = JSON.parse(Buffer.from(body, 'base64url').toString()); return s.exp > this.now() && C.isKey(s.w) && typeof s.n === 'string' ? { wallet: s.w, exp: s.exp, n: s.n } : null; } catch { return null; }
   }
+  session(token) { const s = this._parse(token); return s && !this.store.has('revoked', s.n) ? { wallet: s.wallet, exp: s.exp } : null; }
 }
 module.exports = { Auth };

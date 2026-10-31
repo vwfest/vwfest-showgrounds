@@ -92,7 +92,15 @@ Avatar: the asset address is a keypair derived from `HMAC(SERVER_SECRET, collect
 * (b) No server broadcast: there is no route, helper or client call that sends a transaction through the server (`/tx/send`, `/rpc`, `/relay` are tested to 404). The browser uses `PUBLIC_RPC_URL` (never `RPC_URL`, which may hold a private key).
 * (c) Postgres TLS: `pgBackend` keeps `rejectUnauthorized:true` (provider CA via `PG_CA`); `PGSSL=off` throws in production. The §1 facade reuses the host's pool.
 * (d) Wallet auth: server nonce, 5 min TTL, single-use (burnt even on a failed attempt), message includes domain + nonce + expiry, ed25519 verify, per-wallet nonce cap, HMAC session.
-* (e) `SERVER_SECRET` from env, mandatory, >=32 chars; no random fallback.
+* (e) `SERVER_SECRET` from env, mandatory, >=32 chars; no random or padded fallback anywhere (`Solana.seedOf`, `Auth`, and the §1 facade all refuse a shorter secret).
+* Security-review fixes (tests in `test/security.test.js` + the last test in `test/e2e.test.js`):
+  * **Avatar trait reservation is atomic**: `store.reserve('trait', fp, …)` runs synchronously at quote time. Only the same wallet can refresh (that supersedes its older open quote, unless a pay tx for it was built <150 s ago, so a burn can never land on a quote that no longer owns the trait set). Another wallet gets "Someone else is minting" *before* any payment; `/tx/pay` and `/pay/confirm` re-check that the reservation still belongs to this quote. Paid reservations are permanent until minted.
+  * **Client pay audit re-runs the Jupiter allow-list** (`auditJupiterIxs`) on every non-fee instruction when the quote swaps, bounded by `swapInRaw` (+10M lamports rent cushion), caps total System transfer/createAccount lamports, and rejects any token/ATA instruction a non-swap quote does not need.
+  * **Mint audit decodes Core `CreateV1`** and requires name + uri to equal the `/tx/mint` response (no plugins/trailing data); the client passes them in.
+  * **Metadata fetch (NFT-as-avatar) is SSRF-hardened** (`nft.safeGetJson`): https only (ipfs:// -> gateway), port 443, no credentials, localhost/.local/.internal refused, every resolved address must be public (checked inside the connection's own DNS lookup, so rebinding cannot swap it), redirects re-validated (max 3), 8 s timeout, 200 KB cap, JSON only. Optional allowlist `NFT_METADATA_HOSTS`.
+  * Only `burnChecked` counts as a burn (verify.js and the facade).
+  * **Sessions are revocable**: `POST /api/solana/auth/logout` (client `logout()`) puts the token id on a persisted denylist until it would expire; otherwise tokens live 12 h.
+  * The facade's optional `swapSig` is ownership-only (recorded for the tracker link, never used to grant anything).
 * Transactions are audited by program allow-list + exact amounts/accounts both server-side before returning and client-side before signing (and again on what the wallet returns). Jupiter's instructions are allow-listed (programs, token/system instruction types, SOL bounded to the quote, accounts only the user's).
 * Verification only counts **top-level** instructions (no burn smuggled in a CPI), checks fee payer == quote wallet == signer, memo == quote memo, mint, authority, amounts (`>= burnMin`, dev fee `>= 99%`), and for NFTs reads the asset **account state** (owner, collection, URI).
 * The `AUTHORITY_SECRET_KEY` only co-signs collection mints; it holds no user funds (keep ~0.05 SOL on it on mainnet for collection creation only; rent for each mint is paid by the player).
@@ -104,6 +112,7 @@ Avatar: the asset address is a keypair derived from `HMAC(SERVER_SECRET, collect
 | `SOLANA_NETWORK` (alias `MINT_NETWORK`) | `devnet` | `devnet` \| `mainnet-beta` \| `localnet` |
 | `MAINNET_ARMED` (alias `MINT_MAINNET`) | off | **second switch** for mainnet. While off: quote/build/simulate work, confirm/grant is refused, client refuses to send |
 | `SOLANA_ENABLED` / (`MINT_ENABLED=1` for the facade) | on / off | master switch |
+| `NFT_METADATA_HOSTS` | – | optional comma list of hostnames allowed for server-side NFT metadata fetches (empty = any public https host) |
 | `SERVER_SECRET` | – (**required**) | >=32 chars, persistent. Signs sessions, seeds ride commit-reveal, derives asset addresses |
 | `AUTHORITY_SECRET_KEY` | – (required for NFT mints) | base58 or JSON-array key of the collection update authority |
 | `AVATAR_COLLECTION`, `RIDE_COLLECTION` | – | Core collection addresses (`scripts/create-collections.js`) |

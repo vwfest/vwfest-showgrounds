@@ -64,6 +64,7 @@ class Solana {
   challenge(wallet, domain) { return this._needAuth().challenge({ wallet, domain }); }
   signIn({ wallet, nonce, signature }) { return this._needAuth().verify({ wallet, nonce, signature }); }
   session(token) { return this.auth ? this.auth.session(token) : null; }
+  logout(token) { return this.auth ? this.auth.revoke(token) : false; }
 
   // ---------- quotes ----------
   _gate(kind, { sim = false } = {}) {
@@ -115,6 +116,7 @@ class Solana {
   async buildPay({ quoteId, wallet }) {
     this._gate(this.store.get('quote', quoteId)?.kind, { sim: true });
     const q = this.getQuote(quoteId, wallet); if (!q) return fail('Unknown quote');
+    if (q.state === 'superseded') return fail('This quote was replaced by a newer one for the same avatar. Use the latest quote.');
     if (q.state !== 'open') return fail('This quote is already used');
     if (q.expires < Date.now()) return fail('This quote expired. Please request a new one.');
     if (q.nft) { const r = this.store.get('trait', q.nft.fp); if (!r || r.quoteId !== q.id || r.wallet !== q.wallet) return fail('This avatar quote is no longer reserved for you. Request a new quote.'); }
@@ -133,7 +135,7 @@ class Solana {
     const meta = await this._prepareMetadata(q, kind);
     const assetKey = kind === 'avatar' ? q.nft.fp : q.id;
     const b = await this.builder.buildMint({ wallet, kind, assetKey, name: meta.name, uri: meta.uri });
-    audit.auditMintTx(audit.decodeTx(b.tx), { wallet, asset: b.asset, collection: this.cfg.collections[kind].address });
+    audit.auditMintTx(audit.decodeTx(b.tx), { wallet, asset: b.asset, collection: this.cfg.collections[kind].address, name: meta.name, uri: meta.uri });
     q.mint = { state: 'built', asset: b.asset, uri: meta.uri, name: meta.name, at: Date.now() }; this.store.set('quote', q.id, q);
     return { ok: true, tx: b.tx, asset: b.asset, uri: meta.uri, name: meta.name, lastValidBlockHeight: b.lastValidBlockHeight, rentNote: 'Network rent + fee (about 0.003 SOL) is paid by your wallet.' };
   }
@@ -178,6 +180,7 @@ class Solana {
     const prior = this.store.get('sig', signature);
     if (prior) { if (prior.quoteId === q.id && prior.state === 'paid') return { ok: true, repeat: true, receipt: this.store.get('receipt', q.id) }; return fail(prior.state === 'pending' && prior.quoteId === q.id ? 'Verification in progress' : 'This transaction was already used', { pending: prior.state === 'pending' }); }
     if (q.state === 'paid') return fail('This quote is already paid');
+    if (q.state === 'superseded') return fail('This quote was replaced by a newer one for the same avatar.');
     if (q.state !== 'open') return fail('Verification in progress', { pending: true });
     if (q.expires + GRACE_MS < Date.now()) return fail('This quote expired');
     if (q.nft) { const r = this.store.get('trait', q.nft.fp); if (!r || r.quoteId !== q.id || r.wallet !== q.wallet) return fail('This avatar is no longer reserved for this quote.'); }

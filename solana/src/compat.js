@@ -55,7 +55,7 @@ class Facade {
     this.conn = conn || new Connection(cfg.rpcUrl, 'confirmed'); this.prices = new Prices(cfg, fetchImpl || fetch); this.f = fetchImpl || fetch;
     this.tracker = new BurnTracker({ store: this.store, cfg });
     this.pending = new Set(); this.codes = new Set(); for (const b of this.tracker.all()) if (b.code) this.codes.add(b.code);
-    const secret = cfg.serverSecret; this.authLib = secret && secret.length >= 32 ? new Auth({ store: this.store, secret }) : null; // >= 32 chars, never padded this.ready = true; return this;
+    const secret = cfg.serverSecret; this.authLib = secret && secret.length >= 32 ? new Auth({ store: this.store, secret }) : null; /* >= 32 chars, never padded */ this.ready = true; return this;
   }
   config() {
     const c = this.cfg; return { enabled: !!this.enabledFlag, reason: this.reason || undefined, network: c.network, mint: c.vwfestMint, decimals: c.decimals, devWalletOk: C.isKey(c.devWallet),
