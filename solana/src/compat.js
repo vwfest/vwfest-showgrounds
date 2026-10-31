@@ -63,11 +63,11 @@ class Facade {
   }
   async solUsd() { return (await this.prices.solUsd()).usd; }
   // Amounts are computed here from the caller's USD/percent policy (the caller owns pricing policy; the client can't choose any of these).
-  async quote({ kind, usd, method, discountPct = 0, devPct = 0, devWalletOk = true, entry = false }) {
+  async quote({ kind, usd, method, discountPct = 0, devPct = 0, devWalletOk = true }) {
     if (!(usd > 0 && usd < 10000)) throw new Error('bad usd'); if (!['vwfest', 'sol'].includes(method)) throw new Error('bad method');
     const cfg = this.cfg; const dec = 10 ** cfg.decimals; const solUsd = await this.solUsd(); const vw = await this.prices.vwfestUsd();
     const dp = method === 'vwfest' ? discountPct : 0; const dv = method === 'sol' && devWalletOk ? devPct : 0;
-    const q = { kind, usd, method, solUsd, discountPct: dp, devPct: dv, swap: false, totalLamports: '0', swapLamports: '0', devLamports: '0', devWallet: dv > 0 ? cfg.devWallet : null, burnRaw: '0', burnMin: '0', entry: !!entry };
+    const q = { kind, usd, method, solUsd, discountPct: dp, devPct: dv, swap: false, totalLamports: '0', swapLamports: '0', devLamports: '0', devWallet: dv > 0 ? cfg.devWallet : null, burnRaw: '0', burnMin: '0' };
     const lam = (u) => BigInt(Math.max(1, Math.ceil((u / solUsd) * 1e9)));
     if (method === 'vwfest') {
       const paid = usd * (1 - dp / 100); q.paidUsd = Math.round(paid * 100) / 100; q.burnRaw = BigInt(Math.max(1, Math.ceil(paid / vw.usd * dec))).toString(); q.burnMin = (BigInt(q.burnRaw) * 98n / 100n).toString();

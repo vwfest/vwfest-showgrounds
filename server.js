@@ -418,11 +418,11 @@ async function handle(c, m) {
       if (!p) return; const now = Date.now(); if (now - (p.lastQuote || 0) < 1200) return; p.lastQuote = now;
       if (!mint.enabled) return hub.json(c, { t: 'quoteerr', why: 'Purchases are not open yet.' });
       try {
-        const kind = m.kind, method = m.method === 'vwfest' ? 'vwfest' : 'sol'; let usd, item = null, uri = null, code = null, entry = false, devPct = mint.devFeePct, discountPct = mint.discountPct, extra = {};
+        const kind = m.kind, method = m.method === 'vwfest' ? 'vwfest' : 'sol'; let usd, item = null, uri = null, code = null, devPct = mint.devFeePct, discountPct = mint.discountPct, extra = {};
         if (kind === 'avatar') {
           if (method !== 'sol') return hub.json(c, { t: 'quoteerr', why: 'Avatar minting is paid in SOL (100% is used to buy back and burn $VWFEST).' });
           code = avatar.pack(p.av); if (burns.codes.has(code)) return hub.json(c, { t: 'quoteerr', why: 'This exact avatar has already been minted. Change a trait to mint a new one.' });
-          usd = mint.feeUsd; devPct = 0; uri = `${publicUrl}/nft/${code}.json`; extra = { name: 'VW FEST Avatar', code }; /* no entry discount: m.entry is ignored (a session issued is not proof that anything was paid) */
+          usd = mint.feeUsd; devPct = 0; uri = `${publicUrl}/nft/${code}.json`; extra = { name: 'VW FEST Avatar', code };
         } else if (kind === 'shop') {
           item = SHOP.find((x) => x.id === m.item); if (!item) return hub.json(c, { t: 'quoteerr', why: 'Unknown item.' });
           if (p.prof.items.has(item.id)) return hub.json(c, { t: 'quoteerr', why: 'You already own this.' });
@@ -435,11 +435,11 @@ async function handle(c, m) {
           const cb = vendors.canBuy(p.prof.id, m.plot); if (!cb.ok) return hub.json(c, { t: 'quoteerr', why: cb.why });
           usd = vcfg.feeUsd; discountPct = 0; extra = { plot: cb.plot, mode: cb.mode, days: vcfg.days }; if (cb.mode === 'claim') vendors.hold(cb.plot, p.prof.id);
         } else return;
-        const q = await chain.quote({ kind, usd, method, devWalletOk: !!mint.devWallet, devPct, discountPct, entry });
+        const q = await chain.quote({ kind, usd, method, devWalletOk: !!mint.devWallet, devPct, discountPct });
         if (q.devPct > 0 && !q.devWallet) return hub.json(c, { t: 'quoteerr', why: 'Paying in SOL is not available right now.' });
         const rec = pay.create({ ...q, kind, item: item && item.id, pid: p.prof.id, uri, code, plot: extra.plot });
         if (kind === 'ride') { rec.uri = `${publicUrl}/ride/${rec.id}.json`; extra = { name: 'VW Fest Ride', commit: commitOf(serverSeed(rec.id)) }; }
-        hub.json(c, { t: 'quote', q: { id: rec.id, kind, item: rec.item, method, usd, paidUsd: q.paidUsd, solUsd: q.solUsd, discountPct: q.discountPct, devPct: q.devPct, swap: q.swap, totalLamports: q.totalLamports, swapLamports: q.swapLamports, devLamports: q.devLamports, devWallet: q.devWallet, burnRaw: q.burnRaw, burnMin: q.burnMin, burnUi: q.burnUi, entry, uri: rec.uri, expires: rec.expires, ...extra } });
+        hub.json(c, { t: 'quote', q: { id: rec.id, kind, item: rec.item, method, usd, paidUsd: q.paidUsd, solUsd: q.solUsd, discountPct: q.discountPct, devPct: q.devPct, swap: q.swap, totalLamports: q.totalLamports, swapLamports: q.swapLamports, devLamports: q.devLamports, devWallet: q.devWallet, burnRaw: q.burnRaw, burnMin: q.burnMin, burnUi: q.burnUi, uri: rec.uri, expires: rec.expires, ...extra } });
       } catch (e) { console.error('quote failed', e.message); hub.json(c, { t: 'quoteerr', why: 'Could not get a price right now. Try again in a moment.' }); }
       break;
     }

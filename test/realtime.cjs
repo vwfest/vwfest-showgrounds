@@ -97,8 +97,14 @@ process.on('unhandledRejection', (e) => { console.error('UNHANDLED REJECTION', e
     E2.send({ t: 'onramp', provider: 'custom', purpose: 'entry' }); assert((await E2.wait('onrampres')).url, 'the server issued an on-ramp session (this is all the old discount checked for)'); assert(S.hub.find(E2.welcome.pid).rampAt, 'session recorded');
     const ask = async (entry) => { E2.msgs.length = 0; E2.waiters = []; await wait(1300); E2.send({ t: 'quote', kind: 'avatar', method: 'sol', entry }); return Promise.race([E2.wait('quote'), E2.wait('quoteerr')]); };
     const q0 = await ask(false), q1 = await ask(true); assert.strictEqual(q0.t, 'quote', 'quotes must be available in this test: ' + JSON.stringify(q0)); assert.strictEqual(q1.t, 'quote');
-    assert(!q1.q.entry, 'no entry flag on the quote'); assert.strictEqual(q1.q.burnMin, q0.q.burnMin, 'identical required burn with or without entry:true'); assert.strictEqual(q1.q.burnRaw, q0.q.burnRaw);
+    assert(!('entry' in q1.q) && !('entry' in q0.q), 'the quote has no entry field at all'); assert.strictEqual(q1.q.burnMin, q0.q.burnMin, 'identical required burn with or without entry:true'); assert.strictEqual(q1.q.burnRaw, q0.q.burnRaw);
   });
+  await t('dead entry plumbing is gone: no entry flag in the server quote path, the client quote request, the sweep (entry) pay path, and docs/preview.html/.css are not published', () => {
+    const fs = require('fs'); const rd = (f) => fs.readFileSync(require('path').join(__dirname, '..', f), 'utf8'); const srv = rd('server.js');
+    assert(!/\bentry\b[^\n]{0,40}(=|,|\})/.test(srv.split('\n').filter((l) => /chain\.quote|t: 'quote', q:|let usd, item/.test(l)).join('\n')), 'server.js quote path mentions entry');
+    assert(!/entry/.test(rd('solana/src/compat.js').split('async quote(')[1].split('\n').slice(0, 6).join('\n')), 'chain.quote has no entry parameter/field');
+    const ui = rd('src/ui.js'); assert(!/opts\.entry|q\.entry|entry: (true|opts)/.test(ui), 'ui.js'); const pay = rd('src/pay.js'); assert(!/sweep|reserveLamports/.test(pay), 'pay.js sweep path removed');
+    for (const f of ['docs/preview.html', 'docs/preview.css']) assert(!fs.existsSync(require('path').join(__dirname, '..', f)), f + ' removed'); });
   await t('headers: Permissions-Policy locks camera/geolocation/payment/usb..., microphone only for self', async () => { const r = await fetch(BASE + '/healthz'); const pp = r.headers.get('permissions-policy') || ''; assert(/camera=\(\)/.test(pp) && /geolocation=\(\)/.test(pp) && /payment=\(\)/.test(pp) && /microphone=\(self\)/.test(pp) && /usb=\(\)/.test(pp), pp); });
   await t('client source guards: __sg only on localhost, framed pages refuse wallet/pay UI, creator-fee address shown in full with a copy button, no key export in signing', () => {
     const fs = require('fs'); const rd = (f) => fs.readFileSync(require('path').join(__dirname, '..', f), 'utf8');

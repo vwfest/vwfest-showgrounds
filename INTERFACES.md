@@ -35,7 +35,6 @@ await chain.quote({
   discountPct: number,       // 50 for shop/ride paid in $VWFEST (VWFEST_DISCOUNT_PCT), 0 for vendor/avatar
   devPct: number,            // DEV_FEE_PCT (10) when method==='sol' for shop/ride/vendor; 0 for avatar
   devWalletOk: boolean,
-  entry?: boolean            // ignored by the server (no entry discount); quotes are always the normal price
 }) // -> { usd, paidUsd, solUsd, discountPct, devPct, swap:boolean, totalLamports, swapLamports, devLamports, devWallet|null,
    //      burnRaw:string, burnMin:string, burnUi:number, devMin:string, ... }   (all bigint amounts as decimal strings)
 chain.solUsd()   // -> number (cached SOL/USD), used by GET /api/mint/price
