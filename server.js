@@ -7,7 +7,7 @@ const http = require('http');
 const path = require('path');
 const crypto = require('crypto');
 require('./lib/secret'); // fails fast in production without SERVER_SECRET
-const chain = require('./lib/chain'); const { NftAvatars } = require('./lib/nftavatar'); // Solana payments module (solana/): quotes + on-chain verification (INTERFACES.md §1)
+const chain = require('./lib/chain'); const { NftAvatars } = require('./lib/nftavatar'); const { DJ } = require('./lib/dj'); // Solana payments module (solana/): quotes + on-chain verification (INTERFACES.md §1)
 const walletauth = require('./lib/walletauth');
 const { WebSocketServer } = require('ws');
 const { Hub } = require('./lib/hub');
@@ -65,6 +65,7 @@ const hub = new Hub(cfg);
 const burns = new Burns({ network: NETWORK, mint: mint.mint, decimals: mint.decimals, rpcUrl: mint.rpcUrl, explorer: mint.explorer.bind(mint), base: publicUrl });
 const profiles = new Profiles((code) => burns.mintedBy(code));
 const nftav = new NftAvatars({ hub, profiles, env: process.env, publicUrl: publicUrl, db: (sql, params) => { if (!profiles.q) throw new Error('no db'); return profiles.q(sql, params); } });
+const dj = new DJ({ hub, env: process.env }); hub.onLeave = (p) => dj.drop(p);
 const rides = new Rides();
 const pay = new Pay(mint);
 const SHOP = catalog();
@@ -115,7 +116,7 @@ const iceServers = () => {
 };
 const shopView = () => SHOP.map((i) => ({ ...i, vwfestUsd: Math.round(i.usd * (1 - mint.discountPct / 100) * 100) / 100 }));
 const PUBLIC_RPC = process.env.PUBLIC_RPC_URL || RPC_DEFAULT[NETWORK]; // what browsers broadcast through (never the keyed server RPC)
-const payFlags = () => ({ nftAvatars: nftav.enabled, publicRpcUrl: PUBLIC_RPC, enabled: mint.enabled, reason: mint.reason, network: mint.network, mint: mint.mint, decimals: mint.decimals, feeUsd: mint.feeUsd, rideUsd: mint.rideUsd, slippageBps: mint.slippageBps, discountPct: mint.discountPct, devFeePct: mint.devFeePct, solShopEnabled: !!mint.devWallet, jupiter: mint.jupiter, embedded: mint.embedded, onramp: onramp.providers().map(({ id, name, how }) => ({ id, name, how })), entryUsd: mint.entryUsd, entryMinBurnPct: mint.entryMinBurnPct, payTokens: mint.payTokens, devnetTokensPerUsd: mint.devnetTokensPerUsd, base: publicUrl, vendor: { feeUsd: vcfg.feeUsd, days: vcfg.days, plots: vcfg.plots, imgKb: vcfg.imgKb, maxProducts: vcfg.maxProducts, devFeePct: mint.devFeePct, solAvailable: !!mint.devWallet, premod: vcfg.premod } });
+const payFlags = () => ({ dj: { on: dj.enabled && dj.playlist.length > 0, slotMs: dj.slotMs, queueMax: dj.queueMax }, nftAvatars: nftav.enabled, publicRpcUrl: PUBLIC_RPC, enabled: mint.enabled, reason: mint.reason, network: mint.network, mint: mint.mint, decimals: mint.decimals, feeUsd: mint.feeUsd, rideUsd: mint.rideUsd, slippageBps: mint.slippageBps, discountPct: mint.discountPct, devFeePct: mint.devFeePct, solShopEnabled: !!mint.devWallet, jupiter: mint.jupiter, embedded: mint.embedded, onramp: onramp.providers().map(({ id, name, how }) => ({ id, name, how })), entryUsd: mint.entryUsd, entryMinBurnPct: mint.entryMinBurnPct, payTokens: mint.payTokens, devnetTokensPerUsd: mint.devnetTokensPerUsd, base: publicUrl, vendor: { feeUsd: vcfg.feeUsd, days: vcfg.days, plots: vcfg.plots, imgKb: vcfg.imgKb, maxProducts: vcfg.maxProducts, devFeePct: mint.devFeePct, solAvailable: !!mint.devWallet, premod: vcfg.premod } });
 app.get('/api/config', (req, res) => res.set('Cache-Control', 'no-store').json({
   ...payFlags(), shop: shopView(), odds: R.TIERS.map((t, i) => ({ tier: t, pct: R.ODDS[i] })), iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }], turn: !!process.env.TURN_URL, /* TURN credentials are only sent over the authenticated WebSocket after join */ voiceRange: VOICE_RANGE, maxPlayers: cfg.maxPlayers,
 }));
@@ -131,7 +132,7 @@ app.post('/api/onramp/session', rateLimit({ windowMs: 60e3, limit: 6, standardHe
 });
 
 // ---- Info Booth guide: docs/info.json + CHANGELOG.md rendered with LIVE config values ----
-const guideValues = () => guide.values({ mint, vendor: vcfg, shop: SHOP, R, voiceRange: VOICE_RANGE, maxPlayers: cfg.maxPlayers });
+const guideValues = () => guide.values({ mint, vendor: vcfg, shop: SHOP, R, voiceRange: VOICE_RANGE, maxPlayers: cfg.maxPlayers, dj });
 let guideSrc = null; try { guideSrc = guide.load(); } catch (e) { console.error('guide files missing', e.message); }
 app.get('/api/guide', (req, res) => {
   if (!guideSrc) return res.status(503).json({ ok: false }); const v = guideValues(); const g = guide.render(guideSrc.info, v, { R, games: GAMES });
@@ -165,6 +166,8 @@ app.post('/api/vendor/report', vLimit, vOrigin, express.json({ limit: '1kb' }), 
 // Moderation API. Disabled unless ADMIN_SECRET (>= 16 chars) is set. Send it in the x-admin-secret header.
 const adminAuth = (req, res, next) => { if (!ADMIN_SECRET) return res.status(404).end(); const a = Buffer.from(String(req.get('x-admin-secret') || '')), b = Buffer.from(ADMIN_SECRET); if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return res.status(401).json({ error: 'unauthorized' }); next(); };
 const adminLimit = rateLimit({ windowMs: 60e3, limit: 30, standardHeaders: true, legacyHeaders: false });
+app.get('/api/admin/dj', adminLimit, adminAuth, (req, res) => res.set('Cache-Control', 'no-store').json({ ok: true, ...dj.view(), queueFull: dj.queue.map((q) => ({ id: q.id, nick: q.nick })) }));
+app.post('/api/admin/dj', adminLimit, adminAuth, express.json({ limit: '1kb' }), (req, res) => { const r = dj.admin(String((req.body && req.body.action) || '')); res.status(r.ok ? 200 : 400).json(r); }); // action: release (end current set) | clear (empty queue) | next (skip track)
 app.get('/api/admin/vendors', adminLimit, adminAuth, (req, res) => res.set('Cache-Control', 'no-store').json({ ok: true, booths: vendors.adminList() }));
 app.get('/api/admin/vendors/:plot/image/:id', adminLimit, adminAuth, (req, res) => { const im = /^[0-9a-f]{20}$/.test(req.params.id) && vendors.images.get(req.params.id); if (!im) return res.status(404).end(); res.set({ 'Content-Type': 'image/jpeg', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; sandbox" }).send(im.buf); });
 app.post('/api/admin/vendors/:plot', adminLimit, adminAuth, express.json({ limit: '1kb' }), async (req, res) => {
@@ -237,7 +240,9 @@ function onConnect(ws, ip) {
   ws.on('pong', () => { c.alive = true; });
   ws.on('message', (data, isBinary) => {
     const now = Date.now(); hub.stats.rx += data.length;
-    if (isBinary) { // movement: separate, generous bucket (20/s)
+    if (isBinary) { // 0x04 = DJ microphone packet (own limits inside dj.relay); 0x01 = movement
+      if (data[0] === 4) { if (c.player && data.length <= 4096) dj.relay(c.player, Buffer.from(data)); return; }
+      // movement: separate, generous bucket (20/s)
       c.mv = Math.min(30, c.mv + ((now - c.mvLast) / 1000) * 20); c.mvLast = now;
       if (c.mv < 1) return; c.mv -= 1;
       if (c.player) hub.onMove(c.player, Buffer.from(data)); return;
@@ -289,11 +294,17 @@ async function handle(c, m) {
       const r = hub.join(c, prof, burns.forProfile(prof.id).length > 0 || rides.forProfile(prof.id).length > 0);
       if (r.full) { hub.json(c, { t: 'full', online: hub.size, cap: cfg.maxPlayers }); return setTimeout(() => c.ws.close(1000, 'full'), 200); }
       if (r.err) return hub.json(c, { t: 'joinerr', err: r.err, why: r.why });
-      clearTimeout(c.joinTimer); setRide(r.p, prof.ride); hub.json(c, vendorMsg()); nftav.restore && setTimeout(() => nftav.restore(r.p), 50); hub.welcome(r.p, { iceServers: iceServers(), cred: created, created: prof.created, inv: inv(r.p), vibe: prof.av.vibe });
+      clearTimeout(c.joinTimer); setRide(r.p, prof.ride); hub.json(c, vendorMsg()); nftav.restore && setTimeout(() => nftav.restore(r.p), 50); setTimeout(() => dj.hello(r.p), 80); hub.welcome(r.p, { iceServers: iceServers(), cred: created, created: prof.created, inv: inv(r.p), vibe: prof.av.vibe });
       break;
     }
     case 'chat': if (p) hub.onChat(p, m); break;
     case 'emote': if (p) hub.onEmote(p, m.id); break;
+    case 'djclaim': { if (!p) return; const r = dj.claim(p); hub.json(c, { t: 'djres', ...r }); break; }
+    case 'djleave': { if (!p) return; dj.leave(p); hub.json(c, { t: 'djres', ok: true, you: null }); break; }
+    case 'djskip': if (p) dj.skip(p); break;
+    case 'djpick': if (p) dj.setTrack(p, m.i); break;
+    case 'djmic': if (p) dj.setMic(p, m.on); break;
+    case 'djhype': if (p) dj.hype(p); break;
     case 'nfts': case 'nftuse': case 'nftclear': { // use-my-NFT avatar: wallet must have signed our challenge in this session (wauth/wproof)
       if (!p) return; const now = Date.now(); if (now - (p.lastNft || 0) < 1500) return hub.json(c, { t: 'nftres', ok: false, why: 'Slow down a little.' }); p.lastNft = now;
       if (m.t === 'nftclear') { nftav.clear(p); return hub.json(c, { t: 'nftres', ok: true, nf: null }); }
@@ -406,4 +417,4 @@ if (require.main === module) {
   });
   process.on('SIGTERM', () => { server.close(); require('./lib/db').end().catch(() => {}); setTimeout(() => process.exit(0), 500).unref(); });
 }
-module.exports = { nftav, app, server, hub, burns, mint, cfg, profiles, rides, pay, vendors, vcfg, guideValues, init };
+module.exports = { dj, nftav, app, server, hub, burns, mint, cfg, profiles, rides, pay, vendors, vcfg, guideValues, init };

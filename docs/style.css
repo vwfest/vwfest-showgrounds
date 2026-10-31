@@ -62,3 +62,19 @@ a{color:var(--acc2)}.tier{display:inline-block;padding:2px 9px;border-radius:999
 .nftpick .nftcard.sel{border-color:#ffd166;box-shadow:0 0 0 3px #ffd16644}.nftpick .nftcard b{display:block;margin-top:6px;font-size:13px;overflow-wrap:anywhere}.nftpick .nftcard small{color:#b9a9e0}
 .nftpick .pill{display:inline-block;padding:3px 10px;border-radius:99px;background:#0f3d2c;color:#7dffb4;border:1px solid #2a8a5a;font-size:13px}
 .nftpick .ok{margin:10px 0;padding:10px;border-radius:12px;background:#0f3d2c;border:1px solid #2a8a5a;color:#d6ffe9}
+
+/* DJ booth */
+#djchip { position: fixed; top: 54px; left: 50%; transform: translateX(-50%); z-index: 40; display: flex; align-items: center; gap: 8px; max-width: min(92vw, 520px); padding: 5px 8px 5px 12px; border-radius: 999px; background: rgba(20, 8, 40, .82); border: 1px solid #ff2fd0; color: #fff; font-size: 13px; box-shadow: 0 0 14px rgba(255, 47, 208, .45); backdrop-filter: blur(4px); }
+#djchip.hidden { display: none; }
+#djchip .djt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+#djchip .dji { animation: djpulse 1s infinite; }
+#djchip .djb { background: #2a1450; border: 1px solid #33f0ff; color: #fff; border-radius: 999px; padding: 3px 9px; font-size: 14px; cursor: pointer; }
+@keyframes djpulse { 50% { transform: scale(1.25); } }
+.djp .djnow { padding: 10px; border-radius: 10px; background: linear-gradient(135deg, #2a0f44, #08304a); border: 1px solid #ff2fd0; margin-bottom: 10px; }
+.djp .djnm { font-weight: 900; font-size: 17px; color: #33f0ff; } .djp .djtr { margin: 4px 0 8px; font-weight: 700; }
+.djp .djbar { height: 6px; border-radius: 6px; background: #ffffff22; overflow: hidden; margin-bottom: 4px; } .djp .djbar i { display: block; height: 100%; background: linear-gradient(90deg, #ff2fd0, #33f0ff); }
+.djp .row { display: flex; gap: 8px; align-items: center; margin: 8px 0; } .djp .row.wrap { flex-wrap: wrap; }
+.djp .djq, .djp .djl { margin: 8px 0; display: grid; gap: 4px; }
+.djp .djtrk { text-align: left; padding: 7px 10px; border-radius: 8px; border: 1px solid #ffffff33; background: #ffffff0d; color: inherit; cursor: pointer; } .djp .djtrk.on { border-color: #ff2fd0; background: #ff2fd033; }
+.djp .btn.talk { width: 100%; padding: 14px; touch-action: none; user-select: none; } .djp .btn.on { background: #c0262d; }
+.djp .djvol input[type=range] { flex: 1; min-width: 120px; } .djp .small { font-size: 12px; }

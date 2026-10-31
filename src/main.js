@@ -13,6 +13,8 @@ import * as V from './vendors.js';
 import { walkAngle, walkDir } from './move.mjs';
 import { attachNft, animateNft } from './nftgfx.js';
 import { nftAvatarModal } from './nftui.js';
+import { DjClient } from './dj.js';
+import { mountChip, djModal } from './djui.js';
 import { FIELDS, VIBES, DEFAULT } from '../shared/traits.js';
 
 const CFG0 = window.SG_CONFIG || {}; const onGh = /github\.io$/.test(location.hostname) || location.protocol === 'file:';
@@ -28,6 +30,13 @@ const waiters = {}; const players = new Map();
 const net = new Net(WS_URL);
 let voice = null, scene, renderer, camera, world, sky, me3 = null, joined = false, parked = new Map(), nowT = 0;
 const ctx = { net, server: SERVER, state, waiters, get cfg() { return state.cfg; }, get voice() { return voice; }, pack: (av) => UI.packAv(av, FIELDS), closeTop() { const m = $('#modals').lastElementChild; if (m) m.remove(); }, openEditor: () => openEditor(), entry: (o) => UI.entryModal(ctx, o), purchase: (kind, o) => UI.purchaseFlow(ctx, kind, { ...o, title: kind === 'ride' ? '🎁 Mystery ride' : kind === 'shop' ? o.item.name : 'Mint avatar NFT' }), voiceChanged: () => updateVoiceHud(), shopRedraw: null, garageRedraw: null };
+// ---------- DJ booth ----------
+const dj = new DjClient(net, SERVER); dj.me = () => state.me && state.me.id; ctx.hype = hype; ctx.djc = dj;
+const chipUpd = mountChip(dj, ctx);
+dj.onChange = () => { chipUpd(); if (world && world.stage && dj.st) world.stage.setScreen(dj.st); if (dj.panel) dj.panel(); };
+fetch(new URL('assets/music/playlist.json', document.baseURI)).then((r) => r.json()).then((j) => { ctx.playlist = j.tracks; }).catch(() => {});
+addEventListener('pointerdown', () => dj.unlock(), { once: true }); addEventListener('keydown', () => dj.unlock(), { once: true });
+function hype() { if (!joined) return; doEmote(4); dj.hype(); }
 const on = (t, f) => { const prev = net.on[t]; net.on[t] = (m) => { if (prev) prev(m); f(m); }; };
 // resolve waiters
 for (const t of ['quote', 'quoteerr', 'buyres', 'wchal', 'wok', 'nfts', 'nftres']) on(t, (m) => { const w = waiters[t]; if (w && w.length) { waiters[t] = []; w.forEach((f) => f(m)); } });
@@ -77,8 +86,8 @@ const keys = new Set(); let camYaw = Math.PI, camPitch = 0.28, camDist = 7.5, ca
 addEventListener('keydown', (e) => { if (chatFocus || e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return; const k = e.key.toLowerCase(); keys.add(k);
   if (k === ' ' || k.startsWith('arrow')) e.preventDefault();
   if (!joined) return; if (k === 'enter') { e.preventDefault(); $('#chatin').focus(); }
-  else if (k === 'f') interact(); else if (k === 'e') toggleDrive(); else if (k === 'p') togglePark(); else if (k === 'v' && voice) voice.ptt(true); else if (k >= '1' && k <= '5') doEmote(+k); else if (k === 'escape') { const m = $('#modals').lastElementChild; if (m) m.remove(); } });
-addEventListener('keyup', (e) => { const k = e.key.toLowerCase(); keys.delete(k); if (k === 'v' && voice) voice.ptt(false); });
+  else if (k === 'f') interact(); else if (k === 'e') toggleDrive(); else if (k === 'p') togglePark(); else if (k === 'v' && voice) voice.ptt(true); else if (k === 'h') hype(); else if (k === 't') dj.talk(true); else if (k >= '1' && k <= '5') doEmote(+k); else if (k === 'escape') { const m = $('#modals').lastElementChild; if (m) m.remove(); } });
+addEventListener('keyup', (e) => { const k = e.key.toLowerCase(); keys.delete(k); if (k === 'v' && voice) voice.ptt(false); if (k === 't') dj.talk(false); });
 addEventListener('blur', () => { keys.clear(); if (voice) voice.ptt(false); });
 function bindCanvasDrag() {
   const c = $('#c'); let drag = null, moved = 0;
@@ -173,7 +182,7 @@ function interact() {
   if (!joined || !curSpot) return; const s = curSpot;
   if (s.game) { window.open(s.game.url, '_blank', 'noopener,noreferrer'); toast(`Opening ${s.game.name} in a new tab…`); }
   else if (s.id === 'shop') UI.shopModal(ctx); else if (s.id === 'showroom') UI.garageModal(ctx); else if (s.id === 'burn') UI.burnModal(ctx);
-  else if (s.id === 'info') V.infoModal(ctx); else if (s.id.startsWith('vendor:')) V.boothModal(ctx, +s.id.slice(7));
+  else if (s.id === 'info') V.infoModal(ctx); else if (s.id === 'dj') { if (dj.st && dj.st.on && !dj.st.dj) dj.claim(); djModal(ctx, dj); } else if (s.id.startsWith('vendor:')) V.boothModal(ctx, +s.id.slice(7));
 }
 function clickAt(px, py) { // click a player to open their profile card
   let best = null, bd = 48 * 48; const v = new THREE.Vector3();
@@ -204,7 +213,8 @@ function bindNet() {
   on('welcome', (m) => onWelcome(m));
   on('p+', (m) => { if (!state.me || m.id === state.me.id && !joined) return; updateInfo(m); });
   on('p-', (m) => { state.roster.delete(m.id); const e = players.get(m.id); if (e) { scene.remove(e.person.root); scene.remove(e.car); players.delete(m.id); } const pk = parked.get(m.id); if (pk) { scene.remove(pk); parked.delete(m.id); } if (voice) voice.drop(m.id, true); });
-  on('bin', (dv) => { const snap = decodeSnapshot(dv); const seen = new Set(); for (const s of snap.list) { seen.add(s.id); let e = players.get(s.id); if (!e) { const info = state.roster.get(s.id); if (!info) continue; e = spawnEntity(info); e.x = s.x; e.y = s.y; e.z = s.z; e.yaw = s.yaw; players.set(s.id, e); } e.tx = s.x; e.ty = s.y; e.tz = s.z; e.tyaw = s.yaw; e.flags = s.flags; } if (snap.key) for (const [id, e] of players) if (!seen.has(id)) { scene.remove(e.person.root); scene.remove(e.car); players.delete(id); } });
+  on('dj', (m) => dj.onState(m)); on('djh', () => { if (world.stage) world.stage.fx.flash = 1; });
+  on('bin', (dv) => { if (dv.getUint8(0) === 4) return dj.onMicPacket(dv); const snap = decodeSnapshot(dv); const seen = new Set(); for (const s of snap.list) { seen.add(s.id); let e = players.get(s.id); if (!e) { const info = state.roster.get(s.id); if (!info) continue; e = spawnEntity(info); e.x = s.x; e.y = s.y; e.z = s.z; e.yaw = s.yaw; players.set(s.id, e); } e.tx = s.x; e.ty = s.y; e.tz = s.z; e.tyaw = s.yaw; e.flags = s.flags; } if (snap.key) for (const [id, e] of players) if (!seen.has(id)) { scene.remove(e.person.root); scene.remove(e.car); players.delete(id); } });
   on('chat', (m) => { addChat(m); const e = m.id === state.me.id ? me3 : players.get(m.id); if (e && !(voice && voice.isBlocked(e.key))) say(e, m.text); });
   on('sys', (m) => { state.online = m.online; hud(); if (m.kind !== 'leave') addChat({ text: m.text, kind: m.kind }); });
   on('chaterr', (m) => toast(m.why)); on('toast', (m) => toast(m.text));
@@ -272,6 +282,7 @@ function loop(now) {
   requestAnimationFrame(loop); const dt = Math.min(0.1, (now - last) / 1000); last = now; nowT += dt; PLATE_UNI.uTime.value = nowT;
   const phase = (Date.now() / 1000 % 600) / 600; sky.update(q.has('phase') ? +q.get('phase') : phase);
   for (const f of world.anim) f(nowT);
+  dj.tick(dt, joined ? L.x : 0, joined ? L.z : 20); if (world.stage) world.stage.update(dj.level, dj.bands, dt);
   if (joined && me3) {
     step(dt); updateEntity(me3, dt, nowT, true);
     for (const e of players.values()) updateEntity(e, dt, nowT, false);
@@ -296,7 +307,7 @@ async function boot() {
   voice = new Voice(net, state.cfg); voice.onChange = () => updateVoiceHud(); state.blocked = (k) => voice.isBlocked(k);
   $('#bAvatar').onclick = () => joined && openEditor(); $('#bShop').onclick = () => joined && UI.shopModal(ctx); $('#bGarage').onclick = () => joined && UI.garageModal(ctx); $('#bBurn').onclick = () => UI.burnModal(ctx); $('#bVoice').onclick = () => joined && UI.voiceModal(ctx); $('#bPlayers').onclick = () => joined && UI.playersModal(ctx); $('#bHelp').onclick = () => V.infoModal(ctx); $('#bVendors').onclick = () => V.vendorDirectory(ctx); const lh = $('#howLink'); if (lh) lh.onclick = (e) => { e.preventDefault(); V.infoModal(ctx); }; $('#bSet').onclick = settingsModal; $('#bProfile').onclick = () => joined && net.json({ t: 'profile', sid: state.me.id });
   net.connect(); showJoin(false); requestAnimationFrame(loop);
-  window.__sg = { state, players, get world() { return world; }, L, net, ctx, get me() { return me3; }, cam: () => camera, goto: (x, z) => { L.x = x; L.z = z; }, emote: doEmote, setCam: (y, p) => { camYaw = y; camPitch = p; }, voice: () => voice, scene: () => scene, renderer: () => renderer, gfx: () => gfx, setDist: (d, look) => { camDist = d; camLook = look || 0; } };
+  window.__sg = { dj, state, players, get world() { return world; }, L, net, ctx, get me() { return me3; }, cam: () => camera, goto: (x, z) => { L.x = x; L.z = z; }, emote: doEmote, setCam: (y, p) => { camYaw = y; camPitch = p; }, voice: () => voice, scene: () => scene, renderer: () => renderer, gfx: () => gfx, setDist: (d, look) => { camDist = d; camLook = look || 0; } };
   window.__ready = true;
 }
 function settingsModal() {

@@ -1,0 +1,53 @@
+{
+ "_note": "Original tracks synthesized by tools/make-music.py. CC0 1.0 (public domain).",
+ "tracks": [
+  {
+   "id": "dust-road-house",
+   "title": "Dust Road House",
+   "artist": "VW FEST House Band (synthesized)",
+   "file": "dust-road-house.mp3",
+   "dur": 95.9,
+   "license": "CC0 1.0"
+  },
+  {
+   "id": "arcade-sunrise",
+   "title": "Arcade Sunrise",
+   "artist": "VW FEST House Band (synthesized)",
+   "file": "arcade-sunrise.mp3",
+   "dur": 91.6,
+   "license": "CC0 1.0"
+  },
+  {
+   "id": "lowrider-lofi",
+   "title": "Lowrider Lo-Fi",
+   "artist": "VW FEST House Band (synthesized)",
+   "file": "lowrider-lofi.mp3",
+   "dur": 101.5,
+   "license": "CC0 1.0"
+  },
+  {
+   "id": "neon-cruise",
+   "title": "Neon Cruise",
+   "artist": "VW FEST House Band (synthesized)",
+   "file": "neon-cruise.mp3",
+   "dur": 99.0,
+   "license": "CC0 1.0"
+  },
+  {
+   "id": "airy-funk",
+   "title": "Air-Cooled Funk",
+   "artist": "VW FEST House Band (synthesized)",
+   "file": "airy-funk.mp3",
+   "dur": 82.0,
+   "license": "CC0 1.0"
+  },
+  {
+   "id": "sunset-chill",
+   "title": "Sunset Chill",
+   "artist": "VW FEST House Band (synthesized)",
+   "file": "sunset-chill.mp3",
+   "dur": 78.7,
+   "license": "CC0 1.0"
+  }
+ ]
+}
