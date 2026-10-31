@@ -61,7 +61,8 @@ export async function connectEmbedded(cfg, server, via = 'google', remember = fa
   assertTop();
   const inst = await web3auth(cfg, server, remember); const m = inst._m;
   if (!inst.connected) await inst.connectTo(m.WALLET_CONNECTORS.AUTH, { authConnection: via === 'apple' ? m.AUTH_CONNECTION.APPLE : m.AUTH_CONNECTION.GOOGLE });
-  const a = await adapt(inst); if (!a) throw new Error('Sign-in was cancelled.'); if (remember) localStorage.setItem('sg_emb', '1'); else localStorage.removeItem('sg_emb'); // staying signed in is opt-in const lo = a.logout; a.logout = async () => { localStorage.removeItem('sg_emb'); await lo(); w3a = null; }; return a;
+  const a = await adapt(inst); if (!a) throw new Error('Sign-in was cancelled.'); if (remember) localStorage.setItem('sg_emb', '1'); else localStorage.removeItem('sg_emb'); // staying signed in is opt-in
+  const lo = a.logout; a.logout = async () => { localStorage.removeItem('sg_emb'); await lo(); w3a = null; }; return a;
 }
 // Quietly restore an earlier Google session (no popup) if there is one.
 export async function resumeEmbedded(cfg, server) { if (framed || !cfg.embedded || !localStorage.getItem('sg_emb')) return null; try { const inst = await web3auth(cfg, server, true); if (!inst.connected) return null; const a = await adapt(inst); const lo = a.logout; a.logout = async () => { localStorage.removeItem('sg_emb'); await lo(); w3a = null; }; return a; } catch { return null; } }
