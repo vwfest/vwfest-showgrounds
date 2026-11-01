@@ -20,10 +20,10 @@ function decompile(tx, alts) {
 // Runs on the exact transaction object that is about to be signed (build time AND again right before the wallet prompt, from a fresh decode of its bytes).
 export function auditTx(tx, ctx) { return auditMessage(decompile(tx, ctx.alts), ctx.c); }
 // Defence in depth on top of the instruction audit: Jupiter's route carries ~30 opaque AMM accounts, and none of them may be a token account OWNED BY THE PLAYER except `allowed`
-// (isolated temp account, $VWFEST account, wSOL account). Refuses if the check cannot run. 25 keys per call = the /api/rpc getMultipleAccounts cap.
+// (isolated temp account, $VWFEST account, wSOL account). Refuses if the check cannot run. 10 keys per call: public RPCs (Allnodes, etc.) reject more than 10 accounts per getMultipleAccounts (-32602).
 export async function assertNoStrayUserTokenAccounts(conn, ixs, user, allowed) {
   const keys = new Set(); for (const i of ixs) for (const a of i.accounts) keys.add(a.pubkey); for (const x of allowed) keys.delete(x); keys.delete(user.toBase58()); const list = [...keys]; const ub = user.toBytes();
-  for (let o = 0; o < list.length; o += 25) { const infos = await conn.getMultipleAccountsInfo(list.slice(o, o + 25).map((k) => new PublicKey(k)), 'confirmed');
+  for (let o = 0; o < list.length; o += 10) { const infos = await conn.getMultipleAccountsInfo(list.slice(o, o + 10).map((k) => new PublicKey(k)), 'confirmed');
     for (const info of infos) if (info && (info.owner.equals(TOKEN) || info.owner.equals(TOKEN22)) && info.data.length >= 165 && info.data.subarray(32, 64).every((x, n) => x === ub[n])) throw new Error('Swap route touches another token account of yours. Aborted for your safety.'); }
 }
 const u64 = (n) => { const b = new Uint8Array(8); new DataView(b.buffer).setBigUint64(0, BigInt(n), true); return b; };
