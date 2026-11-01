@@ -70,8 +70,9 @@ function loadConfig(env = process.env) {
     publicBase: (env.PUBLIC_BASE_URL || '').replace(/\/$/, ''),
     storage: { driver: env.NFT_STORAGE || 'server', pinataJwt: env.PINATA_JWT || '', gateway: (env.PINATA_GATEWAY || 'https://gateway.pinata.cloud').replace(/\/$/, '') },
     collections: {
-      avatar: { name: 'VW Fest Show Grounds Avatars', address: env.AVATAR_COLLECTION || '', symbol: 'VWFAV' },
-      ride: { name: 'VW Fest Show Grounds Rides', address: env.RIDE_COLLECTION || '', symbol: 'VWFRIDE' },
+      // fpNamespace: legacy string hashed into avatar uniqueness fingerprints; never change it (display name can change).
+      avatar: { name: 'Show Grounds Avatars', fpNamespace: 'VW Fest Show Grounds Avatars', address: env.AVATAR_COLLECTION || '', symbol: 'VWFAV' },
+      ride: { name: 'Show Grounds Rides', address: env.RIDE_COLLECTION || '', symbol: 'VWFRIDE' },
     },
     // Per-kind price policy. discount = 50% off when paying in $VWFEST. devFee = dev cut applies to non-$VWFEST payments (SOL/SPL).
     // Mints: 100% of a $VWFEST payment is burned, and 50% of a SOL payment is swapped+burned and 50% goes to DEV_WALLET (set MINT_DEV_FEE=0 for a 100% burn on SOL too).

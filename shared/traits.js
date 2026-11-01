@@ -18,8 +18,8 @@ const NAMES = {
   outfit: ['T-shirt only', 'Mechanic overalls', 'Hawaiian shirt', 'Denim jacket', 'Swap-meet vest'],
   hat: ['None', 'Ball cap', 'Bucket hat', 'Cowboy hat', 'Beanie', 'Flower', 'Bandana', 'Straw hat'],
   glasses: ['None', 'Aviators', 'Round specs', 'Shades'],
-  acc: ['None', 'Peace sign necklace', 'Wrench', 'Scarf', 'Headphones', 'VW badge'],
-  car: ['Beetle', 'Bus', 'Karmann Ghia', 'Thing'],
+  acc: ['None', 'Peace sign necklace', 'Wrench', 'Scarf', 'Headphones', 'Fest badge'],
+  car: ['Bug', 'Camper', 'Ghia Coupe', 'Safari'], // display only; avatars store the index
   carColor: ['Red', 'Orange', 'Yellow', 'Mint', 'Ocean', 'Purple', 'Pink', 'White', 'Tangerine', 'Teal', 'Lime', 'Indigo', 'Navy', 'Sky', 'Brick', 'Black'],
   carColor2: ['Red', 'Orange', 'Yellow', 'Mint', 'Ocean', 'Purple', 'Pink', 'White', 'Tangerine', 'Teal', 'Lime', 'Indigo', 'Navy', 'Sky', 'Brick', 'Black', 'Single color'],
   stripe: ['None', 'Racing stripes', 'Beltline stripe', 'Flames', 'Checkers'],

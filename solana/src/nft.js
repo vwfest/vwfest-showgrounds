@@ -1,6 +1,6 @@
 'use strict';
 // Metaplex Core helpers (hand-encoded instructions: no Umi dependency), metadata, uniqueness, ownership lookup.
-//  * Collections 'VW Fest Show Grounds Avatars' / 'VW Fest Show Grounds Rides' are Core collections whose update authority is the server's
+//  * Collections 'Show Grounds Avatars' / 'Show Grounds Rides' are Core collections whose update authority is the server's
 //    AUTHORITY key. That key only co-signs mints (Core requires the collection authority to sign adding an asset). It holds no user funds.
 //  * One mint per unique trait set is enforced ON-CHAIN: the asset address is a keypair derived from HMAC(SERVER_SECRET, collection+fingerprint),
 //    so a second mint of the same trait set fails because the account already exists (plus the off-chain reservation for a friendly error).

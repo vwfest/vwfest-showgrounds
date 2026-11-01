@@ -7,7 +7,7 @@ const { startValidator, testEnv } = require('./helpers'); const setup = require(
 
 const ORIGIN = 'http://site.test'; const ctx = {}; let skip = false;
 const SVG = (t) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><title>${t}</title><rect width="10" height="10" fill="#f0f"/></svg>`;
-const traits = (n) => ({ Sex: 'Female', Hair: 'Teal ' + n, Personality: 'Chill Cruiser', Body: 'Average', 'Favorite VW': 'Bus' });
+const traits = (n) => ({ Sex: 'Female', Hair: 'Teal ' + n, Personality: 'Chill Cruiser', Body: 'Average', 'Favorite VW': 'Camper' });
 const supply = async (conn, mint) => BigInt((await conn.getTokenSupply(new PublicKey(mint))).value.amount);
 const bal = async (conn, mint, owner) => { const a = spl.getAssociatedTokenAddressSync(new PublicKey(mint), new PublicKey(owner)); return BigInt((await conn.getTokenAccountBalance(a)).value.amount); };
 async function newUser(sol = 3) { const kp = Keypair.generate(); await setup.airdrop(ctx.conn, kp.publicKey, sol); const client = ctx.createClient({ base: ctx.base, origin: ORIGIN, connection: ctx.conn, wallet: ctx.keypairAdapter(kp, nacl) }); await client.connect(); await client.signIn(); return { kp, client, w: kp.publicKey.toBase58() }; }
@@ -48,7 +48,7 @@ test('faucet + avatar mint paid in $VWFEST (50% off, burned), unique per trait s
   assert.equal(await supply(ctx.conn, mint), s0 - 25_000_000n, 'exactly 25 test tokens burned on-chain'); assert.equal(res.receipt.burned, '25000000');
   assert.equal(ctx.grants.length, 1); assert.equal(ctx.grants[0].kind, 'avatar'); assert.equal(ctx.grants[0].wallet, w);
   const info = await ctx.conn.getAccountInfo(new PublicKey(res.mint.asset)); const a = nft.parseAsset(info.data); assert.equal(a.owner, w); assert.equal(a.updateAuthority.type, 'collection'); assert.equal(a.updateAuthority.address, ctx.env.AVATAR_COLLECTION); assert.equal(a.name, 'Alice Avatar');
-  const meta = await (await fetch(a.uri.replace('http://localhost:3999', ctx.base.replace('/api/solana', '')))).json(); assert.equal(meta.collection.name, 'VW Fest Show Grounds Avatars'); assert.ok(meta.attributes.find((x) => x.trait_type === 'Hair' && x.value === 'Teal A')); assert.match(meta.image, /nft\/img\//);
+  const meta = await (await fetch(a.uri.replace('http://localhost:3999', ctx.base.replace('/api/solana', '')))).json(); assert.equal(meta.collection.name, 'Show Grounds Avatars'); assert.ok(meta.attributes.find((x) => x.trait_type === 'Hair' && x.value === 'Teal A')); assert.match(meta.image, /nft\/img\//);
   const col = await ctx.conn.getAccountInfo(new PublicKey(ctx.env.AVATAR_COLLECTION)); assert.ok(col.owner.equals(nft.CORE)); assert.ok(ctx.minted.length === 1 && ctx.minted[0].asset === res.mint.asset);
   // one mint per unique trait set
   await assert.rejects(ctx.bob.client.quote({ kind: 'avatar', method: 'vwfest', nft: { traits: traits('A'), imageSvg: SVG('x') } }), /already been minted/);
@@ -85,7 +85,7 @@ test('ride mint: commit-reveal, published odds, verifiable; Rides collection', a
   // the commit really is on-chain in the memo, before the roll
   const tx = await ctx.conn.getParsedTransaction(p.signature, { maxSupportedTransactionVersion: 0 }); assert.ok(tx.transaction.message.instructions.some((i) => i.parsed === q.memo));
   const m = await client.mint(q); const a = nft.parseAsset((await ctx.conn.getAccountInfo(new PublicKey(m.asset))).data); assert.equal(a.updateAuthority.address, ctx.env.RIDE_COLLECTION); assert.match(a.name, new RegExp(p.receipt.ride.tier));
-  const meta = await (await fetch(a.uri.replace('http://localhost:3999', ctx.base.replace('/api/solana', '')))).json(); assert.equal(meta.fairness.seed, p.receipt.ride.seed); assert.equal(meta.fairness.commit, q.commit); assert.equal(meta.collection.name, 'VW Fest Show Grounds Rides'); assert.ok(meta.attributes.find((x) => x.trait_type === 'Plate').value.startsWith('VWFEST'));
+  const meta = await (await fetch(a.uri.replace('http://localhost:3999', ctx.base.replace('/api/solana', '')))).json(); assert.equal(meta.fairness.seed, p.receipt.ride.seed); assert.equal(meta.fairness.commit, q.commit); assert.equal(meta.collection.name, 'Show Grounds Rides'); assert.ok(meta.attributes.find((x) => x.trait_type === 'Plate').value.startsWith('VWFEST'));
   assert.equal(R.verifyRide({ seed: meta.fairness.seed, commit: meta.fairness.commit, sig: meta.fairness.paymentSignature, reroll: meta.fairness.reroll, spec: p.receipt.ride.spec }).ok, true, 'anyone can verify from public metadata');
   await assert.rejects(client.mint(q), /Already minted/);
 });

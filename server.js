@@ -264,7 +264,7 @@ app.get('/ride/:file', (req, res) => {
   nftHead(res); const r = rides.byId.get(m[1]);
   res.set('Cache-Control', r ? 'public, max-age=3600' : 'no-store');
   if (m[2] === 'svg') return res.type('image/svg+xml').send(r ? ridesvg(r.spec) : placeholder());
-  const base = { symbol: 'VWRIDE', external_url: 'https://vwfest.github.io/vwfest-arcade/', image: `${publicUrl}/ride/${m[1]}.svg`, properties: { files: [{ uri: `${publicUrl}/ride/${m[1]}.svg`, type: 'image/svg+xml' }], category: 'image' }, collection: { name: 'VW Fest Show Grounds Rides' } };
+  const base = { symbol: 'VWRIDE', external_url: 'https://vwfest.github.io/vwfest-arcade/', image: `${publicUrl}/ride/${m[1]}.svg`, properties: { files: [{ uri: `${publicUrl}/ride/${m[1]}.svg`, type: 'image/svg+xml' }], category: 'image' }, collection: { name: 'Show Grounds Rides' } };
   if (!r) return res.type('json').send(JSON.stringify({ ...base, name: 'VW Fest Ride (mystery)', description: 'Mystery ride. It is revealed when the mint transaction confirms.', attributes: [{ trait_type: 'Status', value: 'Unrevealed' }] }));
   const d = R.describe(r.spec);
   res.type('json').send(JSON.stringify({ ...base, name: `VW Fest Ride ${d.build}`, description: `A ${d.tier} ${d.model} from the VW Fest Show Grounds. Every ride carries a VWFEST plate. Randomness is commit-reveal: commit ${r.commit}, server seed ${r.seed}, final seed = SHA256(seed + ":" + mint tx signature)${r.reroll ? ' + "#' + r.reroll + '" re-roll counter' : ''}.`,
