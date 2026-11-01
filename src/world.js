@@ -11,6 +11,7 @@ const rng = (seed) => () => { seed = (seed * 1664525 + 1013904223) >>> 0; return
 const R = rng(209916);
 const pick = (a) => a[Math.floor(R() * a.length)];
 import GAMES_LIST from '../shared/games.js';
+import STAGE from '../shared/stage.js';
 export const GAMES = GAMES_LIST;
 function canvasTex(w, h, draw) { const cv = document.createElement('canvas'); cv.width = w; cv.height = h; const x = cv.getContext('2d'); draw(x, w, h); const t = cTex(cv); t.anisotropy = 4; return { t, cv, x }; }
 function signMesh(w, h, tex, basic = true) { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), basic ? new THREE.MeshBasicMaterial({ map: tex, toneMapped: false, transparent: true }) : new THREE.MeshLambertMaterial({ map: tex })); return m; }
@@ -61,12 +62,12 @@ export function buildWorld(scene, opts = {}) {
     solid.box(0.5, 0.9, 0.05, '#f4f1ea', x + (x < 0 ? -2.3 : 2.3), 0.5, z, 0); }
   { const cm = mergeMeshes(carGroup); cm.traverse((o) => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } }); scene.add(cm); }
   // ---------- stage ----------
-  const SZ = -86;
+  const SZ = STAGE.SZ, SIGN = STAGE.SIGN, SCREEN = STAGE.SCREEN;
   solid.box(46, 1.6, 20, '#2b2230', 0, 0.8, SZ); solid.box(48, 0.2, 22, '#40344a', 0, 1.65, SZ); rect(0, SZ, 48, 22);
   solid.box(46, 16, 1.2, '#1c1626', 0, 9.6, SZ - 9.4); for (const s of [-1, 1]) { solid.box(1.4, 18, 1.4, '#555a66', s * 23, 9, SZ + 8); solid.box(1.4, 18, 1.4, '#555a66', s * 23, 9, SZ - 9); solid.box(1.4, 1.4, 18, '#555a66', s * 23, 18, SZ - 0.5); }
   solid.box(46, 1.2, 1.2, '#555a66', 0, 18.2, SZ + 8); for (const s of [-1, 1]) for (let i = 0; i < 3; i++) solid.box(3.4, 3.4 + i * 0.4, 3, '#14141a', s * (17 - i * 3.4), 3.4 + (3.4 + i * 0.4) / 2, SZ + 5);
   const sign = textTex([{ t: '$VWFEST', c: '#ff2fd0', s: 150, glow: true, y: 100 }, { t: 'SHOW GROUNDS', c: '#33f0ff', s: 66, glow: true, y: 205 }], { w: 1024, h: 256, bg: '#0b0716' });
-  const signM = signMesh(34, 8.5, sign.t); signM.position.set(0, 12.5, SZ - 8.6); scene.add(signM);
+  const signM = signMesh(SIGN.w, SIGN.h, sign.t); signM.position.set(0, SIGN.y, SZ + SIGN.dz); scene.add(signM);
   for (let i = 0; i < 13; i++) neon.box(2, 0.3, 0.3, ['#ff2fd0', '#33f0ff', '#ffd166'][i % 3], -24 + i * 4, 17.5, SZ + 8);
   const fx = { level: 0, flash: 0, bars: new Float32Array(24) }; // driven by the DJ client: music level, crowd-hype flash, spectrum
   const stagePts = []; for (let i = 0; i < 6; i++) { const m = new THREE.Mesh(new THREE.ConeGeometry(2.2, 14, 8, 1, true), new THREE.MeshBasicMaterial({ color: [0xff2fd0, 0x33f0ff, 0xffd166][i % 3], transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending })); m.position.set(-20 + i * 8, 11, SZ + 6); m.rotation.z = 0; scene.add(m); anim.push((t) => { const sp = 1 + fx.level * 2.2; m.rotation.z = Math.sin(t * 0.8 * sp + i) * (0.5 + fx.level * 0.25); m.rotation.x = Math.cos(t * 0.6 * sp + i * 1.7) * 0.4; m.material.opacity = 0.12 + fx.level * 0.38 + fx.flash * 0.3; m.scale.set(1 + fx.level * 0.5, 1, 1 + fx.level * 0.5); }); }
@@ -80,7 +81,7 @@ export function buildWorld(scene, opts = {}) {
     for (const s of [-1, 1]) { const x = DX + s * 4.6; solid.box(1.5, 2.8, 1.2, '#101014', x, 1.4, DZ - 0.3); solid.cyl(0.5, 0.06, '#2b2b34', x, 0.95, DZ + 0.33, Math.PI / 2, 0, 0, 20); solid.cyl(0.3, 0.06, '#2b2b34', x, 2.05, DZ + 0.33, Math.PI / 2, 0, 0, 16); neon.box(1.5, 0.06, 0.06, '#33f0ff', x, 2.8, DZ + 0.33); rect(x, DZ - 0.3, 1.7, 1.4); }
     const bt = textTex([{ t: '🎧 DJ BOOTH', c: '#fff', s: 74, glow: false, y: 70 }], { w: 640, h: 130, bg: '#14102a', border: '#33f0ff' }); const bm = signMesh(3.6, 0.74, bt.t); bm.position.set(DX, 0.52, DZ + 0.67); scene.add(bm);
     // big screen above the stage: DJ name + now playing
-    const scr = canvasTex(1024, 256, () => {}); const scm = signMesh(17.6, 4.4, scr.t); scm.position.set(0, 5.6, SZ + 10.62); scene.add(scm); solid.box(18.2, 5.0, 0.3, '#08080c', 0, 5.6, SZ + 10.4);
+    const scr = canvasTex(1024, 256, () => {}); const scm = signMesh(SCREEN.w, SCREEN.h, scr.t); scm.position.set(0, SCREEN.y, SZ + SCREEN.dz); scene.add(scm); solid.box(SCREEN.w + 0.6, SCREEN.h + 0.6, 0.3, '#08080c', 0, SCREEN.y, SZ + 10.4);
     let sig = ''; const wrap = (x, t, mw) => { let s = t; while (x.measureText(s).width > mw && s.length > 4) s = s.slice(0, -2); return s === t ? s : s + '…'; };
     const stage = { fx, setScreen(st) { // st: {on, dj:{nick}|null, track:{title,artist}|null, mic, queue:n}
       const k = JSON.stringify([st.on, st.dj && st.dj.nick, st.track && st.track.title, st.mic, st.qn]); if (k === sig) return; sig = k; const x = scr.x, w = 1024, h = 256;

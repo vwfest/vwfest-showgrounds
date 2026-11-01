@@ -210,9 +210,9 @@ function bindChat() {
 // ---------- net events ----------
 function bindNet() {
   on('hi', (m) => { state.online = m.online; state.cap = m.cap; state.burns = m.burns; if (world) world.drawBurn(m.burns); hud(); });
-  on('full', (m) => { showFull(m); });
-  on('joinerr', (m) => { joinMsg(m.why || 'Could not join', true); if (m.err === 'stale') { localStorage.removeItem('vwfest-sg'); state.creds = null; showJoin(true); } });
-  on('welcome', (m) => { setRpcToken(m.rpcToken); onWelcome(m); if (voice && voice.on) voice.optIn(); });
+  on('full', (m) => { joinDone(); showFull(m); });
+  on('joinerr', (m) => { joinDone(); if (m.err === 'stale') { localStorage.removeItem('vwfest-sg'); state.creds = null; showJoin(true); } joinMsg(m.why || 'Could not join', true); if (['badnick', 'taken'].includes(m.err)) nickProblem(); });
+  on('welcome', (m) => { joinDone(); setRpcToken(m.rpcToken); onWelcome(m); if (voice && voice.on) voice.optIn(); });
   on('rpctok', (m) => setRpcToken(m.rpcToken)); onRpcRefresh(() => { if (net.open && joined) net.json({ t: 'rpctok' }); });
   on('p+', (m) => { if (!state.me || m.id === state.me.id && !joined) return; updateInfo(m); });
   on('p-', (m) => { state.roster.delete(m.id); const e = players.get(m.id); if (e) { scene.remove(e.person.root); scene.remove(e.car); players.delete(m.id); } const pk = parked.get(m.id); if (pk) { scene.remove(pk); parked.delete(m.id); } if (voice) voice.drop(m.id, true); });
@@ -233,8 +233,8 @@ function bindNet() {
   on('profile', (m) => UI.profileCardModal(ctx, m));
   on('avres', (m) => { /* handled by editor promise */ if (waiters.avres) { const w = waiters.avres; waiters.avres = []; w.forEach((f) => f(m)); } });
   on('rtc', (m) => { if (voice) voice.onSignal(m, players, { x: L.x, z: L.z, id: state.me.id }); });
-  on('close', (m) => { clearRpcToken(); if (joined && !net.noReconnect) { joinMsg('Connection lost, reconnecting…', true); joined = false; $('#hudwrap').classList.add('dim'); } });
-  on('open', () => { if (state.me && state.creds && !joined) { net.json({ t: 'join', id: state.creds.id, secret: state.creds.secret, nick: state.creds.nick }); } });
+  on('close', (m) => { clearRpcToken(); if (!joined && !pendingJoin && !m.was && !net.noReconnect) { const e = $('#msgjoin'); if (e && !e.textContent) joinMsg('The server is not answering yet. Retrying…'); } if (joined && !net.noReconnect) { joinMsg('Connection lost, reconnecting…', true); joined = false; $('#hudwrap').classList.add('dim'); } });
+  on('open', () => { if (pendingJoin) { const j = pendingJoin; pendingJoin = null; clearTimeout(joinWatch); joinMsg('Connecting…'); net.json(j); return; } if (state.me && state.creds && !joined) { net.json({ t: 'join', id: state.creds.id, secret: state.creds.secret, nick: state.creds.nick }); } });
 }
 function onWelcome(m) {
   if (m.cred) { state.creds = { id: m.cred.id, secret: m.cred.secret, nick: m.nick }; try { localStorage.setItem('vwfest-sg', JSON.stringify(state.creds)); } catch {} }
@@ -253,24 +253,37 @@ function setupEmoteBar() { const v = VIBES[state.me.av.vibe] || VIBES[0]; const 
 
 // ---------- screens ----------
 function hud() { $('#online').textContent = `${state.online}/${state.cap} online`; }
-function joinMsg(t, bad) { const e = $('#msgjoin'); e.textContent = t; e.className = 'msg' + (bad ? ' bad' : ''); }
+function joinMsg(t, bad) { const e = $('#msgjoin'); if (!e) return; e.textContent = t; e.className = 'msg' + (bad ? ' bad' : ''); }
+// A join that is clicked while the socket is not open yet (server asleep on free hosting, or down) used to be dropped silently, leaving "Connecting…" forever.
+// Now it is held and sent the moment the socket opens, with honest progress text while we wait.
+let pendingJoin = null, joinWatch = 0, nickEl = null;
+function sendJoin(msg) {
+  pendingJoin = msg; clearTimeout(joinWatch);
+  if (net.open) { pendingJoin = null; joinMsg('Connecting…'); net.json(msg); return; }
+  joinMsg('Reaching the server…');
+  joinWatch = setTimeout(() => { if (!pendingJoin) return; joinMsg('The server is waking up (free hosting can take up to a minute). Hang tight: you will join automatically.');
+    joinWatch = setTimeout(() => { if (pendingJoin) joinMsg("Still can't reach the server. We keep retrying in the background. You can also try again in a minute.", true); }, 45000); }, 4000);
+}
+function joinDone() { pendingJoin = null; clearTimeout(joinWatch); }
+function nickProblem() { if (nickEl && nickEl.isConnected) { nickEl.scrollIntoView({ block: 'center', behavior: 'smooth' }); nickEl.focus({ preventScroll: true }); nickEl.select(); } }
 function showFull(m) { net.noReconnect = true; const j = $('#join'); j.classList.remove('hidden'); clear($('#joinbody')).append(h('div', { class: 'full' }, h('h2', { text: '🚐 The grounds are full' }), h('p', { text: `${m.online} of ${m.cap} people are here right now. We will keep trying for you.` }), h('button', { class: 'btn primary', text: 'Try again now', onclick: () => location.reload() }), h('p', { class: 'muted', text: 'Meanwhile: the Arcade Room games are always open.' }), h('a', { class: 'btn', href: 'https://vwfest.github.io/vwfest-arcade/', text: '🎮 Arcade Room' }))); setTimeout(() => location.reload(), 20000); }
 function showKicked(why) { const j = $('#join'); j.classList.remove('hidden'); clear($('#joinbody')).append(h('div', { class: 'full' }, h('h2', { text: 'You left the grounds' }), h('p', { text: why || '' }), h('button', { class: 'btn primary', text: 'Rejoin', onclick: () => location.reload() }))); }
 function showJoin(forceNew) {
   const j = $('#join'); j.classList.remove('hidden'); const body = clear($('#joinbody')); let saved = null; try { saved = JSON.parse(localStorage.getItem('vwfest-sg') || 'null'); } catch {}
   const status = h('p', { id: 'msgjoin', class: 'msg' });
-  if (saved && saved.id && !forceNew) { state.creds = saved; body.append(h('h2', { text: `Welcome back, ${saved.nick}` }), h('p', { class: 'muted', text: `Profile ${saved.id}` }), h('div', { class: 'row' }, h('button', { class: 'btn primary big', text: '▶ Enter the grounds', onclick: () => { joinMsg('Connecting…'); net.json({ t: 'join', id: saved.id, secret: saved.secret, nick: saved.nick }); } }), h('button', { class: 'btn', text: 'New profile', onclick: () => showJoin(true) })), status); return; }
-  const quiz = defaultQuiz(); const nick = h('input', { type: 'text', maxlength: 14, placeholder: 'Your nickname (3-14 letters/numbers)', autocomplete: 'off', 'aria-label': 'Nickname', value: (saved && saved.nick) || '' });
+  if (saved && saved.id && !forceNew) { state.creds = saved; body.append(h('h2', { text: `Welcome back, ${saved.nick}` }), h('p', { class: 'muted', text: `Profile ${saved.id}` }), h('div', { class: 'row' }, h('button', { class: 'btn primary big', text: '▶ Enter the grounds', onclick: () => { sendJoin({ t: 'join', id: saved.id, secret: saved.secret, nick: saved.nick }); } }), h('button', { class: 'btn', text: 'New profile', onclick: () => showJoin(true) })), status); return; }
+  const quiz = defaultQuiz(); const nick = h('input', { type: 'text', maxlength: 14, placeholder: 'Your nickname (3-14 letters, numbers, space _ -)', autocomplete: 'off', autocapitalize: 'words', spellcheck: 'false', 'aria-label': 'Nickname', value: forceNew ? '' : (saved && saved.nick) || '' }); nickEl = nick; // 'New profile' must start EMPTY: a prefilled old name made typing append to it and the 14-char limit silently cut the new name (ShotBot -> ShotBo)
+  nick.addEventListener('focus', () => nick.select());
   body.append(h('h2', { text: 'Create your profile' }), h('p', { class: 'muted', text: 'Free, no sign-up. Answer a few questions and we will build your one-of-a-kind avatar (fine details like freckles, tattoos and your outfit are rolled from your profile ID). You can customize everything afterwards.' }), nick);
   const qz = h('div', { class: 'quizwrap' }); body.append(qz); buildQuiz(qz, quiz);
-  const go = h('button', { class: 'btn primary big', text: '▶ Create profile & enter', onclick: () => { const n = nick.value.trim(); if (n.length < 3) return joinMsg('Pick a nickname first (3-14 characters).', true); joinMsg('Connecting…'); state.creds = { nick: n }; net.json({ t: 'join', nick: n, quiz }); } });
+  const go = h('button', { class: 'btn primary big', text: '▶ Create profile & enter', onclick: () => { const n = nick.value.trim(); if (n.length < 3) { joinMsg('Pick a nickname first (3-14 characters).', true); return nickProblem(); } state.creds = { nick: n }; sendJoin({ t: 'join', nick: n, quiz }); } });
   body.append(h('div', { class: 'row' }, go, saved ? h('button', { class: 'btn', text: 'Use saved profile', onclick: () => showJoin(false) }) : null), status);
 }
 function openEditor() {
   const body = h('div', { class: 'editor' }); const sig = state.me.av;
   buildEditor(body, state.me.av, state.me.eq, state.me.av, (av) => new Promise((res) => { waiters.avres = [...(waiters.avres || []), (m) => { if (m.ok) { state.me.av = m.av; } res(m); }]; net.json({ t: 'av', av }); setTimeout(() => res({ ok: false, why: 'No answer from the server' }), 8000); }));
   const mod = modal('🧍 Avatar editor', body, { cls: 'wide' });
-  const mint = h('div', { class: 'row' }, h('button', { class: 'btn', text: '✨ Mint this avatar as an NFT ($' + (state.cfg ? state.cfg.feeUsd : 5) + ' · burns $VWFEST)', onclick: () => { mod.close(); ctx.purchase('avatar', { method: 'sol' }); } }), h('button', { class: 'btn', text: '🎟 No wallet? Entry / Mint with Google + card', onclick: () => { mod.close(); UI.entryModal(ctx); } })); body.append(mint); if (state.cfg && state.cfg.nftAvatars) body.append(h('div', { class: 'row' }, h('button', { class: 'btn', text: state.me && state.me.nf ? '🖼 Change / remove my NFT avatar' : '🖼 Use an NFT I already own (free)', onclick: () => { mod.close(); nftAvatarModal(ctx); } })));
+  const mint = h('div', { class: 'row' }, h('button', { class: 'btn', text: '✨ Mint this avatar as an NFT ($' + (state.cfg ? state.cfg.feeUsd : 5) + ' · burns $VWFEST)', onclick: () => { mod.close(); ctx.purchase('avatar', { method: 'sol' }); } }), h('button', { class: 'btn', text: '🎟 No wallet? Entry / Mint with Google' + (state.cfg && state.cfg.onramp && state.cfg.onramp.length ? ' + card' : ''), onclick: () => { mod.close(); UI.entryModal(ctx); } })); body.append(mint); if (state.cfg && state.cfg.nftAvatars) body.append(h('div', { class: 'row' }, h('button', { class: 'btn', text: state.me && state.me.nf ? '🖼 Change / remove my NFT avatar' : '🖼 Use an NFT I already own (free)', onclick: () => { mod.close(); nftAvatarModal(ctx); } })));
 }
 function helpModal() {
   modal('Welcome to the VW FEST SHOW GROUNDS', h('div', { class: 'help' }, h('p', { text: 'A free hangout for the $VWFEST community: stroll the show field, check out the cars, visit the Arcade booths and say hi.' }), h('ul', {}, h('li', { text: 'Move: WASD / arrows (Shift to run) · Space: jump · drag to look · scroll to zoom' }), h('li', { text: 'F: use a booth / tent · E: drive your VW (A/D steer) · P: park · 1-5: emotes' }), h('li', { text: 'Click a player to open their profile card' }), h('li', { text: 'Enter: chat (Nearby or Global). Voice: open 🎙 and join; hold V to talk' }), h('li', { text: 'Mobile: left stick to move, buttons on the right' })), h('p', { class: 'muted', text: 'Shop, rides and NFT minting are optional. A wallet is only needed for those, and every purchase burns $VWFEST.' })));
