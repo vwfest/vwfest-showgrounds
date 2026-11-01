@@ -21,7 +21,10 @@ function jupSource(ix, d) { const idx = SOURCE_IDX[d.subarray(0, 8).toString('he
 function pinSource(ix, account, expected) {
   const idx = SOURCE_IDX[dataOf(ix).subarray(0, 8).toString('hex')]; if (idx === undefined || !ix.accounts[idx]) throw new Error('Unrecognised swap route type. Aborted.');
   if (expected && ix.accounts[idx].pubkey !== expected) throw new Error('Swap route does not take its input from your own token account. Aborted.');
-  return { ...ix, accounts: ix.accounts.map((a, n) => (n === idx ? { ...a, pubkey: account } : a)) };
+  // Jupiter lists the source account again inside the per-hop AMM accounts (first leg's "user source" slot): EVERY reference to the player's own token account must be redirected to the temp account,
+  // otherwise the first hop would still debit the player's main account (and our audit, correctly, refuses such a route). Found by the first real mainnet USDC swap test.
+  const from = expected || ix.accounts[idx].pubkey;
+  return { ...ix, accounts: ix.accounts.map((a, n) => (n === idx || a.pubkey === from ? { ...a, pubkey: account } : a)) };
 }
 // Route layouts from the Jupiter v6 IDL: route [.., 3 user_destination_token_account, 4 destination_token_account (optional: program id when unused), 5 destination_mint, 6 platform_fee_account ..]; shared_accounts_route [.., 6 destination_token_account, .., 9 platform_fee_account ..].
 const DEST_IDX = { e517cb977ae3ad2a: 3, c1209b3341d69c81: 6 };

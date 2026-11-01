@@ -75,6 +75,16 @@ test('jupiter.pinSource: moves the route input to the temp account, refuses an u
   assert.equal(jup.jupSource(orig, Buffer.from(orig.data, 'base64')), r.main.toBase58());
 });
 
+test('jupiter.pinSource: EVERY reference to the player\'s own token account is redirected (multi-hop routes list the source again inside the AMM accounts); the audit then accepts the route (mainnet regression)', async () => {
+  const r = await rig(); const j = (ix) => ({ programId: ix.programId.toBase58(), accounts: ix.keys.map((k) => ({ pubkey: k.pubkey.toBase58(), isSigner: k.isSigner, isWritable: k.isWritable })), data: ix.data.toString('base64') });
+  const orig = j(r.route(r.main, AMOUNT, [r.main])); assert.equal(orig.accounts.filter((a) => a.pubkey === r.main.toBase58()).length, 2);
+  const pinned = jup.pinSource(orig, r.temp.toBase58(), r.main.toBase58()); assert.equal(pinned.accounts.filter((a) => a.pubkey === r.main.toBase58()).length, 0); assert.equal(pinned.accounts.filter((a) => a.pubkey === r.temp.toBase58()).length, 2);
+  assert.ok(pinned.accounts.filter((a) => a.pubkey === r.temp.toBase58()).every((a) => a.isWritable), 'writable flag preserved');
+  const d = routeData(AMOUNT), quoted = d.readBigUInt64LE(d.length - 19 + 8), slip = BigInt(d.readUInt16LE(d.length - 19 + 16)); const opts = { user: r.user.publicKey.toBase58(), maxLamports: 0n, maxSwapIn: AMOUNT, source: r.temp.toBase58(), forbid: [r.main.toBase58()], dest: r.vwAta.toBase58(), minOut: quoted * (10000n - slip) / 10000n, maxSlippageBps: Number(slip), quotedOut: quoted };
+  assert.equal(jup.auditJupiterIxs([pinned], opts), true);
+  assert.throws(() => jup.auditJupiterIxs([orig], opts), /must not use|different account/);
+});
+
 test('assertNoStrayUserTokenAccounts: a route that references ANOTHER token account owned by the player is refused (needs RPC)', async () => {
   const r = await rig(); const stray = Keypair.generate().publicKey, pool = Keypair.generate().publicKey; const data = (owner) => { const b = Buffer.alloc(165); owner.toBuffer().copy(b, 32); return b; };
   const store = { [stray.toBase58()]: { owner: TOKEN, data: data(r.user.publicKey) }, [pool.toBase58()]: { owner: TOKEN, data: data(Keypair.generate().publicKey) } };
@@ -92,7 +102,8 @@ test('swapInstructions end to end (mock Jupiter): token swap pins the route to t
   assert.equal(ok.instructions[0].keys[2].pubkey.toBase58(), r.temp.toBase58(), 'route input rewritten to the isolated account');
   await assert.rejects(jup.swapInstructions({ cfg, prices, conn, user: r.q.wallet, inputMint: r.q.swapInputMint, amount: AMOUNT, maxSolLamports: 10_000_000n, iso, allow: [], dest, fetchImpl: reply(j(r.route(Keypair.generate().publicKey))) }), /own token account/); // hostile: input from some other account
   await assert.rejects(jup.swapInstructions({ cfg, prices, conn, user: r.q.wallet, inputMint: r.q.swapInputMint, amount: AMOUNT, maxSolLamports: 10_000_000n, iso, allow: [], dest, fetchImpl: reply(j(r.route(r.main, AMOUNT * 3n))) }), /spend more/); // hostile: in_amount x3
-  await assert.rejects(jup.swapInstructions({ cfg, prices, conn, user: r.q.wallet, inputMint: r.q.swapInputMint, amount: AMOUNT, maxSolLamports: 10_000_000n, iso, allow: [], dest, fetchImpl: reply(j(r.route(r.main, AMOUNT, [r.main]))) }), /must not use/); // hostile: main smuggled into the route accounts
+  const multi = await jup.swapInstructions({ cfg, prices, conn, user: r.q.wallet, inputMint: r.q.swapInputMint, amount: AMOUNT, maxSolLamports: 10_000_000n, iso, allow: [], dest, fetchImpl: reply(j(r.route(r.main, AMOUNT, [r.main]))) }); // Jupiter itself lists the source again in the first hop's accounts (real mainnet USDC route): ALL such references are redirected to the temp account
+  assert.equal(multi.instructions[0].keys.filter((k) => k.pubkey.equals(r.main)).length, 0, 'no reference to the player\'s own token account survives'); assert.equal(multi.instructions[0].keys.filter((k) => k.pubkey.equals(r.temp)).length, 2);
 });
 
 test('swapInstructions: a hostile Jupiter reply that redirects the OUTPUT (route idx 3 / idx 4) or inflates slippage is refused; a missing dest is a programming error', async () => {
