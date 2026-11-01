@@ -16,12 +16,12 @@ const send = (url, init, tok) => fetch(url, { ...init, headers: { ...(init.heade
 const nextToken = (ms) => new Promise((res) => { if (!ask) return res(''); let t = 0; const done = (tok) => { clearTimeout(t); waiters = waiters.filter((f) => f !== done); res(tok); }; t = setTimeout(() => done(''), ms); waiters.push(done); try { ask(); } catch { done(''); } }); // every exit clears its own timer
 export const setRotateWaitMs = (ms) => { waitMs = ms; }; let waitMs = 4000;
 const drop = (tok) => { if (tok && token === tok) { token = ''; clearTimeout(timer); timer = 0; } }; // forget a token the server rejected, together with its refresh timer (only if nobody replaced it meanwhile)
-export async function rpcFetch(url, init = {}) {
+export async function rpcFetch(url, init = {}, { failover = true } = {}) {
   const sent = token; let r = await send(url, init, sent); if (r.status !== 401 && r.status !== 429) return r;
   if (token && token !== sent) { const t2 = token; r = await send(url, init, t2); if (r.status !== 401 && r.status !== 429) return r; drop(t2); } // another request already rotated the token while this one was in flight: use it; if it is rejected too, drop it
   drop(sent);
   const fresh = await nextToken(waitMs); if (fresh && fresh !== sent) { r = await send(url, init, fresh); if (r.status !== 401 && r.status !== 429) return r; drop(fresh); } // a rotation that is still rejected must not stay armed (no stale token, no refresh timer left running)
-  return pubUrl ? send(pubUrl, init, '') : r; // fail over to the public RPC
+  return pubUrl && failover ? send(pubUrl, init, '') : r; // fail over to the public RPC (never for the Jupiter proxy: the public RPC is not a Jupiter)
 }
 // Connection for READS: the server proxy when we hold a token, else the public RPC.
 export function readConnection(Connection, server, cfg, opts = {}) {
@@ -30,3 +30,5 @@ export function readConnection(Connection, server, cfg, opts = {}) {
   if (token) return new Connection(server + '/api/rpc', { ...base, fetch: rpcFetch });
   return new Connection(cfg.publicRpcUrl || (server + '/api/rpc'), base);
 }
+// Same token handling for the server's Jupiter proxy (/api/jup/*): the session token is sent, rotated and retried once exactly like for /api/rpc, but there is no failover to the public RPC.
+export const jupFetch = (url, init = {}) => rpcFetch(url, init, { failover: false });

@@ -1,8 +1,9 @@
 // Non-custodial purchase builder (lazy chunk). The player's own wallet signs; no project wallet ever holds funds.
 //  tx = [compute budget] + [Jupiter swap SOL -> $VWFEST for the swap share] + [SOL fee to creator wallet, if any] + SPL burn + [Core NFT create] + memo
 import { audit, auditMessage, sameMessage, pinSource } from './txaudit.mjs';
-import { rpcFetch } from './rpc.mjs';
+import { rpcFetch, jupFetch } from './rpc.mjs';
 import { sendAndConfirm } from './rebroadcast.mjs';
+import { tokenQuotes } from './swapquote.mjs';
 import { assertTop } from './frame.js';
 import { Connection, PublicKey, Keypair, TransactionInstruction, TransactionMessage, VersionedTransaction, SystemProgram, ComputeBudgetProgram, AddressLookupTableAccount } from '@solana/web3.js';
 
@@ -32,18 +33,19 @@ export function getProvider() { return (window.phantom && window.phantom.solana)
 export async function connectWallet() { assertTop(); const p = getProvider(); if (!p) throw new Error('No Solana wallet found. Install Phantom (phantom.app) and reload.'); const r = await p.connect(); const pk = r && r.publicKey ? r.publicKey : p.publicKey; return { provider: p, pubkey: new PublicKey(pk.toString()) }; }
 
 const ix = (j) => new TransactionInstruction({ programId: new PublicKey(j.programId), keys: j.accounts.map((a) => ({ pubkey: new PublicKey(a.pubkey), isSigner: a.isSigner, isWritable: a.isWritable })), data: Uint8Array.from(atob(j.data), (c) => c.charCodeAt(0)) });
-async function jget(url) { const r = await fetch(url); if (!r.ok) throw new Error('Price service error (' + r.status + ')'); return r.json(); }
+async function jget(url) { const r = await jupFetch(url); // through the server's Jupiter proxy with the session token
+   if (!r.ok) throw Object.assign(new Error('Price service error (' + r.status + ')'), { status: r.status }); return r.json(); }
 
 // Funding sources: 'sol' (Jupiter ExactIn SOL -> $VWFEST), 'token' (Jupiter ExactOut: any SPL token -> exactly the burn amount), 'direct' ($VWFEST already held / test mode).
 //  opts.payToken: { mint, sym, dec } to pay with an SPL token instead of SOL (e.g. USDC, BONK).
-async function build({ q, cfg, conn, user, mint, tokenProg, ata, swapLamports, payToken, onStep }) {
+async function build({ q, cfg, conn, user, mint, tokenProg, ata, swapLamports, payToken, onStep, maxAccounts = 40 }) {
   const ixs = []; const alts = []; let burn = BigInt(q.burnRaw), swapInfo = null, simTok = null;
   const budget = ComputeBudgetProgram.setComputeUnitLimit({ units: 600000 });
   const wsolAta = PublicKey.findProgramAddressSync([user.toBytes(), TOKEN.toBytes(), WSOL_MINT.toBytes()], ATA_PROG)[0].toBase58(); let swapCtx = null;
   const isoPre = [], isoPost = []; // isolation prelude/postlude for token-funded swaps (see below)
   // iso (token-funded swaps only): { temp, main, mint, dec, amount, maxRent }. Jupiter's route is rewritten to take its input from the isolated temp account; the player's own token account (main) may appear in no route instruction.
   const swapIxs = async (qs, maxLamports, maxSwapIn, iso) => {
-    const res = await fetch(`${cfg.jupiter}/swap-instructions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ quoteResponse: qs, userPublicKey: user.toBase58(), wrapAndUnwrapSol: true, dynamicComputeUnitLimit: true, dynamicSlippage: false }) });
+    const res = await jupFetch(`${cfg.jupiter}/swap-instructions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ quoteResponse: qs, userPublicKey: user.toBase58(), wrapAndUnwrapSol: true, dynamicComputeUnitLimit: true, dynamicSlippage: false }) });
     if (!res.ok) throw new Error('Swap service error (' + res.status + ')'); const j = await res.json(); if (j.error) throw new Error('Swap service: ' + j.error);
     const swapIx = iso ? pinSource(j.swapInstruction, iso.temp, iso.main) : j.swapInstruction; // the route as Jupiter built it must have used the player's own account; we move it to the isolated one
     const all = [...(j.computeBudgetInstructions || []), ...(j.setupInstructions || []), swapIx, ...(j.cleanupInstruction ? [j.cleanupInstruction] : [])]; const route = { dest: ata.toBase58(), minOut: BigInt(qs.otherAmountThreshold), maxSlippageBps: cfg.slippageBps, quotedOut: BigInt(qs.outAmount) }; // the output must land in the player's own $VWFEST account and cover the burn
@@ -57,9 +59,7 @@ async function build({ q, cfg, conn, user, mint, tokenProg, ata, swapLamports, p
     onStep && onStep(`Getting the best ${payToken.sym} → $VWFEST route from Jupiter…`);
     const target = BigInt(q.burnRaw) * 995n / 1000n; if (target < BigInt(q.burnMin)) throw new Error('Price error. Please start again.');
     // 1) price discovery (ExactOut): how much of the token buys the burn amount. 2) the swap itself is ExactIn of exactly that quoted maximum, so the player's exposure is a number we fix up front.
-    const qo = await jget(`${cfg.jupiter}/quote?inputMint=${payToken.mint}&outputMint=${cfg.mint}&amount=${target}&swapMode=ExactOut&slippageBps=${cfg.slippageBps}&restrictIntermediateTokens=true&maxAccounts=40`);
-    const maxIn = BigInt(qo.otherAmountThreshold); if (maxIn <= 0n) throw new Error('Price error. Please start again.');
-    const qs = await jget(`${cfg.jupiter}/quote?inputMint=${payToken.mint}&outputMint=${cfg.mint}&amount=${maxIn}&swapMode=ExactIn&slippageBps=${cfg.slippageBps}&restrictIntermediateTokens=true&maxAccounts=40`);
+    const { maxIn, qs } = await tokenQuotes({ get: jget, jup: cfg.jupiter, payMint: payToken.mint, vwMint: cfg.mint, dec: payToken.dec, target, burnMin: BigInt(q.burnMin), slippageBps: cfg.slippageBps, maxAccounts });
     const minOut = BigInt(qs.otherAmountThreshold); if (BigInt(qs.inAmount) !== maxIn || minOut < BigInt(q.burnMin)) throw new Error('Swap route returned too little $VWFEST. Aborted.');
     const tmint = new PublicKey(payToken.mint); const tinfo = await conn.getAccountInfo(tmint); if (!tinfo) throw new Error(payToken.sym + ' mint not found.');
     if (!tinfo.owner.equals(TOKEN)) throw new Error(payToken.sym + ' cannot be used to pay (only standard SPL tokens are supported for swaps).');
@@ -95,10 +95,11 @@ async function build({ q, cfg, conn, user, mint, tokenProg, ata, swapLamports, p
   ixs.push(new TransactionInstruction({ programId: MEMO, keys: [{ pubkey: user, isSigner: true, isWritable: false }], data: new TextEncoder().encode('vwfest:' + q.id) }));
   onStep && onStep('Checking the transaction…');
   const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash('confirmed');
-  const msg = new TransactionMessage({ payerKey: user, recentBlockhash: blockhash, instructions: ixs }).compileToV0Message(alts); const tx = new VersionedTransaction(msg); if (asset) tx.sign([asset]);
+  const msg = new TransactionMessage({ payerKey: user, recentBlockhash: blockhash, instructions: ixs }).compileToV0Message(alts); let tx; const tooBig = (size) => Object.assign(new Error(`Transaction too large${size ? ' (' + size + ' bytes)' : ''}` + (payToken ? '. This route is too complex to fit in one transaction; try paying with SOL or $VWFEST.' : '. Try again; the route may have changed.')), { tooLarge: true, size });
+  try { tx = new VersionedTransaction(msg); if (asset) tx.sign([asset]); } catch (e) { if (e instanceof RangeError) throw tooBig(0); throw e; } // web3.js cannot even serialize a message past the packet size: that is the same "too large", not a crash
   const auditCtx = { alts, c: { user: user.toBase58(), mint: cfg.mint, ata: ata.toBase58(), decimals: cfg.decimals, burn, memo: 'vwfest:' + q.id, devWallet: BigInt(q.devLamports) > 0n ? q.devWallet : '', devLamports: BigInt(q.devLamports), asset: asset ? asset.publicKey.toBase58() : null, name: q.name || 'VW FEST NFT', uri: q.uri || '', swap: swapCtx } };
   auditTx(tx, auditCtx); // 1st audit: the compiled transaction, before it is simulated or shown
-  const size = tx.serialize().length; if (size > 1232) throw new Error(`Transaction too large (${size} bytes). Try again; the route may have changed.`);
+  let size; try { size = tx.serialize().length; } catch (e) { if (e instanceof RangeError) throw tooBig(0); throw e; } if (size > 1232) throw tooBig(size);
   const pre = await conn.getBalance(user, 'confirmed'); const sim = await conn.simulateTransaction(tx, { sigVerify: false, replaceRecentBlockhash: true, commitment: 'confirmed', accounts: { encoding: 'base64', addresses: [user.toBase58(), ...(simTok ? [simTok.addr.toBase58()] : [])] } });
   if (sim.value.err) throw new Error('This purchase would fail on-chain: ' + JSON.stringify(sim.value.err).slice(0, 140) + (sim.value.logs ? ' · ' + (sim.value.logs.filter((l) => /error|insufficient|failed/i.test(l)).slice(-1)[0] || '') : ''));
   if (simTok) { const a1 = sim.value.accounts && sim.value.accounts[1]; if (!a1 || !a1.data) throw new Error('Could not check how much of your token the swap uses. Aborted.'); const raw = Uint8Array.from(atob(a1.data[0]), (c) => c.charCodeAt(0)); const after = new DataView(raw.buffer).getBigUint64(64, true); if (simTok.before - after > simTok.max) throw new Error('Simulation shows the swap taking more of your token than quoted. Aborted.'); } // belt and braces on top of the instruction-data bound
@@ -115,9 +116,12 @@ export async function prepare({ q, cfg, server, pubkey, onStep, payToken }) {
   const tokenProg = mintInfo.owner.equals(TOKEN22) ? TOKEN22 : TOKEN;
   const [ata] = PublicKey.findProgramAddressSync([user.toBytes(), tokenProg.toBytes(), mint.toBytes()], ATA_PROG);
   const base = { q, cfg, conn, user, mint, tokenProg, ata, payToken, onStep };
-  return build({ ...base, swapLamports: BigInt(q.swapLamports) });
+  // A token-funded swap can come back as a route that does not fit the 1232-byte packet (the memo, the isolation account and an NFT mint all take room): ask Jupiter for fewer accounts and try again, then give up with a clear message.
+  const tries = payToken ? [40, 32, 26] : [40]; let last;
+  for (const ma of tries) { try { return await build({ ...base, swapLamports: BigInt(q.swapLamports), maxAccounts: ma }); } catch (e) { if (last && !(e && e.tooLarge)) throw last; /* a simpler route may not exist: report the real problem */ if (!(e && e.tooLarge) || ma === tries[tries.length - 1]) throw e; last = e; onStep && onStep('That route is too big for one transaction, looking for a simpler one…'); } }
+  throw last;
 }
-export async function signAndSend(prep, provider, onStep) {
+export async function signAndSend(prep, provider, onStep, onSent) {
   assertTop();
   // quotes expire: refuse to even open the wallet prompt on a stale one (a burn that matches a signed quote is still honored server-side, but starting a payment needs a live quote)
   if (prep.q && prep.q.expires && Date.now() > prep.q.expires - 20000) throw new Error('This price quote has expired. Close this window and start the purchase again.');
@@ -127,5 +131,5 @@ export async function signAndSend(prep, provider, onStep) {
   const signed = await provider.signTransaction(toSign);
   if (!signed || !signed.message || !sameMessage(signed.message.serialize(), audited)) throw new Error('Your wallet returned a different transaction than the one shown. Nothing was sent.');
   onStep && onStep('Sending…');
-  const { sig } = await sendAndConfirm({ conn: prep.conn, raw: signed.serialize(), lastValidBlockHeight: prep.lastValidBlockHeight, onStep: (t) => onStep && onStep(t) }); return sig;
+  const { sig } = await sendAndConfirm({ conn: prep.conn, raw: signed.serialize(), lastValidBlockHeight: prep.lastValidBlockHeight, onSent, onStep: (t) => onStep && onStep(t) }); return sig;
 }
