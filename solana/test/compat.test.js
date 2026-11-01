@@ -25,26 +25,26 @@ test('facade surface matches INTERFACES.md §1', (t) => {
   for (const k of ['init', 'config', 'quote', 'solUsd', 'verifyPurchase', 'burns', 'auth', 'onramp', 'mountRoutes', '__test']) assert.ok(k in chainMod, k);
   const c = ctx.F.config(); assert.equal(c.enabled, !skip); assert.equal(c.network, 'localnet'); assert.equal(c.devWalletOk, true); assert.ok(Array.isArray(c.payTokens));
 });
-test('quote: vwfest 50% off / sol with 10% dev cut / avatar no dev fee', async (t) => {
+test('quote: vwfest 50% off / sol with 50% dev cut / avatar no dev fee', async (t) => {
   if (skip) return t.skip('no validator'); const F = ctx.F;
-  const a = await F.quote({ kind: 'shop', usd: 4, method: 'vwfest', discountPct: 50, devPct: 10 }); assert.equal(a.paidUsd, 2); assert.equal(a.devPct, 0); assert.equal(a.burnUi, 20); assert.equal(a.devLamports, '0');
-  const b = await F.quote({ kind: 'shop', usd: 4, method: 'sol', discountPct: 50, devPct: 10 }); assert.equal(b.discountPct, 0); assert.equal(b.devPct, 10); assert.equal(b.devLamports, String(0.004 * 1e9)); assert.equal(b.devWallet, ctx.dev); assert.equal(b.burnUi, 36);
+  const a = await F.quote({ kind: 'shop', usd: 4, method: 'vwfest', discountPct: 50, devPct: 50 }); assert.equal(a.paidUsd, 2); assert.equal(a.devPct, 0); assert.equal(a.burnUi, 20); assert.equal(a.devLamports, '0');
+  const b = await F.quote({ kind: 'shop', usd: 4, method: 'sol', discountPct: 50, devPct: 50 }); assert.equal(b.discountPct, 0); assert.equal(b.devPct, 50); assert.equal(b.devLamports, String(0.02 * 1e9)); assert.equal(b.devWallet, ctx.dev); assert.equal(b.burnUi, 20);
   const m = await F.quote({ kind: 'avatar', usd: 5, method: 'sol', discountPct: 0, devPct: 0 }); assert.equal(m.devWallet, null); assert.equal(m.burnUi, 50);
   await assert.rejects(F.quote({ kind: 'x', usd: -1, method: 'sol' })); assert.equal(typeof (await F.solUsd()), 'number');
 });
 test('verifyPurchase: honest NFT purchase verified once; replay, underburn, wrong wallet, wrong memo, wrong uri, dev fee short all rejected', async (t) => {
   if (skip) return t.skip('no validator'); const F = ctx.F; const w = ctx.user.publicKey.toBase58();
-  const q = { ...(await F.quote({ kind: 'avatar', usd: 5, method: 'sol', discountPct: 0, devPct: 10 })), nonce: 'qn1' }; const uri = 'https://x.test/nft/abc.json';
+  const q = { ...(await F.quote({ kind: 'avatar', usd: 5, method: 'sol', discountPct: 0, devPct: 50 })), nonce: 'qn1' }; const uri = 'https://x.test/nft/abc.json';
   const exp = (o = {}) => ({ code: 'code-1', uri, burnMin: BigInt(q.burnMin), devMin: BigInt(q.devMin), devWallet: ctx.dev, wallet: w, ...o });
   const good = burnTx(q, { uri }); const sig = await send(good); const dev0 = await ctx.conn.getBalance(new PublicKey(ctx.dev));
   const r = await F.verifyPurchase({ sig, nonce: 'qn1', pid: 'p1', nick: 'Zed', kind: 'mint', expect: exp() }); assert.equal(r.ok, true); assert.equal(r.rec.wallet, w); assert.equal(r.rec.asset, good.asset.publicKey.toBase58()); assert.equal(r.rec.amount, q.burnRaw); assert.ok(dev0 >= Number(q.devLamports));
   assert.equal((await F.verifyPurchase({ sig, nonce: 'qn1', pid: 'p1', nick: 'Zed', kind: 'mint', expect: exp() })).dup, true, 'replay of the same signature');
   const s2 = await send(burnTx({ ...q, nonce: 'qn2' }, { uri })); assert.equal((await F.verifyPurchase({ sig: s2, nonce: 'qn2', pid: 'p2', kind: 'mint', expect: exp() })).dup, true, 'same avatar code cannot be minted twice');
-  const under = await send(burnTx(q, { burn: 1_000_000, uri })); assert.match((await F.verifyPurchase({ sig: under, nonce: 'qn1', kind: 'mint', expect: exp({ code: 'c2' }) })).why, /lower than the quote/);
-  const other = Keypair.generate(); assert.match((await F.verifyPurchase({ sig: under, nonce: 'qn1', kind: 'mint', expect: exp({ code: 'c2', wallet: other.publicKey.toBase58() }) })).why, /not signed by your proven wallet/);
-  const badMemo = await send(burnTx(q, { uri, memo: 'vwfest:other' })); assert.match((await F.verifyPurchase({ sig: badMemo, nonce: 'qn1', kind: 'mint', expect: exp({ code: 'c3' }) })).why, /code mismatch/);
-  const badUri = await send(burnTx(q, { uri: 'https://evil.test/x.json' })); assert.match((await F.verifyPurchase({ sig: badUri, nonce: 'qn1', kind: 'mint', expect: exp({ code: 'c4' }) })).why, /does not match your quote/);
-  const noDev = await send(burnTx({ ...q, devLamports: '0' }, { uri })); assert.match((await F.verifyPurchase({ sig: noDev, nonce: 'qn1', kind: 'mint', expect: exp({ code: 'c5' }) })).why, /creator fee/i);
+  const under = await send(burnTx({ ...q, nonce: 'qn3' }, { burn: 1_000_000, uri })); assert.match((await F.verifyPurchase({ sig: under, nonce: 'qn3', kind: 'mint', expect: exp({ code: 'c2' }) })).why, /lower than the quote/);
+  const other = Keypair.generate(); assert.match((await F.verifyPurchase({ sig: under, nonce: 'qn3', kind: 'mint', expect: exp({ code: 'c2', wallet: other.publicKey.toBase58() }) })).why, /not signed by your proven wallet/);
+  const badMemo = await send(burnTx({ ...q, nonce: 'qn6' }, { uri, memo: 'vwfest:other' })); assert.match((await F.verifyPurchase({ sig: badMemo, nonce: 'qn6', kind: 'mint', expect: exp({ code: 'c3' }) })).why, /code mismatch/);
+  const badUri = await send(burnTx({ ...q, nonce: 'qn7' }, { uri: 'https://evil.test/x.json' })); assert.match((await F.verifyPurchase({ sig: badUri, nonce: 'qn7', kind: 'mint', expect: exp({ code: 'c4' }) })).why, /does not match your quote/);
+  const noDev = await send(burnTx({ ...q, nonce: 'qn8', devLamports: '0' }, { uri })); assert.match((await F.verifyPurchase({ sig: noDev, nonce: 'qn8', kind: 'mint', expect: exp({ code: 'c5' }) })).why, /creator fee/i);
   assert.equal((await F.verifyPurchase({ sig: 'bad', nonce: 'x', kind: 'shop', expect: {} })).ok, false);
   // failures released their reservation: a correct tx for code c2 still works afterwards
   const fine = await send(burnTx({ ...q, nonce: 'qn9' }, { uri: 'https://x.test/nft/def.json' })); assert.equal((await F.verifyPurchase({ sig: fine, nonce: 'qn9', pid: 'p9', kind: 'mint', expect: exp({ code: 'c2', uri: 'https://x.test/nft/def.json' }) })).ok, true);

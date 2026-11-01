@@ -22,9 +22,9 @@ test('config: defaults to devnet, mainnet disarmed unless MAINNET_ARMED', () => 
 test('pricing: $VWFEST pays 50% less, burns all, no dev fee', () => {
   const cfg = C.loadConfig({ SOLANA_NETWORK: 'mainnet-beta' });
   const v = Q.breakdown(cfg, { kind: 'avatar', method: 'vwfest', prices: P }); assert.equal(v.paidUsd, 2.5); assert.equal(v.discountPct, 50); assert.equal(v.devPct, 0); assert.equal(v.devLamports, '0'); assert.equal(BigInt(v.burnRaw), 2.5 / 0.00002 * 1e6 | 0 ? BigInt(Math.ceil(2.5 / 0.00002 * 1e6)) : 0n);
-  const s = Q.breakdown(cfg, { kind: 'avatar', method: 'sol', prices: P }); assert.equal(s.discountPct, 0); assert.equal(s.devPct, 10); assert.equal(s.devLamports, String(0.5 / 100 * 1e9)); assert.equal(s.swapInRaw, String(4.5 / 100 * 1e9)); assert.equal(s.devWallet, C.DEV_WALLET);
+  const s = Q.breakdown(cfg, { kind: 'avatar', method: 'sol', prices: P }); assert.equal(s.discountPct, 0); assert.equal(s.devPct, 50); assert.equal(s.devLamports, String(2.5 / 100 * 1e9)); assert.equal(s.swapInRaw, String(2.5 / 100 * 1e9)); assert.equal(s.devWallet, C.DEV_WALLET);
   const vend = Q.breakdown(cfg, { kind: 'vendor', method: 'vwfest', prices: P }); assert.equal(vend.paidUsd, 30, 'vendor booth has no discount'); assert.equal(vend.discountPct, 0);
-  const vs = Q.breakdown(cfg, { kind: 'vendor', method: 'sol', prices: P }); assert.equal(vs.devPct, 10); assert.equal(vs.devLamports, String(3 / 100 * 1e9));
+  const vs = Q.breakdown(cfg, { kind: 'vendor', method: 'sol', prices: P }); assert.equal(vs.devPct, 50); assert.equal(vs.devLamports, String(15 / 100 * 1e9));
   const shop = Q.breakdown(cfg, { kind: 'shop', usd: 4, method: 'vwfest', prices: P }); assert.equal(shop.paidUsd, 2);
   assert.throws(() => Q.breakdown(cfg, { kind: 'shop', usd: 5000, method: 'sol', prices: P }), /shop price/); assert.throws(() => Q.breakdown(cfg, { kind: 'shop', usd: -1, method: 'sol', prices: P }));
 });
@@ -32,7 +32,7 @@ test('pricing: MINT_DEV_FEE=0 makes SOL mints 100% buyback; spl pays dev fee in 
   const cfg = C.loadConfig({ SOLANA_NETWORK: 'mainnet-beta', MINT_DEV_FEE: '0' });
   const s = Q.breakdown(cfg, { kind: 'ride', method: 'sol', prices: P }); assert.equal(s.devPct, 0); assert.equal(s.swapInRaw, String(5 / 100 * 1e9)); assert.equal(s.devWallet, null);
   const cfg2 = C.loadConfig({ SOLANA_NETWORK: 'mainnet-beta' }); const t = cfg2.payTokens[0];
-  const b = Q.breakdown(cfg2, { kind: 'avatar', method: 'spl', payToken: t, prices: { ...P, tokenUsd: 1 } }); assert.equal(b.swapInRaw, '4500000'); assert.equal(b.devTokenRaw, '500000'); assert.equal(b.devTokenMint, t.mint); assert.equal(b.devLamports, '0');
+  const b = Q.breakdown(cfg2, { kind: 'avatar', method: 'spl', payToken: t, prices: { ...P, tokenUsd: 1 } }); assert.equal(b.swapInRaw, '2500000'); assert.equal(b.devTokenRaw, '2500000'); assert.equal(b.devTokenMint, t.mint); assert.equal(b.devLamports, '0');
 });
 test('rides: published odds, commit-reveal, verifiable, lowrider Mythics + diamond plates', () => {
   assert.deepEqual(R.ODDS, [55, 25, 12, 6, 2]); assert.equal(R.ODDS.reduce((a, b) => a + b), 100);

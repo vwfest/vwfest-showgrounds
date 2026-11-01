@@ -9,7 +9,7 @@ solana/
   client.js           browser ESM entry (bundle with esbuild): createClient + wallet adapters + INTERFACES §2 helpers (see "Gaps")
   src/config.js       env -> config, feature flags, constants ($VWFEST mint, DEV_WALLET, program ids)
   src/prices.js       SOL/USD (Jupiter -> Coinbase -> Kraken), $VWFEST/USD (Jupiter executable quote cross-checked with price API, 25% deviation guard)
-  src/quotes.js       pricing policy + breakdown (50% off in $VWFEST, 10% dev fee, burn amounts, slippage guard)
+  src/quotes.js       pricing policy + breakdown (50% off in $VWFEST, 50% dev fee on SOL/token payments, burn amounts, slippage guard)
   src/jupiter.js      Jupiter swap-instructions + allow-list audit of every instruction Jupiter returns
   src/txbuild.js      builds UNSIGNED pay tx (swap -> burn) and mint tx (Core create; co-signed only by collection authority + asset key)
   src/audit.js        tx audit used by the server AND the browser before the wallet is asked to sign
@@ -31,10 +31,10 @@ solana/
 
 | | Pay in `$VWFEST` | Pay in SOL | Pay in any SPL token (USDC, BONK, JUP, `PAY_TOKENS`) |
 |---|---|---|---|
-| Avatar NFT mint ($5), Ride NFT mint ($5), Outfit shop | **50% off**, 100% burned | full USD price: **90% swapped via Jupiter to $VWFEST and burned, 10% SOL to `DEV_WALLET`** | same as SOL, but the 10% dev fee is sent **in the same token** to the dev wallet's ATA |
-| Vendor booth ($30) | **no discount**, 100% burned | 90% swap+burn, 10% SOL to `DEV_WALLET` | same as SOL |
+| Avatar NFT mint ($5), Ride NFT mint ($5), Outfit shop | **50% off**, 100% burned | full USD price: **50% swapped via Jupiter to $VWFEST and burned, 50% SOL to `DEV_WALLET`** | same as SOL, but the 10% dev fee is sent **in the same token** to the dev wallet's ATA |
+| Vendor booth ($30) | **no discount**, 100% burned | 50% swap+burn, 50% SOL to `DEV_WALLET` | same as SOL |
 
-* `MINT_DEV_FEE=0` turns mints into 100% buyback & burn on SOL too (the default follows the brief: mints = 100% burn on $VWFEST, 90/10 on SOL).
+* `MINT_DEV_FEE=0` turns mints into 100% buyback & burn on SOL too (the default follows the brief: mints = 100% burn on $VWFEST, 50/50 on SOL).
   INTERFACES.md §0 says avatar mint has *no dev fee*: the §1 facade lets the caller choose (`devPct: 0`), the native API follows `MINT_DEV_FEE`.
 * USD -> token amounts come from live prices; the quote shows the full breakdown (`paidUsd`, `discountPct`, `devPct`, `devLamports`/`devTokenRaw`, `swapInRaw`, `burnRaw`, `burnMin`, price sources).
 * Slippage guard: `SLIPPAGE_BPS` (default 3%) on the Jupiter swap, price-impact cap 5%, `burnMin` = 99% of Jupiter's min-out, the tx is **rebuilt from a fresh quote** and refused if min-out fell below `burnMin`; the on-chain swap itself fails if min-out is not delivered.
@@ -118,7 +118,7 @@ Avatar: the asset address is a keypair derived from `HMAC(SERVER_SECRET, collect
 | `AVATAR_COLLECTION`, `RIDE_COLLECTION` | – | Core collection addresses (`scripts/create-collections.js`) |
 | `VWFEST_MINT` | `9ktd1qdiu9wRFhxHPczWKrKRGmJb9nkanv2Zz27Rpump` on mainnet | on test networks use `DEVNET_VWFEST_MINT` (test token from `testnet-setup.js`) |
 | `DEV_WALLET` | `DV4gtG2VpnDtFUVFnnrE5YM3A6LrV5qAcdfaaUwLFRok` | |
-| `DEV_FEE_PCT` / `VWFEST_DISCOUNT_PCT` / `MINT_DEV_FEE` | 10 / 50 / 1 | |
+| `DEV_FEE_PCT` / `VWFEST_DISCOUNT_PCT` / `MINT_DEV_FEE` | 50 / 50 / 1 | |
 | `AVATAR_MINT_USD` `RIDE_MINT_USD` `VENDOR_FEE_USD` | 5 / 5 / 30 | shop price comes from `shopPrice()` (max `MAX_SHOP_USD`=100) |
 | `RPC_URL` | public cluster | server-side reads/verification. Use a paid/private RPC on mainnet (e.g. Helius) |
 | `PUBLIC_RPC_URL` | public cluster | what browsers use to send. Domain-restrict any key you put here |

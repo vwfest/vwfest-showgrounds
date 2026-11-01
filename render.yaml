@@ -26,7 +26,8 @@ services:
       - { key: DEV_WALLET, sync: false }
       - { key: RPC_URL, sync: false }                       # keyed Solana RPC used ONLY by the server (verification, quotes)
       - { key: PUBLIC_RPC_URL, sync: false }                # RPC the browsers broadcast through (public; no secret in it)
-      - { key: MINT_DEV_FEE, value: "0" }                   # avatar/ride mints: 100% buyback & burn (10% creator fee only on shop/vendor SOL/token payments)
+      - { key: MINT_DEV_FEE, value: "0" }                   # avatar/ride mints: 100% buyback & burn (the creator fee applies only on shop/vendor SOL/token payments)
+      - { key: DEV_FEE_PCT, value: "50" }                   # shop/vendor paid in SOL or another token: 50% to DEV_WALLET, 50% swapped to $VWFEST and burned (never above 50)
       - { key: JUPITER_API_KEY, sync: false }               # optional
       - { key: VENDOR_PREMOD, value: "1" }
       - { key: WEB3AUTH_CLIENT_ID, sync: false }

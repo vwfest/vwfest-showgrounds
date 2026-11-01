@@ -33,7 +33,7 @@ await chain.quote({
   usd: number,               // from config: MINT_FEE_USD / item.usd / RIDE_FEE_USD / VENDOR_FEE_USD
   method: 'vwfest'|'sol',    // 'vwfest' = pay directly with $VWFEST (burn only); 'sol' = swap SOL(or token) -> $VWFEST then burn
   discountPct: number,       // 50 for shop/ride paid in $VWFEST (VWFEST_DISCOUNT_PCT), 0 for vendor/avatar
-  devPct: number,            // DEV_FEE_PCT (10) when method==='sol' for shop/ride/vendor; 0 for avatar
+  devPct: number,            // DEV_FEE_PCT (50) when method==='sol' for shop/ride/vendor; 0 for avatar
   devWalletOk: boolean,
 }) // -> { usd, paidUsd, solUsd, discountPct, devPct, swap:boolean, totalLamports, swapLamports, devLamports, devWallet|null,
    //      burnRaw:string, burnMin:string, burnUi:number, devMin:string, ... }   (all bigint amounts as decimal strings)
@@ -123,7 +123,7 @@ Error contract: throw `Error` with a **user-readable** message (shown in a toast
 * **Burn Tracker** panel + world sign: `GET /api/burns` and WS `burn` events.
 
 ## 5. Shared config (single source of truth = `server.js` `mint`/`vcfg`; also rendered into the in-world Info Booth by `lib/guide.js`)
-`MINT_FEE_USD=5` `DEV_FEE_PCT=10` `VWFEST_DISCOUNT_PCT=50` `VENDOR_FEE_USD=30` `VENDOR_DAYS=30` `VENDOR_BOOTHS=24` `ENTRY_ONRAMP_USD`
+`MINT_FEE_USD=5` `DEV_FEE_PCT=50` `VWFEST_DISCOUNT_PCT=50` `VENDOR_FEE_USD=30` `VENDOR_DAYS=30` `VENDOR_BOOTHS=24` `ENTRY_ONRAMP_USD`
 `DEV_WALLET` `VWFEST_MINT=9ktd1qdiu9wRFhxHPczWKrKRGmJb9nkanv2Zz27Rpump` `MINT_NETWORK` `RPC_URL`/`RPC_*` `PAY_TOKENS` `WEB3AUTH_CLIENT_ID` `WEB3AUTH_NETWORK`.
 **If you add or rename a user-visible number, add it to `lib/guide.js values()` and run `npm run test:guide`** — the Info Booth must never go stale.
 
@@ -137,7 +137,7 @@ Current tests: `npm run test:unit`, `test/api.cjs`, `test/guide.cjs`.
   The browser builds the transaction (`src/pay.js prepare`), the wallet signs it, and the browser broadcasts through `PUBLIC_RPC_URL` (published in `/api/config` as `publicRpcUrl`;
   defaults to the public cluster endpoint; a CORS-enabled keyless/limited-key endpoint is expected). The server only verifies the reported signature (`chain.verifyPurchase`).
   Server wiring: `lib/chain.js` = `require('../solana')`; `server.js init()` calls `chain.init({ env, db: lib/db pool })` + `chain.mountRoutes(router, ...)`; quotes come from `chain.quote`
-  (ride and avatar quotes pass `devPct = 0`; `MINT_DEV_FEE` defaults to `0` so mints are 100% buyback & burn; the 10% creator fee is only on shop/vendor SOL/token payments);
+  (ride and avatar quotes pass `devPct = 0`; `MINT_DEV_FEE` defaults to `0` so mints are 100% buyback & burn; the 50% creator fee is only on shop/vendor SOL/token payments);
   purchases are verified by `chain.verifyPurchase` and the returned receipt is written to the Burn Tracker ledger with `Burns.record(rec)` (idempotent by signature).
 * **Wallet ownership proof** (WS): `{t:'wauth', pubkey}` → `{t:'wchal', nonce, message, exp}` → wallet `signMessage(message)` → `{t:'wproof', pubkey, nonce, sig(base64)}` → `{t:'wok', ok}`.
   Nonce is single-use, 5-min TTL, bound to the profile. The proof lives in the WS session (30 min). `{t:'buy', qid, sig, wallet}` is refused unless `wallet` is proven

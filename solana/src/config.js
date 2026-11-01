@@ -11,6 +11,7 @@ const TOKEN_2022_PROGRAM = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
 const ATA_PROGRAM = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL';
 const MEMO_PROGRAM = 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr';
 const MPL_CORE_PROGRAM = 'CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d';
+const DEFAULT_DEV_FEE_PCT = 50; // the ONE default for the creator-fee share (env DEV_FEE_PCT may lower it; it can never exceed 50)
 const JUPITER_PROGRAM = 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4';
 
 const isKey = (s) => { if (typeof s !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(s)) return false; try { return new PublicKey(s).toBytes().length === 32; } catch { return false; } };
@@ -54,7 +55,7 @@ function loadConfig(env = process.env) {
     dasUrl: env.DAS_URL || env.RPC_URL || '',
     cluster: NETWORKS[network].cluster,
     vwfestMint, decimals: num(env.VWFEST_DECIMALS, 6),
-    devWallet, devFeePct: clamp(num(env.DEV_FEE_PCT, 10), 0, 50),
+    devWallet, devFeePct: clamp(num(env.DEV_FEE_PCT, DEFAULT_DEV_FEE_PCT), 0, 50), // creator fee on SOL / other-token payments: 50% to DEV_WALLET, the other 50% is swapped to $VWFEST and burned
     discountPct: clamp(num(env.VWFEST_DISCOUNT_PCT, 50), 0, 90),
     slippageBps: clamp(Math.round(num(env.SLIPPAGE_BPS, 300)), 10, 2000),
     jupiterBase: (env.JUPITER_BASE || 'https://lite-api.jup.ag').replace(/\/$/, ''),
@@ -71,7 +72,7 @@ function loadConfig(env = process.env) {
       ride: { name: 'VW Fest Show Grounds Rides', address: env.RIDE_COLLECTION || '', symbol: 'VWFRIDE' },
     },
     // Per-kind price policy. discount = 50% off when paying in $VWFEST. devFee = dev cut applies to non-$VWFEST payments (SOL/SPL).
-    // Mints: 100% of a $VWFEST payment is burned, and 90% of a SOL payment is swapped+burned with 10% to DEV_WALLET (set MINT_DEV_FEE=0 for a 100% burn on SOL too).
+    // Mints: 100% of a $VWFEST payment is burned, and 50% of a SOL payment is swapped+burned and 50% goes to DEV_WALLET (set MINT_DEV_FEE=0 for a 100% burn on SOL too).
     kinds: {
       avatar: { usd: num(env.AVATAR_MINT_USD, 5), discount: true, devFee: flag(env.MINT_DEV_FEE, true), nft: 'avatar', label: 'Avatar NFT' },
       ride: { usd: num(env.RIDE_MINT_USD, 5), discount: true, devFee: flag(env.MINT_DEV_FEE, true), nft: 'ride', label: 'Mystery Ride NFT' },
@@ -118,4 +119,4 @@ function problems(cfg) {
   return p;
 }
 
-module.exports = { loadConfig, problems, isKey, parseSecretKey, VWFEST_MINT, DEV_WALLET, WSOL, TOKEN_PROGRAM, TOKEN_2022_PROGRAM, ATA_PROGRAM, MEMO_PROGRAM, MPL_CORE_PROGRAM, JUPITER_PROGRAM };
+module.exports = { DEFAULT_DEV_FEE_PCT, loadConfig, problems, isKey, parseSecretKey, VWFEST_MINT, DEV_WALLET, WSOL, TOKEN_PROGRAM, TOKEN_2022_PROGRAM, ATA_PROGRAM, MEMO_PROGRAM, MPL_CORE_PROGRAM, JUPITER_PROGRAM };

@@ -31,7 +31,7 @@ test.after(async () => { if (ctx.srv) ctx.srv.close(); if (ctx.sg) await ctx.sg.
 
 test('config + auth gating', async (t) => {
   if (skip) return t.skip('no solana-test-validator');
-  const cfg = await (await fetch(ctx.base + '/config')).json(); assert.equal(cfg.enabled, true); assert.equal(cfg.network, 'localnet'); assert.equal(cfg.discountPct, 50); assert.equal(cfg.devFeePct, 10); assert.equal(cfg.rpcUrl, ctx.v.rpc);
+  const cfg = await (await fetch(ctx.base + '/config')).json(); assert.equal(cfg.enabled, true); assert.equal(cfg.network, 'localnet'); assert.equal(cfg.discountPct, 50); assert.equal(cfg.devFeePct, 50); assert.equal(cfg.rpcUrl, ctx.v.rpc);
   assert.ok(!JSON.stringify(cfg).includes(Buffer.from(ctx.cfg.authority.secretKey).toString('hex')) && !JSON.stringify(cfg).includes('serverSecret'));
   assert.equal(cfg.odds.length, 5); assert.equal(cfg.collections.avatar, ctx.env.AVATAR_COLLECTION);
   const r = await fetch(ctx.base + '/quote', { method: 'POST', headers: { 'content-type': 'application/json', origin: ORIGIN }, body: '{}' }); assert.equal(r.status, 401);
@@ -59,18 +59,18 @@ test('faucet + avatar mint paid in $VWFEST (50% off, burned), unique per trait s
   const burns = await client.burns(); assert.equal(burns.totalBurned, 25); assert.equal(burns.count, 1); assert.equal(burns.recent[0].nick, 'Alice'); assert.equal(burns.recent[0].asset, res.mint.asset); assert.match(burns.recent[0].wallet, /…/);
 });
 
-test('shop paid in SOL: 10% to DEV_WALLET, 90% burned; vendor booth $30 no discount; shop price is server-side only', async (t) => {
+test('shop paid in SOL: 50% to DEV_WALLET, 50% burned; vendor booth $30 no discount; shop price is server-side only', async (t) => {
   if (skip) return t.skip('no solana-test-validator');
   const { client, w } = ctx.alice; await new Promise((r) => setTimeout(r, 1100)); await client.faucet().catch(() => {}); const mint = ctx.cfg.vwfestMint; const dev = ctx.cfg.devWallet;
   const s0 = await supply(ctx.conn, mint), d0 = await ctx.conn.getBalance(new PublicKey(dev));
-  const r = await client.purchase({ kind: 'shop', item: 'halo', method: 'sol' }); // halo = $6 -> dev 0.6 USD = 0.006 SOL, burn 5.4 USD = 54 tokens
-  assert.equal(r.quote.usd, 6); assert.equal(r.quote.devPct, 10); assert.equal(r.quote.devLamports, String(0.006 * LAMPORTS_PER_SOL)); assert.equal(r.quote.burnUi, 54);
-  assert.equal((await ctx.conn.getBalance(new PublicKey(dev))) - d0, 6_000_000); assert.equal(s0 - (await supply(ctx.conn, mint)), 54_000_000n); assert.equal(r.receipt.devLamports, '6000000'); assert.equal(r.mint, null);
+  const r = await client.purchase({ kind: 'shop', item: 'halo', method: 'sol' }); // halo = $6 -> dev 3 USD = 0.03 SOL, burn 3 USD = 30 tokens
+  assert.equal(r.quote.usd, 6); assert.equal(r.quote.devPct, 50); assert.equal(r.quote.devLamports, String(0.03 * LAMPORTS_PER_SOL)); assert.equal(r.quote.burnUi, 30);
+  assert.equal((await ctx.conn.getBalance(new PublicKey(dev))) - d0, 30_000_000); assert.equal(s0 - (await supply(ctx.conn, mint)), 30_000_000n); assert.equal(r.receipt.devLamports, '30000000'); assert.equal(r.mint, null);
   const g = ctx.grants.at(-1); assert.equal(g.kind, 'shop'); assert.equal(g.item, 'halo');
   const hv = await client.quote({ kind: 'shop', item: 'halo', method: 'vwfest' }); assert.equal(hv.paidUsd, 3);
   await assert.rejects(client.quote({ kind: 'shop', item: 'free-thing', method: 'sol' }), /Unknown shop item/);
   const vs = await client.quote({ kind: 'vendor', method: 'vwfest' }); assert.equal(vs.paidUsd, 30); assert.equal(vs.discountPct, 0); assert.equal(vs.burnUi, 300);
-  const vsol = await client.quote({ kind: 'vendor', method: 'sol' }); assert.equal(vsol.devLamports, String(0.03 * LAMPORTS_PER_SOL)); assert.equal(vsol.burnUi, 270);
+  const vsol = await client.quote({ kind: 'vendor', method: 'sol' }); assert.equal(vsol.devLamports, String(0.15 * LAMPORTS_PER_SOL)); assert.equal(vsol.burnUi, 150);
   const pre = ctx.grants.length; const pv = await client.pay(vs); assert.equal(pv.receipt.burned, '300000000'); assert.equal(ctx.grants.length, pre + 1);
   await assert.rejects(client.pay({ ...vs }), /already used|Unknown|already paid/);
   const spl_ = await client.quote({ kind: 'avatar', method: 'spl', payTokenMint: C.loadConfig({}).payTokens[0].mint, nft: { traits: traits('Z'), imageSvg: SVG('z') } }).catch((e) => e); assert.match(spl_.message, /mainnet liquidity/);

@@ -56,7 +56,7 @@ let n = 0; const t = async (name, f) => { try { await f(); n++; console.log('ok 
   await t('quote rules for vendors (no token discount, dev fee only on SOL)', async () => {
     const { Pay } = require('../lib/pay'); const P = new Pay({ network: 'devnet', mint: 'M', decimals: 6, jupiter: 'x', slippageBps: 50, devWallet: 'W'.repeat(40), devnetTokensPerUsd: 10, fixedSolUsd: 100 });
     const tok = await P.compute({ usd: 30, method: 'vwfest', devWalletOk: true, devPct: S.mint.devFeePct, discountPct: 0 }); assert.strictEqual(tok.paidUsd, 30); assert.strictEqual(tok.devLamports, '0'); assert.strictEqual(tok.burnRaw, String(300 * 1e6));
-    const sol = await P.compute({ usd: 30, method: 'sol', devWalletOk: true, devPct: S.mint.devFeePct, discountPct: 0 }); assert.strictEqual(sol.devLamports, String(0.3 * 0.1 * 1e9)); assert.strictEqual(+sol.burnUi, 270); });
+    const sol = await P.compute({ usd: 30, method: 'sol', devWalletOk: true, devPct: S.mint.devFeePct, discountPct: 0 }); assert.strictEqual(sol.devLamports, String(0.3 * 0.5 * 1e9)); assert.strictEqual(+sol.burnUi, 150); });
   await t('guide endpoint renders live values', async () => { const j = await (await fetch(BASE + '/api/guide')).json(); assert(j.ok && j.sections.length >= 10 && j.changelog.length >= 2); assert.strictEqual(j.values.vendorFeeUsd, '$30'); assert.strictEqual(j.values.boothCount, '8'); assert(JSON.stringify(j.sections).includes('8 booth plots')); });
   console.log(`\nall ${n} api tests ${process.exitCode ? 'FINISHED WITH FAILURES' : 'passed'}`); S.server.close(); setTimeout(() => process.exit(process.exitCode || 0), 300);
 })();

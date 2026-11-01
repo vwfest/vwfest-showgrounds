@@ -57,7 +57,7 @@ if (!process.env.PUBLIC_BASE_URL) process.env.PUBLIC_BASE_URL = publicUrl;
 const mint = {
   network: NETWORK, rpcUrl: process.env.RPC_URL || process.env.SOLANA_RPC_URL || RPC_DEFAULT[NETWORK], mint: (NETWORK === 'mainnet-beta' ? process.env.VWFEST_MINT : (process.env.DEVNET_VWFEST_MINT || process.env.VWFEST_MINT)) || '', decimals: num(process.env.VWFEST_DECIMALS, 6),
   feeUsd: num(process.env.MINT_FEE_USD, 5), rideUsd: num(process.env.RIDE_MINT_USD, 5), slippageBps: Math.min(Math.max(num(process.env.MINT_SLIPPAGE_BPS, 50), 10), 500),
-  devWallet: (() => { const w = process.env.DEV_WALLET || require('./solana/src/config').loadConfig(process.env).devWallet; return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(w || '') ? w : ''; })(), devFeePct: Math.min(Math.max(num(process.env.DEV_FEE_PCT, 10), 0), 50), discountPct: Math.min(Math.max(num(process.env.VWFEST_DISCOUNT_PCT, 50), 0), 90), devnetTokensPerUsd: num(process.env.DEVNET_TOKENS_PER_USD, 10), fixedSolUsd: num(process.env.FIXED_SOL_USD, 0),
+  devWallet: (() => { const w = process.env.DEV_WALLET || require('./solana/src/config').loadConfig(process.env).devWallet; return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(w || '') ? w : ''; })(), devFeePct: Math.min(Math.max(num(process.env.DEV_FEE_PCT, require('./solana/src/config').DEFAULT_DEV_FEE_PCT), 0), 50), discountPct: Math.min(Math.max(num(process.env.VWFEST_DISCOUNT_PCT, 50), 0), 90), devnetTokensPerUsd: num(process.env.DEVNET_TOKENS_PER_USD, 10), fixedSolUsd: num(process.env.FIXED_SOL_USD, 0),
   devnetBurn: num(process.env.DEVNET_BURN_TOKENS, 1),
   jupiter: process.env.JUPITER_BASE || 'https://lite-api.jup.ag/swap/v1',
   explorer(id, kind) { const q = NETWORK === 'devnet' ? '?cluster=devnet' : ''; return NETWORK === 'localnet' ? null : `https://solscan.io/${kind}/${id}${q}`; },
@@ -250,7 +250,7 @@ app.get('/nft/:file', (req, res) => {
   }));
 });
 app.get('/ride/:file', (req, res) => {
-  const m = /^(q[0-9a-f]{14})\.(json|svg)$/.exec(req.params.file); if (!m) return res.status(404).type('text').send('Not found');
+  const m = /^(q[A-Za-z0-9_-]{16,160})\.(json|svg)$/.exec(req.params.file); if (!m) return res.status(404).type('text').send('Not found');
   nftHead(res); const r = rides.byId.get(m[1]);
   res.set('Cache-Control', r ? 'public, max-age=3600' : 'no-store');
   if (m[2] === 'svg') return res.type('image/svg+xml').send(r ? ridesvg(r.spec) : placeholder());
@@ -342,6 +342,26 @@ const profileCard = (q) => {
 };
 const inv = (p) => ({ t: 'inv', items: ownedItems(p.prof), equipped: p.prof.equipped || {}, rides: rides.forProfile(p.prof.id).map(pubRide), ride: p.prof.ride || null });
 const setRide = (p, id) => { const r = id ? rides.byId.get(id) : null; p.prof.ride = r && r.pid === p.prof.id ? id : null; p.rd = p.prof.ride ? r.spec : null; if (!p.rd) p.park = null; };
+
+// Delivers a verified burn. IDEMPOTENT (also re-run for a burn that was recorded but never delivered, e.g. a crash in between): `again` only silences the public chat line.
+const buying = new Set(); // quote ids being verified right now (one verification at a time per quote)
+const quoteUri = (kind, id, code) => (kind === 'avatar' && code ? `${publicUrl}/nft/${code}.json` : kind === 'ride' ? `${publicUrl}/ride/${id}.json` : null);
+async function fulfil(c, p, q, rec, sig, again) {
+  const say = (t, k) => { if (!again) hub.sys(t, k); }; const fail = (why, extra) => { hub.json(c, { t: 'buyres', ok: false, why: why + ' Contact the team with this transaction: ' + sig.slice(0, 12) + '…', qid: q.id, ...extra }); return false; };
+  const burned = (Number(BigInt(rec.amount)) / 10 ** mint.decimals).toLocaleString('en-US', { maximumFractionDigits: 2 }); q.used = true;
+  if (q.kind === 'avatar') { hub.setMinted(p); say(`${p.nick} minted their avatar NFT and burned ${burned} $VWFEST 🔥`, 'burn'); }
+  else if (q.kind === 'shop') {
+    const g = profiles.grant(p.prof.id, q.item, { sig, usd: q.usd, method: q.method, ts: Date.now() }); if (!g.ok && !g.dup) { console.error('shop grant failed after verified burn', sig, g.why); return fail('Your burn is confirmed but the item could not be granted (' + g.why + ').', { final: true }); }
+    const it = SHOP.find((x) => x.id === q.item); say(`${p.nick} bought ${it ? it.name : 'an item'} and burned ${burned} $VWFEST 🔥`, 'burn'); if (it && !p.prof.equipped[it.slot] && !g.dup) { profiles.equip(p.prof.id, it.slot, it.id); hub.refresh(p); }
+  } else if (q.kind === 'vendor') {
+    const g = vendors.grant({ pid: p.prof.id, nick: p.nick, plot: q.plot, sig, usd: q.usd }); if (!g.ok && g.why !== 'dup') { console.error('vendor grant failed after verified burn', sig, g.why); return fail('Your burn is confirmed but no booth plot is free.'); }
+    const b = g.booth || vendors.byPid.get(p.prof.id); if (b) { if (g.ok) { await vendors.save(b); broadcastVendors(); say(`${p.nick} ${g.mode === 'renew' ? 'renewed' : 'opened'} a booth on Vendor Row (#${b.plot}) and burned ${burned} $VWFEST 🔥`, 'burn'); } hub.json(c, { t: 'vendor', plot: b.plot, mode: g.mode || 'claim', exp: b.expiresAt }); }
+  } else if (q.kind === 'ride') {
+    const r = rides.byId.get(q.id) || rides.reveal({ id: q.id, pid: p.prof.id, sig, asset: rec.asset, wallet: rec.wallet }); hub.setMinted(p); const d = R.describe(r.spec);
+    say(`${p.nick} minted a ${d.tier.toUpperCase()} ${d.model}${d.lowrider ? ' LOWRIDER' : ''} and burned ${burned} $VWFEST 🔥`, 'burn'); if (!p.prof.ride) { setRide(p, r.id); hub.refresh(p); } hub.json(c, { t: 'reveal', ride: pubRide(r) });
+  }
+  hub.json(c, { t: 'buyres', ok: true, qid: q.id, kind: q.kind, burned }); hub.json(c, inv(p)); return true;
+}
 
 async function handle(c, m) {
   const p = c.player;
@@ -435,11 +455,14 @@ async function handle(c, m) {
           const cb = vendors.canBuy(p.prof.id, m.plot); if (!cb.ok) return hub.json(c, { t: 'quoteerr', why: cb.why });
           usd = vcfg.feeUsd; discountPct = 0; extra = { plot: cb.plot, mode: cb.mode, days: vcfg.days }; if (cb.mode === 'claim') vendors.hold(cb.plot, p.prof.id);
         } else return;
+        const again = pay.reuse({ pid: p.prof.id, kind, item: item && item.id, plot: extra.plot, code, method }); // a second click inside the cache window gets the SAME quote (no new price lookup, no second open quote)
+        if (again && again.view) return hub.json(c, { t: 'quote', q: again.view });
         const q = await chain.quote({ kind, usd, method, devWalletOk: !!mint.devWallet, devPct, discountPct });
         if (q.devPct > 0 && !q.devWallet) return hub.json(c, { t: 'quoteerr', why: 'Paying in SOL is not available right now.' });
         const rec = pay.create({ ...q, kind, item: item && item.id, pid: p.prof.id, uri, code, plot: extra.plot });
         if (kind === 'ride') { rec.uri = `${publicUrl}/ride/${rec.id}.json`; extra = { name: 'VW Fest Ride', commit: commitOf(serverSeed(rec.id)) }; }
-        hub.json(c, { t: 'quote', q: { id: rec.id, kind, item: rec.item, method, usd, paidUsd: q.paidUsd, solUsd: q.solUsd, discountPct: q.discountPct, devPct: q.devPct, swap: q.swap, totalLamports: q.totalLamports, swapLamports: q.swapLamports, devLamports: q.devLamports, devWallet: q.devWallet, burnRaw: q.burnRaw, burnMin: q.burnMin, burnUi: q.burnUi, uri: rec.uri, expires: rec.expires, ...extra } });
+        rec.view = { id: rec.id, kind, item: rec.item, method, usd, paidUsd: q.paidUsd, solUsd: q.solUsd, discountPct: q.discountPct, devPct: q.devPct, swap: q.swap, totalLamports: q.totalLamports, swapLamports: q.swapLamports, devLamports: q.devLamports, devWallet: q.devWallet, burnRaw: q.burnRaw, burnMin: q.burnMin, burnUi: q.burnUi, uri: rec.uri, expires: rec.expires, ...extra };
+        hub.json(c, { t: 'quote', q: rec.view });
       } catch (e) { console.error('quote failed', e.message); hub.json(c, { t: 'quoteerr', why: 'Could not get a price right now. Try again in a moment.' }); }
       break;
     }
@@ -462,26 +485,27 @@ async function handle(c, m) {
       return hub.json(c, { t: 'wok', ok, pubkey: m.pubkey, why: ok ? undefined : 'Could not verify the wallet signature' });
     }
     case 'buy': { // client reports a signed+sent purchase tx; nothing is granted until the confirmed tx is verified on-chain
-      if (!p || !mint.enabled || typeof m.qid !== 'string') return; const q = pay.quotes.get(m.qid);
-      if (!q || q.pid !== p.prof.id || q.used || q.busy || q.expires + 120000 < Date.now()) return hub.json(c, { t: 'buyres', ok: false, why: 'That quote expired. Start again.', qid: m.qid });
+      if (!p || !mint.enabled || typeof m.qid !== 'string') return;
+      // The quote id is signed (lib/quoteid.js): it is rebuilt from the id alone, so a restart, an evicted quote or a buy after expiry still finds it. A burn that matches a signed quote is ALWAYS honored; expiry only blocks starting a payment.
+      const q = pay.recover(m.qid, quoteUri);
+      if (!q || q.pid !== p.prof.id || buying.has(q.id)) return hub.json(c, { t: 'buyres', ok: false, why: q && q.pid === p.prof.id ? 'Still verifying that payment…' : 'Unknown quote. If you already paid, contact the team with your transaction.', qid: m.qid, retry: !!q && q.pid === p.prof.id && buying.has(q.id) });
       if (!isSig(m.sig)) return hub.json(c, { t: 'buyres', ok: false, why: 'Bad signature', qid: m.qid });
       const proof = typeof m.wallet === 'string' && p.proven && p.proven.get(m.wallet) > Date.now(); // wallet-bound action: the paying wallet must have signed our challenge in this session
       if (REQUIRE_PROOF && !proof) return hub.json(c, { t: 'buyres', ok: false, why: 'Please prove you own this wallet first (sign the free message), then try again.', qid: q.id, needProof: true });
-      q.busy = true;
+      buying.add(q.id);
       try {
         const kind = q.kind === 'avatar' ? 'mint' : q.kind;
-        const r = await chain.verifyPurchase({ sig: m.sig, swapSig: m.swapSig, nonce: q.id, nick: p.nick, pid: p.prof.id, kind, item: q.item, rideId: q.kind === 'ride' ? q.id : undefined,
+        let r = await chain.verifyPurchase({ sig: m.sig, swapSig: m.swapSig, nonce: q.id, nick: p.nick, pid: p.prof.id, kind, item: q.item, rideId: q.kind === 'ride' ? q.id : undefined,
           expect: { wallet: REQUIRE_PROOF ? m.wallet : undefined, code: q.code || undefined, uri: q.uri || undefined, burnMin: BigInt(q.burnMin), devMin: BigInt(q.devMin), devWallet: q.devWallet || undefined } });
+        let again = false;
+        if (!r.ok && r.dup && !r.quoteUsed) { // this exact burn is already in the ledger: if its grant never completed (crash between record and grant), run the idempotent grant again
+          const lr = chain.ledgerRec && chain.ledgerRec(m.sig); if (lr && lr.quoteId === q.id && lr.pid === p.prof.id) { r = { ok: true, rec: lr }; again = true; }
+        }
         if (!r.ok) return hub.json(c, { t: 'buyres', ok: false, why: r.why, qid: q.id, retry: !r.dup && (r.retry || /not found/i.test(r.why || '')) });
-        burns.record(r.rec); // Burn Tracker ledger (UI feed); the verified, de-duplicated receipt comes from solana/
-        q.used = true; const burned = (Number(BigInt(r.rec.amount)) / 10 ** mint.decimals).toLocaleString('en-US', { maximumFractionDigits: 2 });
-        if (q.kind === 'avatar') { hub.setMinted(p); hub.sys(`${p.nick} minted their avatar NFT and burned ${burned} $VWFEST 🔥`, 'burn'); }
-        else if (q.kind === 'shop') { const g = profiles.grant(p.prof.id, q.item, { sig: m.sig, usd: q.usd, method: q.method, ts: Date.now() }); if (!g.ok && !g.dup) { console.error('shop grant failed after verified burn', m.sig, g.why); return hub.json(c, { t: 'buyres', ok: false, why: 'Your burn is confirmed but the item could not be granted (' + g.why + '). Contact the team with this transaction: ' + m.sig.slice(0, 12) + '…', qid: q.id, final: true }); } const it = SHOP.find((x) => x.id === q.item); hub.sys(`${p.nick} bought ${it ? it.name : 'an item'} and burned ${burned} $VWFEST 🔥`, 'burn'); if (it && !p.prof.equipped[it.slot]) { profiles.equip(p.prof.id, it.slot, it.id); hub.refresh(p); } }
-        else if (q.kind === 'vendor') { const g = vendors.grant({ pid: p.prof.id, nick: p.nick, plot: q.plot, sig: m.sig, usd: q.usd }); if (!g.ok && g.why !== 'dup') { console.error('vendor grant failed after verified burn', m.sig, g.why); return hub.json(c, { t: 'buyres', ok: false, why: 'Your burn is confirmed but no booth plot is free. Contact the team with this transaction: ' + m.sig.slice(0, 12) + '…', qid: q.id }); } await vendors.save(g.booth); broadcastVendors(); hub.sys(`${p.nick} ${g.mode === 'renew' ? 'renewed' : 'opened'} a booth on Vendor Row (#${g.booth.plot}) and burned ${burned} $VWFEST 🔥`, 'burn'); hub.json(c, { t: 'vendor', plot: g.booth.plot, mode: g.mode, exp: g.booth.expiresAt }); }
-        else if (q.kind === 'ride') { const rec = rides.reveal({ id: q.id, pid: p.prof.id, sig: m.sig, asset: r.rec.asset, wallet: r.rec.wallet }); hub.setMinted(p); const d = R.describe(rec.spec); hub.sys(`${p.nick} minted a ${d.tier.toUpperCase()} ${d.model}${d.lowrider ? ' LOWRIDER' : ''} and burned ${burned} $VWFEST 🔥`, 'burn'); if (!p.prof.ride) { setRide(p, rec.id); hub.refresh(p); } hub.json(c, { t: 'reveal', ride: pubRide(rec) }); }
-        hub.json(c, { t: 'buyres', ok: true, qid: q.id, kind: q.kind, burned }); hub.json(c, inv(p));
+        if (!again) burns.record(r.rec); // Burn Tracker ledger (UI feed); the verified, de-duplicated receipt comes from solana/
+        await fulfil(c, p, q, r.rec, m.sig, again);
       } catch (e) { console.error('buy failed', e.message); hub.json(c, { t: 'buyres', ok: false, why: 'Could not verify yet, try again in a moment', qid: q.id, retry: true }); }
-      finally { q.busy = false; }
+      finally { buying.delete(q.id); }
       break;
     }
     default: break;

@@ -38,6 +38,8 @@ function inspect(tx, { mint, nonce, wallet, devWallet, burnMin, devMin, uri }) {
   if (nonce && memo !== 'vwfest:' + nonce) return { ok: false, why: 'Session code mismatch' };
   if (burnMin !== undefined && burn < BigInt(burnMin)) return { ok: false, why: 'The burned amount was lower than the quote' };
   if (devMin !== undefined && BigInt(devMin) > 0n && dev < BigInt(devMin)) return { ok: false, why: 'The creator fee in that transaction was lower than the quote' };
+  if (devMin !== undefined && BigInt(devMin) > 0n && dev > BigInt(devMin) * 101n / 99n + 2n) return { ok: false, why: 'The creator fee in that transaction was higher than the quote' }; // the split is the quote's (50/50): neither side may be changed (same 1% tolerance as the pre-sign audit)
+  if (devMin !== undefined && BigInt(devMin) === 0n && dev > 0n) return { ok: false, why: 'This purchase has no creator fee, but the transaction pays one' };
   if (uri && (!asset || createdUri !== uri)) return { ok: false, why: 'The NFT in that transaction does not match your quote' };
   if (!ownerOk) return { ok: false, why: 'The NFT was not minted to the burning wallet' };
   return { ok: true, wallet: signer, amount: burn.toString(), devLamports: dev.toString(), asset, uri: createdUri, blockTime: tx.blockTime || null };
