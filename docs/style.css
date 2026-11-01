@@ -31,7 +31,18 @@ details.grp{border:1px solid #ffffff1c;border-radius:12px;padding:6px 10px;margi
 #dbg{position:fixed;top:44px;left:10px;font:11px ui-monospace,monospace;color:#9f9;z-index:5;pointer-events:none}
 #touch{display:none}body.touch #touch{display:block}#joy{position:fixed;left:18px;bottom:190px;width:120px;height:120px;border-radius:50%;background:#ffffff18;border:2px solid #ffffff44;z-index:6;touch-action:none}#joyk{position:absolute;left:35px;top:35px;width:50px;height:50px;border-radius:50%;background:#ffffff77}
 #tbtns{position:fixed;right:14px;bottom:160px;display:grid;grid-template-columns:repeat(2,64px);gap:10px;z-index:6}#tbtns button{width:64px;height:64px;border-radius:50%;font-size:26px;background:#1c1238cc;border:2px solid #ffffff44;touch-action:none}#tbtns #bTalk.on{background:#20c997}
-body.touch #emotes{bottom:100px}body.touch #chat{bottom:8px}body.touch #chatlog{height:70px}body.touch #topbar .brand{display:none}
+body.touch #chat{bottom:8px}body.touch #chatlog{height:70px}body.touch #topbar .brand{display:none}
+/* Phones: one stacked column (bottom -> top): chat (about 151px), a one-row scrollable emote strip, the prompt, then joystick + buttons.
+   The emote bar used to wrap over the chat tabs ("Global" could not be tapped) and the drive button. */
+body.touch #emotes{left:10px;right:10px;bottom:166px;transform:none;max-width:none;flex-wrap:nowrap;overflow-x:auto;justify-content:flex-start;pointer-events:none;scrollbar-width:none;padding:2px 0}
+body.touch #emotes::-webkit-scrollbar{display:none}
+body.touch #emotes .emo{pointer-events:auto;flex:0 0 auto;min-height:34px}
+body.touch #joy{bottom:250px}body.touch #tbtns{bottom:220px}
+body.touch #prompt{top:158px;bottom:auto;max-width:calc(100vw - 20px);white-space:normal;text-align:center}
+body.touch #djchip{top:116px}
+body.touch #topbar button{min-width:34px;min-height:34px}
+/* Landscape phones (about 340-420px high): joystick bottom-left, buttons bottom-right, chat + emote strip in the middle, prompt above them */
+@media (max-height:480px){body.touch #chat{left:170px;width:min(380px,calc(100vw - 340px))}body.touch #chatlog{height:34px}body.touch #emotes{left:170px;right:170px;bottom:140px}body.touch #joy{bottom:14px}body.touch #tbtns{bottom:14px}body.touch #prompt{top:auto;bottom:184px;white-space:nowrap}body.touch #djchip{top:84px}}
 .modal-back{position:fixed;inset:0;background:#000a;display:flex;align-items:center;justify-content:center;z-index:30;padding:10px;touch-action:pan-y}.modal{background:var(--pan);border:2px solid #ffffff2a;border-radius:16px;width:min(560px,100%);max-height:92vh;display:flex;flex-direction:column;box-shadow:0 20px 60px #000}.modal.wide{width:min(940px,100%)}
 .modal-head{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid #ffffff1c;font-size:17px}.modal-head .x{border:0;background:transparent;font-size:18px}.modal-body{padding:14px 16px;overflow:auto}
 .pcard{display:grid;grid-template-columns:160px 1fr;gap:14px}.pcard .wide{grid-column:1/-1}.portrait{border-radius:14px;border:3px solid var(--vc);background:#000}.badge{display:inline-block;padding:3px 10px;border-radius:999px;background:color-mix(in srgb,var(--vc) 30%,#1c1238);border:1px solid var(--vc);font-weight:700;margin:4px 0}.minted{margin:8px 0;padding:6px 10px;border:1px solid var(--gold);border-radius:10px;color:var(--gold)}

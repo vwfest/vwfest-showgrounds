@@ -1,0 +1,1 @@
+import{d as i,e as n,h as u}from"./chunk-JJRCHFYW.js";import{b as o}from"./chunk-TP3HTNGC.js";function c(e){return i(this,void 0,void 0,function(){var r;return n(this,function(t){switch(t.label){case 0:return[4,import("./index.umd-ZA6HMRJN.js")];case 1:return r=t.sent(),e._plugins=r,[2]}})})}var s=o(()=>{u()});s();export{c as loadLegacyVideoPlugins};
