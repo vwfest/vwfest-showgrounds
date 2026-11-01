@@ -6,6 +6,7 @@ import { buildPerson, setLOD, makeTag, makeBubble, makeMic } from './people.js';
 import { carFor, avatarCarSpec, rideSpec, hydraulics, PLATE_UNI } from './cars.js';
 import { Net, decodeSnapshot } from './net.js';
 import { setRpcToken, onRpcRefresh, clearRpcToken } from './rpc.mjs';
+import { rejoinDelay } from './rejoin.mjs';
 import { Voice } from './voice.js';
 import { $, h, clear, modal, toast, fmt } from './dom.js';
 import { buildQuiz, defaultQuiz, buildEditor } from './editor.js';
@@ -211,8 +212,8 @@ function bindChat() {
 function bindNet() {
   on('hi', (m) => { state.online = m.online; state.cap = m.cap; state.burns = m.burns; if (world) world.drawBurn(m.burns); hud(); });
   on('full', (m) => { showFull(m); });
-  on('joinerr', (m) => { joinMsg(m.why || 'Could not join', true); if (m.err === 'stale') { localStorage.removeItem('vwfest-sg'); state.creds = null; showJoin(true); } });
-  on('welcome', (m) => { setRpcToken(m.rpcToken); onWelcome(m); if (voice && voice.on) voice.optIn(); });
+  let rejoinTries = 0; on('joinerr', (m) => { const d = rejoinDelay(m, rejoinTries); if (d !== null && net.lastJoin) { rejoinTries++; joinMsg('Reconnecting…'); const j = net.lastJoin; setTimeout(() => { if (!joined && net.open) net.json(j); }, d); return; } joinMsg(m.why || 'Could not join', true); if (m.err === 'stale') { localStorage.removeItem('vwfest-sg'); state.creds = null; showJoin(true); } });
+  on('welcome', (m) => { rejoinTries = 0; setRpcToken(m.rpcToken); onWelcome(m); setTimeout(() => UI.resumePurchases(ctx).catch(() => {}), 2500); if (voice && voice.on) voice.optIn(); });
   on('rpctok', (m) => setRpcToken(m.rpcToken)); onRpcRefresh(() => { if (net.open && joined) net.json({ t: 'rpctok' }); });
   on('p+', (m) => { if (!state.me || m.id === state.me.id && !joined) return; updateInfo(m); });
   on('p-', (m) => { state.roster.delete(m.id); const e = players.get(m.id); if (e) { scene.remove(e.person.root); scene.remove(e.car); players.delete(m.id); } const pk = parked.get(m.id); if (pk) { scene.remove(pk); parked.delete(m.id); } if (voice) voice.drop(m.id, true); });

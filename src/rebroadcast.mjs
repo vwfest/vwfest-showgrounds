@@ -1,7 +1,8 @@
 // Send a signed transaction and keep re-sending the SAME bytes every `everyMs` until it is confirmed or its blockhash can no longer land (public RPCs drop transactions under load;
 // a rebroadcast of identical bytes is harmless: the signature is the same, so it can only land once). Pure of any browser API: the caller injects `conn`, `sleep` and `now`.
-export async function sendAndConfirm({ conn, raw, lastValidBlockHeight, everyMs = 2000, pollMs = 1000, maxMs = 120000, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = Date.now, onStep }) {
+export async function sendAndConfirm({ conn, raw, lastValidBlockHeight, everyMs = 2000, pollMs = 1000, maxMs = 120000, onSent, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = Date.now, onStep }) {
   const sig = await conn.sendRawTransaction(raw, { skipPreflight: false, maxRetries: 0 }); // first send is pre-flighted (a doomed tx fails here, not silently)
+  if (onSent) { try { onSent(sig); } catch { /* bookkeeping must never stop a payment */ } } // the signature is known now: the caller can save it before we wait for confirmation
   const t0 = now(); let lastSend = t0, sends = 1;
   for (;;) {
     const st = await conn.getSignatureStatuses([sig], { searchTransactionHistory: false }); const v = st.value[0];

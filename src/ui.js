@@ -4,6 +4,8 @@ import { Preview, getPreview } from './editor.js';
 import { VIBES, NAMES, DEFAULT } from '../shared/traits.js';
 import RIDES from '../shared/rides.js';
 import { framed, FRAME_MSG, openDirect } from './frame.js';
+import { pendingStore, replay } from './pending.mjs';
+const store = () => { try { return pendingStore(localStorage); } catch { return pendingStore({ getItem: () => null, setItem: () => { throw new Error('no storage'); } }); } };
 
 export const packAv = (av, FIELDS) => { const b = FIELDS.map((k) => av[k]); let s = ''; for (const x of b) s += String.fromCharCode(x); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); };
 const solscan = (cfg, id, kind = 'tx') => (cfg.network === 'localnet' ? null : `https://solscan.io/${kind}/${id}${cfg.network === 'devnet' ? '?cluster=devnet' : ''}`);
@@ -30,7 +32,7 @@ export function profileCardModal(ctx, m) {
 
 export function burnModal(ctx) {
   const { cfg } = ctx; const s = ctx.state.burns || { totalBurned: 0, count: 0, recent: [] }; const b = h('div', { class: 'burn' });
-  b.append(h('div', { class: 'bigburn' }, h('div', { class: 'n', text: fmt(s.totalBurned, 0) }), h('div', { text: '$VWFEST burned forever 🔥' })), h('p', { class: 'muted', text: cfg.enabled ? `Every avatar mint, mystery ride and shop purchase buys $VWFEST on the market and burns it, or burns tokens straight from your wallet. ${s.count} verified burn${s.count === 1 ? '' : 's'} so far.` : 'Purchases are not open yet. When they open, every avatar mint, ride and outfit buys back and burns $VWFEST. Each burn will be listed here with its Solscan link.' }));
+  b.append(h('div', { class: 'bigburn' }, h('div', { class: 'n', text: fmt(s.totalBurned, 0) }), h('div', { text: '$VWFEST burned forever 🔥' })), h('p', { class: 'muted', text: cfg.enabled ? `Every avatar mint, mystery ride and booth or shop purchase burns $VWFEST: paying in $VWFEST burns it straight from your wallet; paying in SOL (shop and booths) sends ${cfg.devFeePct || 0}% to the creator wallet as a fee and buys back and burns the rest; avatars and rides are 100% buyback and burn. ${s.count} verified burn${s.count === 1 ? '' : 's'} so far.` : 'Purchases are not open yet. When they open, every avatar mint, ride and outfit buys back and burns $VWFEST. Each burn will be listed here with its Solscan link.' }));
   if (cfg.network !== 'mainnet-beta') b.append(h('p', { class: 'warn', text: `Test network: ${cfg.network}. These are not real burns.` }));
   const list = h('div', { class: 'burnlist' }); for (const r of s.recent) list.append(h('div', { class: 'burnrow' }, h('span', { class: 'who', text: r.nick }), h('span', { class: 'amt', text: '🔥 ' + fmt(r.amount, 0) }), h('span', { class: 'what', text: r.what.startsWith('shop:') ? 'outfit' : r.what === 'ride' ? 'ride' : 'avatar' }), h('span', { class: 'when', text: ago(r.ts) }), link(r.url, 'Solscan ↗')));
   if (!s.recent.length) list.append(h('p', { class: 'muted', text: 'No burns yet. Be the first!' })); b.append(list);
@@ -136,10 +138,10 @@ export async function purchaseFlow(ctx, kind, opts) {
     const gate = ageGate(); body.append(gate.el); const connectBtn = h('button', { class: 'btn primary', text: opts.wallet ? 'Review my purchase' : 'Connect wallet & review', onclick: async () => { if (!gate.on()) return; connectBtn.disabled = true; try {
       if (opts.wallet) wallet = { provider: opts.wallet.provider, pubkey: opts.wallet.pubkey }; else { step('Connecting your wallet…'); wallet = await pay.connectWallet(); } step('Proving wallet ownership (free signature)…'); await proveWallet(ctx, wallet); const prep = await pay.prepare({ q, cfg, server: ctx.server, pubkey: wallet.pubkey, onStep: step, payToken: payTok });
       draw(prep); const st2 = h('p', { class: 'status' }); const b2 = h('div', { class: 'row' }); body.append(st2, b2);
-      const go = h('button', { class: 'btn primary', text: 'Sign & pay', onclick: async () => { go.disabled = true; try { const sig = await pay.signAndSend(prep, wallet.provider, (t) => { st2.textContent = t; }); await record(sig, st2); } catch (e) { st2.textContent = '⚠ ' + (e.message || 'Cancelled'); st2.className = 'status bad'; if (e.pending && e.sig) b2.append(h('button', { class: 'btn', text: 'Retry recording', onclick: () => record(e.sig, st2) })); go.disabled = false; } } });
+      const go = h('button', { class: 'btn primary', text: 'Sign & pay', onclick: async () => { go.disabled = true; try { const sig = await pay.signAndSend(prep, wallet.provider, (t) => { st2.textContent = t; }, (s) => store().add({ qid: q.id, sig: s, wallet: wallet.pubkey.toBase58() })); await record(sig, st2); } catch (e) { if (e.expired) store().remove(q.id); /* it never landed: nothing was spent, nothing to replay */ st2.textContent = '⚠ ' + (e.message || 'Cancelled'); st2.className = 'status bad'; if (e.pending && e.sig) b2.append(h('button', { class: 'btn', text: 'Retry recording', onclick: () => record(e.sig, st2) })); go.disabled = false; } } });
       b2.append(go, h('button', { class: 'btn', text: 'Cancel', onclick: () => m.close() }));
     } catch (e) { step('⚠ ' + (e.message || 'Could not prepare')); status.className = 'status bad'; connectBtn.disabled = false; } } });
-    async function record(sig, st) { st.className = 'status'; st.textContent = 'Verifying on-chain…'; for (let i = 0; i < 6; i++) { ctx.net.json({ t: 'buy', qid: q.id, sig, wallet: wallet.pubkey.toBase58() }); const r2 = await waitFor(ctx, 'buyres', 25000); if (r2 && r2.ok) { clear(body); body.append(h('h3', { text: '✅ Done!' }), h('p', { text: `Burned ${r2.burned} $VWFEST 🔥` }), h('div', { class: 'row' }, link(solscan(cfg, sig), 'View on Solscan ↗'), h('button', { class: 'btn primary', text: 'Close', onclick: () => m.close() }))); return; } if (!r2 || !r2.retry) { st.textContent = '⚠ ' + (r2 ? r2.why : 'No answer from the server'); st.className = 'status bad'; return; } st.textContent = 'Waiting for the chain to confirm…'; await new Promise((r) => setTimeout(r, 2500)); } st.textContent = '⚠ Could not verify yet. Your payment went through; try recording it again from the Garage/Shop later.'; st.className = 'status bad'; }
+    async function record(sig, st) { st.className = 'status'; st.textContent = 'Verifying on-chain…'; for (let i = 0; i < 6; i++) { ctx.net.json({ t: 'buy', qid: q.id, sig, wallet: wallet.pubkey.toBase58() }); const r2 = await waitFor(ctx, 'buyres', 25000); if (r2 && r2.ok) { store().remove(q.id); clear(body); body.append(h('h3', { text: '✅ Done!' }), h('p', { text: `Burned ${r2.burned} $VWFEST 🔥` }), h('div', { class: 'row' }, link(solscan(cfg, sig), 'View on Solscan ↗'), h('button', { class: 'btn primary', text: 'Close', onclick: () => m.close() }))); return; } if (!r2 || !r2.retry) { if (r2 && !r2.needProof) store().remove(q.id); /* a final answer: nothing left to replay (the reply carries the reason) */ st.textContent = '⚠ ' + (r2 ? r2.why : 'No answer from the server'); st.className = 'status bad'; return; } st.textContent = 'Waiting for the chain to confirm…'; await new Promise((r) => setTimeout(r, 2500)); } st.textContent = '⚠ Could not verify yet. Your payment went through; try recording it again from the Garage/Shop later.'; st.className = 'status bad'; }
     btns.append(connectBtn, h('button', { class: 'btn', text: 'Cancel', onclick: () => m.close() }));
   } catch (e) { say('Something went wrong: ' + (e.message || e), 'bad'); }
 }
@@ -162,7 +164,7 @@ export async function entryModal(ctx, o = {}) {
   if (framed) { toast('⚠ ' + FRAME_MSG); openDirect(); return; }
   const { cfg } = ctx; const vend = o.kind === 'vendor'; const need$ = vend ? Math.ceil(cfg.vendor.feeUsd * 1.08) : cfg.entryUsd; const minPct = vend ? 102 : cfg.entryMinBurnPct; const body = h('div', { class: 'entry' }); const m = modal(vend ? '🏪 Claim a booth with a card' : '🎟 Entry / Mint your avatar NFT', body, { cls: 'wide', onclose: () => { clearInterval(poll); } });
   let w = null, poll = 0, lamports = null, solUsd = null; const wl = () => import('./wallet.js'); const pay = () => import('./pay.js');
-  const intro = vend ? h('div', {}, h('p', { text: `Claim Booth #${o.plot} without owning crypto: sign in with Google (or use your wallet), add about $${need$} of SOL by card, and the booth fee ($${cfg.vendor.feeUsd}) is swapped to $VWFEST and burned. ${cfg.vendor.devFeePct > 0 ? cfg.vendor.devFeePct + '% of it goes to the creator wallet as a fee. ' : ''}You will see every number before you sign.` })) : h('div', {}, h('p', { text: `Get your one-of-a-kind avatar as an NFT in a few minutes, even if you have never used crypto. You pay $${cfg.entryUsd.toFixed(2)} for your NFT ("Entry / Mint"). This is a purchase, not a donation: the whole payment, minus unavoidable network and on-ramp fees, buys back and burns $VWFEST, and the NFT is minted to a wallet that only you control.` }), cfg.network !== 'mainnet-beta' ? h('p', { class: 'warn', text: `Test network (${cfg.network}). Not real money.` }) : null);
+  const intro = vend ? h('div', {}, h('p', { text: `Claim Booth #${o.plot} without owning crypto: sign in with Google (or use your wallet), add about $${need$} of SOL by card, and the booth fee ($${cfg.vendor.feeUsd}) is paid in SOL: ${cfg.vendor.devFeePct > 0 ? cfg.vendor.devFeePct + '% goes to the creator wallet as a fee and the other ' + (100 - cfg.vendor.devFeePct) + '% is swapped to $VWFEST and burned. ' : 'all of it is swapped to $VWFEST and burned. '}You will see every number before you sign.` })) : h('div', {}, h('p', { text: `Get your one-of-a-kind avatar as an NFT in a few minutes, even if you have never used crypto. You pay $${cfg.entryUsd.toFixed(2)} for your NFT ("Entry / Mint"). This is a purchase, not a donation: the whole payment, minus unavoidable network and on-ramp fees, buys back and burns $VWFEST, and the NFT is minted to a wallet that only you control.` }), cfg.network !== 'mainnet-beta' ? h('p', { class: 'warn', text: `Test network (${cfg.network}). Not real money.` }) : null);
   const gate = ageGate(); const area = h('div', {}); body.append(intro, gate.el, area);
   if (!cfg.enabled) { area.append(h('p', { text: 'Minting is not open yet. Check back soon!' })); return; }
   const rpcConn = async () => { const { Connection } = await import('@solana/web3.js'); return (await import('./rpc.mjs')).readConnection(Connection, ctx.server, cfg); };
@@ -205,4 +207,25 @@ export async function entryModal(ctx, o = {}) {
   }
   // restore a previous Google session silently
   if (cfg.embedded) { drawChoose(); wl().then((x) => x.resumeEmbedded(cfg, ctx.server)).then((r) => { if (r && m.el.isConnected && !w) { w = r; start(); } }).catch(() => {}); } else drawChoose();
+}
+
+// ---------- finish purchases that were paid but never credited (closed tab, crash, restart, flaky connection) ----------
+let resuming = false;
+export async function resumePurchases(ctx) {
+  const ps = store(); if (resuming || !ps.list().length || !ctx.cfg.enabled) return; resuming = true;
+  try {
+    for (let round = 0; round < 6; round++) {
+      const res = await replay(ps, async (e) => { ctx.net.json({ t: 'buy', qid: e.qid, sig: e.sig, wallet: e.wallet }); const r = await waitFor(ctx, 'buyres', 25000); return r && (!r.qid || r.qid === e.qid) ? r : null; });
+      for (const e of res.credited) toast('✅ Your earlier payment was credited (' + e.sig.slice(0, 8) + '…)');
+      for (const f of res.failed) toast('⚠ A payment could not be credited: ' + f.why + ' Transaction ' + f.sig.slice(0, 12) + '…', 12000);
+      if (!ps.list().length) return;
+      if (res.needProof.length && !res.retry.length) return proofPrompt(ctx, res.needProof);
+      await new Promise((r) => setTimeout(r, 5000 * (round + 1)));
+    }
+  } finally { resuming = false; }
+}
+function proofPrompt(ctx, entries) {
+  resuming = false; const body = h('div', { class: 'buy' }); const m = modal('Finish your purchase', body, { sticky: false }); const st = h('p', { class: 'status' });
+  const want = entries[0].wallet; body.append(h('p', { text: 'You paid for something earlier that was not recorded yet. Verify the wallet you paid from (a free signature) and it will be credited.' }), h('p', { class: 'small mono', text: 'Wallet ' + want.slice(0, 6) + '…' + want.slice(-4) }), st);
+  body.append(h('div', { class: 'row' }, h('button', { class: 'btn primary', text: 'Verify wallet & finish', onclick: async (ev) => { ev.target.disabled = true; try { const pay = await import('./pay.js'); const w = await pay.connectWallet(); if (w.pubkey.toBase58() !== want) throw new Error('Connect the wallet that paid (' + want.slice(0, 6) + '…' + want.slice(-4) + ').'); st.textContent = 'Proving wallet ownership (free signature)…'; await proveWallet(ctx, w); m.close(); resumePurchases(ctx); } catch (e) { st.textContent = '⚠ ' + (e.message || 'Could not verify'); st.className = 'status bad'; ev.target.disabled = false; } } }), h('button', { class: 'btn', text: 'Later', onclick: () => m.close() })));
 }

@@ -10,7 +10,7 @@ export class Net {
   }
   emit(t, m) { if (m && m.iceServers) this.ice = m.iceServers; const f = this.on[t]; if (f) f(m); }
   sendBin(u8) { if (this.open && this.ws.bufferedAmount < 16384) { this.sent += u8.length; this.ws.send(u8); } }
-  json(o) { if (this.open) { const s = JSON.stringify(o); this.sent += s.length; this.ws.send(s); } }
+  json(o) { if (o && o.t === 'join') this.lastJoin = o; if (this.open) { const s = JSON.stringify(o); this.sent += s.length; this.ws.send(s); } }
   move(x, y, z, yaw, flags) { // [1][x i16][y i16][z i16][yaw u8][flags u8], fixed point /200
     if (!this.open || this.ws.bufferedAmount > 4096) return; const b = new DataView(new ArrayBuffer(9)); const q = (v) => Math.max(-32768, Math.min(32767, Math.round(v * 200)));
     b.setUint8(0, 1); b.setInt16(1, q(x), true); b.setInt16(3, q(y), true); b.setInt16(5, q(z), true); b.setUint8(7, Math.round(((yaw + Math.PI) / (Math.PI * 2)) * 256) & 255); b.setUint8(8, flags & 255); this.ws.send(b.buffer); this.sent += 9;
