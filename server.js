@@ -113,7 +113,7 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false, crossOriginResourcePolicy: { policy: 'cross-origin' }, frameguard: false, referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
 }));
 // Browser features this site never needs are switched off for it and for anything it embeds. Microphone stays on for this origin only (proximity voice / DJ mic; the browser still asks the player).
-app.use((req, res, next) => { res.setHeader('Permissions-Policy', 'camera=(), microphone=(self), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), hid=(), midi=(), display-capture=(), accelerometer=(), gyroscope=(), magnetometer=(), interest-cohort=()'); next(); });
+app.use((req, res, next) => { res.setHeader('Permissions-Policy', 'camera=(), microphone=(self), geolocation=(), payment=(), usb=(), serial=(), hid=(), midi=(), display-capture=(), accelerometer=(), gyroscope=(), magnetometer=(), interest-cohort=()'); next(); });
 app.use(compression());
 const cors = (req, res, next) => {
   const o = req.get('origin');
@@ -153,7 +153,7 @@ app.post('/api/onramp/session', (req, res) => res.status(410).json({ error: 'Mov
 
 
 // ---- Info Booth guide: docs/info.json + CHANGELOG.md rendered with LIVE config values ----
-const guideValues = () => guide.values({ mint, vendor: vcfg, shop: SHOP, R, voiceRange: VOICE_RANGE, maxPlayers: cfg.maxPlayers, dj });
+const guideValues = () => guide.values({ mint, vendor: vcfg, shop: SHOP, R, voiceRange: VOICE_RANGE, maxPlayers: cfg.maxPlayers, dj, onramp: onramp.providers().length });
 let guideSrc = null; try { guideSrc = guide.load(); } catch (e) { console.error('guide files missing', e.message); }
 app.get('/api/guide', (req, res) => {
   if (!guideSrc) return res.status(503).json({ ok: false }); const v = guideValues(); const g = guide.render(guideSrc.info, v, { R, games: GAMES });
@@ -395,7 +395,7 @@ async function handle(c, m) {
       let prof = profiles.login(m.id, m.secret), created = null;
       if (prof && mod.banned(prof.id, c.ip)) { hub.json(c, { t: 'joinerr', err: 'banned', why: 'You are banned from the grounds.' }); return setTimeout(() => c.ws.close(1008, 'banned'), 200); }
       if (!prof) {
-        if (typeof m.nick !== 'string' && m.id) return hub.json(c, { t: 'joinerr', err: 'stale', why: 'Your saved profile was not found. Pick a nickname to start a new one.' });
+        if (m.id && (!m.quiz || typeof m.quiz !== 'object')) return hub.json(c, { t: 'joinerr', err: 'stale', why: 'Your saved profile was not found. Pick a nickname to start a new one.' });
         if (!budget('mk:' + c.ip, num(process.env.PROFILE_CREATE_PER_HOUR, 5), 3600e3)) return hub.json(c, { t: 'joinerr', err: 'rate', why: 'Too many new profiles from your network. Try again later.' });
         const r = profiles.create(m.nick, m.quiz); if (!r.ok) return hub.json(c, { t: 'joinerr', err: r.err, why: r.why });
         prof = r.prof; created = { id: prof.id, secret: r.secret };
