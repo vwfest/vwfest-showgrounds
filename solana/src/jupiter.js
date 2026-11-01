@@ -78,8 +78,8 @@ const toIx = (j) => new TransactionInstruction({ programId: new PublicKey(j.prog
 // because the route executes with the player's signature and could otherwise be pointed at another balance. Needs RPC; `strict` (default) refuses when the check cannot run.
 async function assertNoStrayUserTokenAccounts(conn, ixs, user, allowed) {
   const keys = new Set(); for (const i of ixs) for (const a of i.accounts) keys.add(a.pubkey); for (const x of allowed) keys.delete(x); keys.delete(user); const list = [...keys];
-  for (let o = 0; o < list.length; o += 100) {
-    const infos = await conn.getMultipleAccountsInfo(list.slice(o, o + 100).map((k) => new PublicKey(k)), 'confirmed'); const ub = new PublicKey(user).toBuffer();
+  for (let o = 0; o < list.length; o += 10) {
+    const infos = await conn.getMultipleAccountsInfo(list.slice(o, o + 10).map((k) => new PublicKey(k)), 'confirmed'); const ub = new PublicKey(user).toBuffer();
     infos.forEach((info) => { if (info && (info.owner.toBase58() === C.TOKEN_PROGRAM || info.owner.toBase58() === C.TOKEN_2022_PROGRAM) && info.data.length >= 165 && Buffer.from(info.data).subarray(32, 64).equals(ub)) throw new Error('Swap route touches another token account of yours. Aborted for your safety.'); });
   }
 }
