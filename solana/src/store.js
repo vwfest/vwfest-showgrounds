@@ -6,7 +6,10 @@ const fs = require('fs');
 const path = require('path');
 
 class Store {
-  constructor(backend = null) { this.ns = new Map(); this.backend = backend; this.pending = Promise.resolve(); }
+  constructor(backend = null, { retryMs = 3000 } = {}) { this.ns = new Map(); this.backend = backend; this.pending = Promise.resolve(); this.failed = new Map(); this.retryMs = retryMs; this.timer = null; }
+  // A write that the backend refused is NOT forgotten: it is kept and retried until it lands, and while any is outstanding the store is `degraded` (the purchase flow fails closed on that: nothing new is credited
+  // that a restart could lose). Memory stays the source of truth for the checks themselves.
+  get durable() { return !!this.backend; } get degraded() { return this.failed.size > 0; }
   _m(ns) { let m = this.ns.get(ns); if (!m) this.ns.set(ns, (m = new Map())); return m; }
   async init() { if (this.backend && this.backend.load) for (const [ns, k, v] of await this.backend.load()) { if (v === null) this._m(ns).delete(k); else this._m(ns).set(k, v); } return this; }
   get(ns, k) { return this._m(ns).get(k); }
@@ -18,9 +21,13 @@ class Store {
   values(ns) { return [...this._m(ns).values()]; }
   entries(ns) { return [...this._m(ns).entries()]; }
   size(ns) { return this._m(ns).size; }
-  _persist(ns, k, v) { if (this.backend) this.pending = this.pending.then(() => this.backend.write(ns, k, v)).catch((e) => console.error('[solana/store] persist failed:', e.message)); }
+  _persist(ns, k, v) {
+    if (!this.backend) return; const key = ns + '\u0000' + k;
+    this.pending = this.pending.then(async () => { try { await this.backend.write(ns, k, v); this.failed.delete(key); /* a later successful write of the key supersedes an older failed one */ } catch (e) { this.failed.set(key, { ns, k, v }); console.error('[solana/store] persist failed (purchases pause until it is saved):', e.message); this._arm(); } });
+  }
+  _arm() { if (this.timer || !this.failed.size) return; this.timer = setTimeout(async () => { this.timer = null; for (const [key, f] of [...this.failed]) { try { await this.backend.write(f.ns, f.k, f.v); this.failed.delete(key); } catch { /* still down */ } } if (this.failed.size) this._arm(); else console.log('[solana/store] persistence recovered'); }, this.retryMs); if (this.timer.unref) this.timer.unref(); }
   async flush() { await this.pending; }
-  async close() { await this.flush(); if (this.backend && this.backend.close) await this.backend.close(); }
+  async close() { clearTimeout(this.timer); this.timer = null; await this.flush(); if (this.backend && this.backend.close) await this.backend.close(); }
 }
 
 // Append-only JSONL log, replayed on boot (last write wins). Good for a VPS / persistent disk. NOT for Render free (ephemeral disk): use PgStore.

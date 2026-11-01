@@ -61,7 +61,7 @@ const mint = {
   devWallet: (() => { const w = process.env.DEV_WALLET || require('./solana/src/config').loadConfig(process.env).devWallet; return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(w || '') ? w : ''; })(), devFeePct: Math.min(Math.max(num(process.env.DEV_FEE_PCT, require('./solana/src/config').DEFAULT_DEV_FEE_PCT), 0), 50), discountPct: Math.min(Math.max(num(process.env.VWFEST_DISCOUNT_PCT, 50), 0), 90), devnetTokensPerUsd: num(process.env.DEVNET_TOKENS_PER_USD, 10), fixedSolUsd: num(process.env.FIXED_SOL_USD, 0),
   devnetBurn: num(process.env.DEVNET_BURN_TOKENS, 1),
   // ONE JUPITER_BASE (default https://api.jup.ag; optional JUPITER_API_KEY goes out as x-api-key, server-side only): /swap/v1 and /price/v3 are derived from it, never doubled
-  jupiterBase: JUP_ROOT, jupiterApiKey: process.env.JUPITER_API_KEY || '', jupiter: JUP_ROOT + '/swap/v1',
+  jupiterBase: JUP_ROOT, jupiterApiKey: process.env.JUPITER_API_KEY || '', jupiterRps: num(process.env.JUPITER_RPS, 0), jupiter: JUP_ROOT + '/swap/v1',
   explorer(id, kind) { const q = NETWORK === 'devnet' ? '?cluster=devnet' : ''; return NETWORK === 'localnet' ? null : `https://solscan.io/${kind}/${id}${q}`; },
 };
 // Embedded wallet (Google sign-in -> non-custodial Solana wallet) via Web3Auth / MetaMask Embedded Wallets. The client id is public by design.
@@ -124,7 +124,7 @@ const cors = (req, res, next) => {
 app.get('/healthz', (req, res) => res.type('text').send('ok'));
 app.use('/api', rateLimit({ windowMs: 60e3, limit: 240, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests' } }), cors);
 // the browser reaches Jupiter only through this server: the API key stays server-side and every browser shares ONE limiter + cache
-require('./lib/jupproxy').mount(app, { jup: jupc, vwMint: mint.mint, origins: ORIGINS, rateLimit, express });
+// (the Jupiter proxy is mounted below, once the RPC session guard exists)
 const mem0 = () => process.memoryUsage().rss;
 app.get('/api/status', (req, res) => {
   const s = hub.stats; res.set('Cache-Control', 'public, max-age=3').json({ ok: true, profiles: profiles.size, rides: rides.byId.size, online: hub.size, cap: cfg.maxPlayers, full: hub.size >= cfg.maxPlayers, uptime: Math.round(process.uptime()), burned: burns.summary(0).totalBurned,
@@ -270,6 +270,8 @@ app.get('/ride/:file', (req, res) => {
     attributes: [{ trait_type: 'Rarity', value: d.tier }, { trait_type: 'Model', value: d.model }, { trait_type: 'Paint', value: d.paint }, { trait_type: 'Color', value: d.color }, { trait_type: 'Second tone', value: d.second }, { trait_type: 'Wheels', value: d.wheels }, { trait_type: 'Stance', value: d.stance }, { trait_type: 'Lowrider', value: d.lowrider ? 'Yes' : 'No' }, { trait_type: 'Plate', value: d.plate }, { trait_type: 'Plate text', value: 'VWFEST' }, { trait_type: 'Build', value: d.build }, ...d.extras.map((e) => ({ trait_type: 'Extra', value: e })), { trait_type: 'Commit', value: r.commit }],
   }));
 });
+// Browser -> Jupiter (quote + swap-instructions) through the server: needs the joined player's session RPC token, per-session/per-IP budgets, and only a share of the Jupiter rate (the 'public' lane); the key stays here.
+require('./lib/jupproxy').mount(app, { jup: jupc, vwMint: mint.mint, origins: ORIGINS, rateLimit, express, guard: rpcGuard, ipOf: (req) => ipOf(req), perSession: num(process.env.JUP_SESSION_PER_MIN, 24), perIp: num(process.env.JUP_IP_PER_MIN, 60) });
 const chainRouter = express.Router(); app.use(chainRouter); // solana/ compat routes (/api/burns, /api/mint/config|price are served by the handlers above first)
 app.use((req, res, next) => (['GET', 'HEAD', 'OPTIONS'].includes(req.method) ? next() : res.status(405).end()));
 app.use(express.static(path.join(__dirname, 'docs'), { maxAge: PROD ? '10m' : 0, index: 'index.html' }));
@@ -361,6 +363,9 @@ const setRide = (p, id) => { const r = id ? rides.byId.get(id) : null; p.prof.ri
 
 // Delivers a verified burn. IDEMPOTENT (also re-run for a burn that was recorded but never delivered, e.g. a crash in between): `again` only silences the public chat line.
 const buying = new Set(); // quote ids being verified right now (one verification at a time per quote)
+// A booth quote lives only as long as the plot is held for the buyer, and the hold outlasts the quote by the time a payment needs to land (rebroadcast window), so a burn made inside the quote can never meet "no plot".
+const VENDOR_QUOTE_MS = Math.max(60e3, num(process.env.VENDOR_QUOTE_MS, vendors.holdMs)); const VENDOR_HOLD_MS = VENDOR_QUOTE_MS + 150e3; vendors.holdMs = Math.max(vendors.holdMs, VENDOR_HOLD_MS);
+const usdFor = (kind, item) => (kind === 'shop' ? (SHOP.find((x) => x.id === item) || {}).usd : kind === 'vendor' ? vcfg.feeUsd : kind === 'ride' ? mint.rideUsd : mint.feeUsd); // list price of a purchase (a recovered quote has no usd of its own)
 const quoteUri = (kind, id, code) => (kind === 'avatar' && code ? `${publicUrl}/nft/${code}.json` : kind === 'ride' ? `${publicUrl}/ride/${id}.json` : null);
 async function fulfil(c, p, q, rec, sig, again) {
   const say = (t, k) => { if (!again) hub.sys(t, k); }; const fail = (why, extra) => { hub.json(c, { t: 'buyres', ok: false, why: why + ' Contact the team with this transaction: ' + sig.slice(0, 12) + '…', qid: q.id, ...extra }); return false; };
@@ -395,7 +400,7 @@ async function handle(c, m) {
         const r = profiles.create(m.nick, m.quiz); if (!r.ok) return hub.json(c, { t: 'joinerr', err: r.err, why: r.why });
         prof = r.prof; created = { id: prof.id, secret: r.secret };
       }
-      { const cd = PROD ? Math.max(3000, num(process.env.JOIN_COOLDOWN_MS, 3000)) : num(process.env.JOIN_COOLDOWN_MS, 3000); const last = joinedAt.get(prof.id) || 0; if (cd > 0 && Date.now() - last < cd) return hub.json(c, { t: 'joinerr', err: 'rate', why: 'Reconnecting too fast. Wait a few seconds and try again.' }); } // per-PROFILE join cooldown (>= 3 s in production): a connect/disconnect loop cannot spam the room
+      { const cd = PROD ? Math.max(3000, num(process.env.JOIN_COOLDOWN_MS, 3000)) : num(process.env.JOIN_COOLDOWN_MS, 3000); const last = joinedAt.get(prof.id) || 0; if (cd > 0 && Date.now() - last < cd) return hub.json(c, { t: 'joinerr', err: 'rate', wait: Math.max(0, cd - (Date.now() - last)), why: 'Reconnecting too fast. Wait a few seconds and try again.' }); } // per-PROFILE join cooldown (>= 3 s in production): a connect/disconnect loop cannot spam the room
       const r = hub.join(c, prof, burns.forProfile(prof.id).length > 0 || rides.forProfile(prof.id).length > 0); if (r.ok) { joinedAt.set(prof.id, Date.now()); if (joinedAt.size > 5000) for (const [k, t] of joinedAt) if (Date.now() - t > 60e3) joinedAt.delete(k); }
       if (r.full) { hub.json(c, { t: 'full', online: hub.size, cap: cfg.maxPlayers }); return setTimeout(() => c.ws.close(1000, 'full'), 200); }
       if (r.err) return hub.json(c, { t: 'joinerr', err: r.err, why: r.why });
@@ -454,6 +459,7 @@ async function handle(c, m) {
     case 'quote': {
       if (!p) return; const now = Date.now(); if (now - (p.lastQuote || 0) < 1200) return; p.lastQuote = now;
       if (!mint.enabled) return hub.json(c, { t: 'quoteerr', why: 'Purchases are not open yet.' });
+      if (paused()) return hub.json(c, { t: 'quoteerr', why: 'Purchases are paused for a moment while the database catches up. Try again shortly.' });
       try {
         const kind = m.kind, method = m.method === 'vwfest' ? 'vwfest' : 'sol'; let usd, item = null, uri = null, code = null, devPct = mint.devFeePct, discountPct = mint.discountPct, extra = {};
         if (kind === 'avatar') {
@@ -471,13 +477,13 @@ async function handle(c, m) {
           if (method === 'sol' && !mint.devWallet && mint.devFeePct > 0) return hub.json(c, { t: 'quoteerr', why: 'Paying in SOL is not available right now. Use $VWFEST.' });
           const cb = vendors.canBuy(p.prof.id, m.plot); if (!cb.ok) return hub.json(c, { t: 'quoteerr', why: cb.why });
           usd = vcfg.feeUsd; discountPct = 0; extra = { plot: cb.plot, mode: cb.mode, days: vcfg.days };
-          if (cb.mode === 'claim') { p.wantPlot = cb.plot; if (hasProof(p) && !vendors.hold(cb.plot, p.prof.id, undefined, c.ip)) return hub.json(c, { t: 'quoteerr', why: 'Too many booth reservations from your network right now. Try again in a few minutes.' }); } // a plot is only RESERVED for a player whose wallet is proven (below, or as soon as the proof arrives)
+          if (cb.mode === 'claim') { p.wantPlot = cb.plot; if (hasProof(p) && !vendors.hold(cb.plot, p.prof.id, VENDOR_HOLD_MS, c.ip)) return hub.json(c, { t: 'quoteerr', why: 'Too many booth reservations from your network right now. Try again in a few minutes.' }); } // a plot is only RESERVED for a player whose wallet is proven (below, or as soon as the proof arrives)
         } else return;
         const again = pay.reuse({ pid: p.prof.id, kind, item: item && item.id, plot: extra.plot, code, method }); // a second click inside the cache window gets the SAME quote (no new price lookup, no second open quote)
         if (again && again.view) return hub.json(c, { t: 'quote', q: again.view });
         const q = await chain.quote({ kind, usd, method, devWalletOk: !!mint.devWallet, devPct, discountPct });
         if (q.devPct > 0 && !q.devWallet) return hub.json(c, { t: 'quoteerr', why: 'Paying in SOL is not available right now.' });
-        const rec = pay.create({ ...q, kind, item: item && item.id, pid: p.prof.id, uri, code, plot: extra.plot });
+        const rec = pay.create({ ...q, kind, item: item && item.id, pid: p.prof.id, uri, code, plot: extra.plot }, kind === 'vendor' ? VENDOR_QUOTE_MS : undefined);
         if (kind === 'ride') { rec.uri = `${publicUrl}/ride/${rec.id}.json`; extra = { name: 'VW Fest Ride', commit: commitOf(serverSeed(rec.id)) }; }
         rec.view = { id: rec.id, kind, item: rec.item, method, usd, paidUsd: q.paidUsd, solUsd: q.solUsd, discountPct: q.discountPct, devPct: q.devPct, swap: q.swap, totalLamports: q.totalLamports, swapLamports: q.swapLamports, devLamports: q.devLamports, devWallet: q.devWallet, burnRaw: q.burnRaw, burnMin: q.burnMin, burnUi: q.burnUi, uri: rec.uri, expires: rec.expires, ...extra };
         hub.json(c, { t: 'quote', q: rec.view });
@@ -499,13 +505,14 @@ async function handle(c, m) {
     }
     case 'wproof': {
       if (!p || !budget('wproof:' + p.id, 12)) return; const ok = walletauth.verify({ nonce: m.nonce, pubkey: m.pubkey, signature: m.sig, pid: p.prof.id, origin: c.origin });
-      if (ok) { (p.proven || (p.proven = new Map())).set(m.pubkey, Date.now() + 30 * 60e3); if (p.proven.size > 5) p.proven.delete(p.proven.keys().next().value); if (p.wantPlot) { const cb = vendors.canBuy(p.prof.id, p.wantPlot); if (cb.ok && cb.mode === 'claim') vendors.hold(cb.plot, p.prof.id, undefined, c.ip); } }
+      if (ok) { (p.proven || (p.proven = new Map())).set(m.pubkey, Date.now() + 30 * 60e3); if (p.proven.size > 5) p.proven.delete(p.proven.keys().next().value); if (p.wantPlot) { const cb = vendors.canBuy(p.prof.id, p.wantPlot); if (cb.ok && cb.mode === 'claim') vendors.hold(cb.plot, p.prof.id, VENDOR_HOLD_MS, c.ip); } }
       return hub.json(c, { t: 'wok', ok, pubkey: m.pubkey, why: ok ? undefined : 'Could not verify the wallet signature' });
     }
     case 'buy': { // client reports a signed+sent purchase tx; nothing is granted until the confirmed tx is verified on-chain
       if (!p || !mint.enabled || typeof m.qid !== 'string') return;
-      // The quote id is signed (lib/quoteid.js): it is rebuilt from the id alone, so a restart, an evicted quote or a buy after expiry still finds it. A burn that matches a signed quote is ALWAYS honored; expiry only blocks starting a payment.
-      const q = pay.recover(m.qid, quoteUri);
+      if (paused()) return hub.json(c, { t: 'buyres', ok: false, why: 'Purchases are paused for a moment while the database catches up. Your payment is safe; this retries automatically.', qid: m.qid, retry: true });
+      // The quote id is signed (lib/quoteid.js): it is rebuilt from the id alone, so a restart or an evicted quote still finds it. A burn MADE WHILE the quote was live (block time <= expiry + 5 min) is honored at any later time; a burn made after that is refused (solana/ inspect).
+      const q = pay.recover(m.qid, quoteUri, usdFor, p.prof.id);
       if (!q || q.pid !== p.prof.id || buying.has(q.id)) return hub.json(c, { t: 'buyres', ok: false, why: q && q.pid === p.prof.id ? 'Still verifying that payment…' : 'Unknown quote. If you already paid, contact the team with your transaction.', qid: m.qid, retry: !!q && q.pid === p.prof.id && buying.has(q.id) });
       if (!isSig(m.sig)) return hub.json(c, { t: 'buyres', ok: false, why: 'Bad signature', qid: m.qid });
       const proof = typeof m.wallet === 'string' && p.proven && p.proven.get(m.wallet) > Date.now(); // wallet-bound action: the paying wallet must have signed our challenge in this session
@@ -514,13 +521,13 @@ async function handle(c, m) {
       try {
         const kind = q.kind === 'avatar' ? 'mint' : q.kind;
         let r = await chain.verifyPurchase({ sig: m.sig, swapSig: m.swapSig, nonce: q.id, nick: p.nick, pid: p.prof.id, kind, item: q.item, rideId: q.kind === 'ride' ? q.id : undefined,
-          expect: { wallet: REQUIRE_PROOF ? m.wallet : undefined, code: q.code || undefined, uri: q.uri || undefined, burnMin: BigInt(q.burnMin), devMin: BigInt(q.devMin), devWallet: q.devWallet || undefined } });
+          expect: { wallet: REQUIRE_PROOF ? m.wallet : undefined, expires: q.expires, code: q.code || undefined, uri: q.uri || undefined, burnMin: BigInt(q.burnMin), devMin: BigInt(q.devMin), devWallet: q.devWallet || undefined } });
         let again = false;
         if (!r.ok && r.dup && !r.quoteUsed) { // this exact burn is already in the ledger: if its grant never completed (crash between record and grant), run the idempotent grant again
           const lr = chain.ledgerRec && chain.ledgerRec(m.sig); if (lr && lr.quoteId === q.id && lr.pid === p.prof.id) { r = { ok: true, rec: lr }; again = true; }
         }
         if (!r.ok) return hub.json(c, { t: 'buyres', ok: false, why: r.why, qid: q.id, retry: !r.dup && (r.retry || /not found/i.test(r.why || '')) });
-        if (!again) burns.record(r.rec); // Burn Tracker ledger (UI feed); the verified, de-duplicated receipt comes from solana/
+        burns.record(r.rec); // Burn Tracker ledger (UI feed; idempotent by signature, so a recovered purchase is listed too); the verified, de-duplicated receipt comes from solana/
         await fulfil(c, p, q, r.rec, m.sig, again);
       } catch (e) { console.error('buy failed', e.message); hub.json(c, { t: 'buyres', ok: false, why: 'Could not verify yet, try again in a moment', qid: q.id, retry: true }); }
       finally { buying.delete(q.id); }
@@ -537,9 +544,17 @@ function startBurnWatch() {
   if (!mint.mint || !watchWallets().length) return; const run = async () => { try { const n = await burns.syncOnchain(watchWallets()); if (n) console.log(`[burns] on-chain fallback added ${n} external burn(s)`); } catch (e) { console.error('[burns] on-chain sync failed', String((e && e.message) || e).slice(0, 100)); } };
   run(); setInterval(run, Math.max(60e3, num(process.env.BURN_WATCH_SEC, 300) * 1000)).unref();
 }
+// The replay protection (used signatures, redeemed quotes, minted codes) and the burn ledger must survive a restart. In production and on mainnet purchases are NOT armed without a working database, and they pause
+// (fail closed) while the database refuses a write, until it is saved.
+const paused = () => !!(burns.degraded || chain.degraded);
+function requireDurable() {
+  const need = PROD || NETWORK === 'mainnet-beta'; const ok = !!process.env.DATABASE_URL && burns.persistent && chain.durable;
+  if (need && mint.enabled && !ok) { mint.enabled = false; mint.reason = 'a database is required (DATABASE_URL): purchases stay off without one'; console.error('[purchases] OFF: ' + mint.reason); }
+}
 async function init() {
   await burns.init();
   await chain.init({ env: process.env, db: require('./lib/db').pool() }); // one shared TLS-verified pg pool; memory-only without DATABASE_URL
+  requireDurable();
   chain.mountRoutes(chainRouter, { express, rateLimit, allowedOrigins: [...ORIGINS] });
   await vendors.init(); await rides.init(); await profiles.init(); await nftav.init();
   startBurnWatch();
@@ -548,12 +563,11 @@ async function init() {
   if (profiles.q) { const t = await require('./lib/rls').enableRls(profiles.q, (process.env.DB_SCHEMA || 'showgrounds').replace(/[^a-z0-9_]/gi, '')); if (t.length) console.log('[rls] RLS on + public grants revoked on', t.join(', ')); } // awaited (it never throws: failures are logged per table)
 }
 if (require.main === module) {
-  process.on('unhandledRejection', (e) => console.error('[process] unhandledRejection:', e && e.stack || e)); // logged; the process keeps serving
-  process.on('uncaughtException', (e) => { console.error('[process] uncaughtException (exiting so the platform restarts a clean process):', e && e.stack || e); process.exitCode = 1; setTimeout(() => process.exit(1), 500).unref(); try { server.close(); } catch {} });
+  require('./lib/fatal').install({ stop: () => { try { server.close(); } catch {} for (const c of conns) { try { c.ws.terminate(); } catch {} } }, flush: async () => { await Promise.allSettled([chain.flush && chain.flush(), burns.flush && burns.flush()]); await require('./lib/db').end().catch(() => {}); },  timeoutMs: num(process.env.FATAL_FLUSH_MS, 4000) });
   init().then(() => {
     server.listen(PORT, '0.0.0.0', () => console.log(`[showgrounds] listening on ${PORT} (cap ${cfg.maxPlayers}, purchases ${mint.enabled ? 'ENABLED on ' + NETWORK : 'off: ' + mint.reason}, SOL shop ${mint.devWallet ? 'on' : 'off (DEV_WALLET unset)'})`));
 
   }).catch((e) => { console.error('FATAL: startup failed:', String((e && e.message) || e).slice(0, 200)); process.exit(1); }); // never listen half-configured
   process.on('SIGTERM', () => { server.close(); require('./lib/db').end().catch(() => {}); setTimeout(() => process.exit(0), 500).unref(); });
 }
-module.exports = { rpcGuard, requireProof: () => REQUIRE_PROOF, mod, iceServers, cleanSignal, dj, nftav, app, server, hub, burns, mint, cfg, profiles, rides, pay, vendors, vcfg, guideValues, init };
+module.exports = { VENDOR_QUOTE_MS, VENDOR_HOLD_MS, paused, requireDurable, rpcGuard, requireProof: () => REQUIRE_PROOF, mod, iceServers, cleanSignal, dj, nftav, app, server, hub, burns, mint, cfg, profiles, rides, pay, vendors, vcfg, guideValues, init };

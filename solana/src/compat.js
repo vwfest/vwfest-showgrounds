@@ -20,7 +20,10 @@ function parseCoreCreate(dataB58) {
   try { let o = 2; const nl = b.readUInt32LE(o); o += 4 + nl; const ul = b.readUInt32LE(o); o += 4; return { uri: b.toString('utf8', o, o + ul) }; } catch { return null; }
 }
 // Pure check of a parsed tx against INTERFACES' expect{}.
-function inspect(tx, { mint, nonce, wallet, devWallet, burnMin, devMin, uri }) {
+// A quote may only be redeemed by a burn that was MADE while the quote was live. `expires` (ms, from the signed quote id) + this grace is the latest block time a burn may have: a burn made long after a quote
+// lapsed (price long gone) is refused even though the id still verifies. A valid burn inside the window still credits at any later time (restart, late retry).
+const EXPIRY_GRACE_MS = 5 * 60 * 1000;
+function inspect(tx, { mint, nonce, wallet, devWallet, burnMin, devMin, uri, expires }) {
   if (!tx || !tx.meta || !tx.transaction) return { ok: false, retry: true, why: 'Transaction not found yet' };
   if (tx.meta.err) return { ok: false, why: 'Transaction failed on-chain' };
   const msg = tx.transaction.message; const keys = msg.accountKeys.map((k) => (typeof k === 'string' ? k : String(k.pubkey))); const signer = keys[0];
@@ -35,6 +38,9 @@ function inspect(tx, { mint, nonce, wallet, devWallet, burnMin, devMin, uri }) {
     else if (String(ix.programId) === C.MPL_CORE_PROGRAM && ix.data) { const c = parseCoreCreate(ix.data); if (c) { asset = String(ix.accounts[0]); createdUri = c.uri; const owner = ix.accounts[4] && String(ix.accounts[4]); ownerOk = !owner || owner === signer || owner === C.MPL_CORE_PROGRAM; } }
   }
   if (burn <= 0n) return { ok: false, why: 'No $VWFEST burn found in that transaction' };
+  if (expires !== undefined && expires !== null) { // fail closed: no usable block time, no credit (not final: the cluster may not have stamped it yet)
+    const bt = Number(tx.blockTime); if (!Number.isFinite(bt) || bt <= 0) return { ok: false, retry: true, why: 'The payment time is not available yet. Try again in a moment.' };
+    if (bt * 1000 > Number(expires) + EXPIRY_GRACE_MS) return { ok: false, expired: true, why: 'That payment was made after its price quote expired, so it cannot be used for this purchase. Contact the team with your transaction.' }; }
   if (nonce && memo !== 'vwfest:' + nonce) return { ok: false, why: 'Session code mismatch' };
   if (burnMin !== undefined && burn < BigInt(burnMin)) return { ok: false, why: 'The burned amount was lower than the quote' };
   if (devMin !== undefined && BigInt(devMin) > 0n && dev < BigInt(devMin)) return { ok: false, why: 'The creator fee in that transaction was lower than the quote' };
@@ -54,13 +60,16 @@ class Facade {
     this.reason = this.enabledFlag ? null : (!(env.MINT_ENABLED === '1' || env.SOLANA_ENABLED === '1') ? 'off' : !C.isKey(cfg.vwfestMint) ? 'VWFEST_MINT missing' : !secretOk ? 'SERVER_SECRET (>=32 chars) missing' : 'mainnet not armed');
     this.fake = env.CHAIN_FAKE === '1' && !cfg.mainnet && env.NODE_ENV !== 'production'; // test hook: never on mainnet and never in production (it would grant purchases without any transaction)
     this.store = await new Store(db ? poolBackend(db, env.DB_SCHEMA || 'showgrounds') : null).init();
+    // Replay protection (used signatures, redeemed quotes, minted codes) must survive a restart: on mainnet and in production purchases are NOT armed without a working database (the init above already threw if it could not load).
+    this.durableRequired = !!cfg.mainnet || env.NODE_ENV === 'production'; if (this.enabledFlag && this.durableRequired && !this.store.durable) { this.enabledFlag = false; this.reason = 'a database is required (set DATABASE_URL): purchases stay off without one'; }
     this.conn = conn || new Connection(cfg.rpcUrl, 'confirmed'); this.prices = new Prices(cfg, fetchImpl || fetch); this.f = fetchImpl || fetch;
     this.tracker = new BurnTracker({ store: this.store, cfg });
     this.pending = new Set(); this.codes = new Set(); this.quoteIds = new Set(); for (const b of this.tracker.all()) { if (b.code) this.codes.add(b.code); if (b.quoteId) this.quoteIds.add(b.quoteId); }
     const secret = cfg.serverSecret; this.authLib = secret && secret.length >= 32 ? new Auth({ store: this.store, secret }) : null; /* >= 32 chars, never padded */ this.ready = true; return this;
   }
+  get degraded() { return !!(this.store && this.store.durable && this.store.degraded); } // the database refused a write: nothing new may be credited until it is saved
   config() {
-    const c = this.cfg; return { enabled: !!this.enabledFlag, reason: this.reason || undefined, network: c.network, mint: c.vwfestMint, decimals: c.decimals, devWalletOk: C.isKey(c.devWallet),
+    const c = this.cfg; return { enabled: !!this.enabledFlag && !this.degraded, reason: this.degraded ? 'paused: the database is unavailable, retrying' : this.reason || undefined, network: c.network, mint: c.vwfestMint, decimals: c.decimals, devWalletOk: C.isKey(c.devWallet),
       embedded: c.embedded && c.embedded.provider === 'web3auth' ? c.embedded : null, onramp: onramp.providers(c, this.env).map(({ id, name }) => ({ id, name, sandbox: id === 'moonpay' && !c.onramp.moonpay.live })), payTokens: c.payTokens.map((t) => ({ symbol: t.sym, mint: t.mint, decimals: t.dec })) };
   }
   async solUsd() { return (await this.prices.solUsd()).usd; }
@@ -84,6 +93,7 @@ class Facade {
   async verifyPurchase(o) {
     const { sig, swapSig, nonce, pid, nick, kind, item, rideId, expect = {} } = o;
     if (!verify.isSig(sig)) return { ok: false, why: 'Bad signature' };
+    if (this.degraded) return { ok: false, retry: true, paused: true, why: 'Purchases are paused for a moment while the database catches up. Your payment is safe; this retries automatically.' }; // fail closed
     // ---- synchronous reservation, before any await ----
     if (this.store.has('burn', sig) || this.pending.has('sig:' + sig)) return { ok: false, why: 'Already recorded', dup: true };
     const code = kind === 'mint' && expect.code ? String(expect.code) : null;
@@ -92,16 +102,18 @@ class Facade {
     if (nonce && (this.quoteIds.has(nonce) || this.pending.has('q:' + nonce))) return { ok: false, why: 'This quote was already used by another transaction', dup: true, quoteUsed: true };
     this.pending.add('sig:' + sig); if (code) this.pending.add('code:' + code); if (nonce) this.pending.add('q:' + nonce);
     const release = () => { this.pending.delete('sig:' + sig); if (code) this.pending.delete('code:' + code); if (nonce) this.pending.delete('q:' + nonce); };
+    const durably = async (res) => { if (!res.ok || !this.store.durable) return res; await this.store.flush(); if (this.store.degraded) return { ok: false, retry: true, paused: true, why: 'Your payment is confirmed on-chain but could not be saved yet. It will be credited as soon as the database is back; try again in a minute.' }; return res; }; // credit only what a restart cannot lose
     try {
-      if (this.fake) { const w = expect.wallet || 'FAKE'; const rec0 = { sig, amount: String(expect.burnMin || 1), wallet: w, kind, ts: Date.now() }; return this._commit({ ...rec0, pid, nick, item, rideId, code, quoteId: nonce, method: 'fake', devLamports: '0' }, code, release); }
+      if (this.fake) { if (expect.expires && Date.now() > Number(expect.expires) + EXPIRY_GRACE_MS) { release(); return { ok: false, expired: true, why: 'That payment was made after its price quote expired, so it cannot be used for this purchase. Contact the team with your transaction.' }; } // the fake chain stamps every burn with "now"
+        const w = expect.wallet || 'FAKE'; const rec0 = { sig, amount: String(expect.burnMin || 1), wallet: w, kind, ts: Date.now() }; return await durably(this._commit({ ...rec0, pid, nick, item, rideId, code, quoteId: nonce, method: 'fake', devLamports: '0' }, code, release)); }
       const tx = await verify.fetchTx(this.conn, sig, { tries: 8, delayMs: 1500 });
       if (tx && tx.transaction.signatures[0] !== sig) { release(); return { ok: false, why: 'Signature mismatch' }; }
-      const r = inspect(tx, { mint: this.cfg.vwfestMint, nonce, wallet: expect.wallet, devWallet: expect.devWallet, burnMin: expect.burnMin, devMin: expect.devMin, uri: expect.uri });
+      const r = inspect(tx, { mint: this.cfg.vwfestMint, nonce, wallet: expect.wallet, devWallet: expect.devWallet, burnMin: expect.burnMin, devMin: expect.devMin, uri: expect.uri, expires: expect.expires });
       if (!r.ok) { release(); return r; }
       // swapSig is OWNERSHIP-ONLY: we merely record it (for the tracker's swap link) when that tx exists, succeeded and was signed by the same wallet.
       // It is never used to decide a grant and its amounts are not checked; the verified $VWFEST burn above is the only thing that counts.
       let swapOk = null; if (verify.isSig(swapSig) && swapSig !== sig) { try { const st = await verify.fetchTx(this.conn, swapSig, { tries: 2, delayMs: 800 }); if (st && !st.meta.err && String(st.transaction.message.accountKeys[0].pubkey) === r.wallet) swapOk = swapSig; } catch {} }
-      return this._commit({ sig, swapSig: swapOk, kind, item: item || null, pid, nick, code, rideId, quoteId: nonce, wallet: r.wallet, amount: r.amount, devLamports: r.devLamports, asset: r.asset || undefined, method: 'tx', ts: (r.blockTime || Math.floor(Date.now() / 1000)) * 1000 }, code, release);
+      return await durably(this._commit({ sig, swapSig: swapOk, kind, item: item || null, pid, nick, code, rideId, quoteId: nonce, wallet: r.wallet, amount: r.amount, devLamports: r.devLamports, asset: r.asset || undefined, method: 'tx', ts: (r.blockTime || Math.floor(Date.now() / 1000)) * 1000 }, code, release));
     } catch (e) { release(); return { ok: false, retry: true, why: 'Could not check the blockchain right now. Try again.' }; }
   }
   ledgerRec(sig) { return this.store.get('burn', sig) || null; } // the recorded burn (crash recovery: re-run the idempotent grant for a burn that was recorded but never delivered)
@@ -116,4 +128,4 @@ class Facade {
       async verify({ pubkey, signature, nonce }) { if (!f.authLib) return { ok: false }; const v = f.authLib.verify({ wallet: pubkey, nonce, signature }); return v.ok ? { ok: true, pubkey } : { ok: false, why: v.why }; } }; }
   get onrampApi() { const f = this; return { async providers() { return f.config().onramp; }, async session({ provider, address, usd, redirect }) { const r = await onramp.createSession(f.cfg, provider, { address, usd, redirect }, { fetchImpl: f.f, env: f.env }); return { url: r.url, clientSecret: r.clientSecret, publishableKey: r.publishableKey }; } }; }
 }
-module.exports = { Facade, inspect, parseCoreCreate, poolBackend };
+module.exports = { Facade, inspect, EXPIRY_GRACE_MS, parseCoreCreate, poolBackend };
