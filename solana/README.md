@@ -123,7 +123,7 @@ Avatar: the asset address is a keypair derived from `HMAC(SERVER_SECRET, collect
 | `RPC_URL` | public cluster | server-side reads/verification. Use a paid/private RPC on mainnet (e.g. Helius) |
 | `PUBLIC_RPC_URL` | public cluster | what browsers use to send. Domain-restrict any key you put here |
 | `DAS_URL` | = `RPC_URL` | DAS-capable RPC for "use NFT as avatar" (falls back to `getProgramAccounts` for Core assets, which works on any RPC) |
-| `JUPITER_BASE` / `JUPITER_API_KEY` | `https://lite-api.jup.ag` / – | **the free lite-api rate-limits (HTTP 429) quickly; get a key at portal.jup.ag for mainnet** |
+| `JUPITER_BASE` / `JUPITER_API_KEY` / `JUPITER_RPS` | `https://api.jup.ag` / – / 1 with a key, 0.5 without | **one gateway for every Jupiter call** (`src/jupclient.js`): `x-api-key` when set, requests paced to the plan rate, identical GETs cached 8 s, 429 -> waits for `x-ratelimit-reset`. Free key at developers.jup.ag (1 req/s per organisation); keyless is 0.5 req/s |
 | `SLIPPAGE_BPS` | 300 | |
 | `PAY_TOKENS` | USDC, USDT, BONK, JUP | JSON `[{"sym","mint","dec"}]` |
 | `PUBLIC_BASE_URL` | – | needed for server-hosted NFT metadata URIs |
@@ -143,7 +143,7 @@ Avatar: the asset address is a keypair derived from `HMAC(SERVER_SECRET, collect
 ## Accounts the user must create (nothing else is needed)
 | Account | Why | Required? |
 |---|---|---|
-| **Jupiter API key** (portal.jup.ag, free tier) | the keyless lite-api returns 429 under load (observed repeatedly while testing) | **Yes for mainnet** |
+| **Jupiter API key** (developers.jup.ag, free tier) | keyless access is only 0.5 req/s (429 under load, observed repeatedly while testing) | **Yes for mainnet** |
 | **Paid/private Solana RPC** (Helius / Triton / QuickNode; free tier OK to start) | reliable `getTransaction` verification + DAS NFT lookup | Strongly recommended |
 | **Authority wallet** (new keypair, ~0.05 SOL) | co-signs collection mints; creates the 2 collections | Yes for NFT mints |
 | **Postgres** (existing Supabase) + its CA cert as `PG_CA` | persistent ledger/replay protection | Yes (Render free disk is ephemeral) |

@@ -54,12 +54,14 @@ if (NETWORK === 'devnet' && process.env.WEB3AUTH_CLIENT_ID === undefined) { proc
 if (process.env.WEB3AUTH_CLIENT_ID === 'off') delete process.env.WEB3AUTH_CLIENT_ID;
 if (!process.env.PUBLIC_BASE_URL) process.env.PUBLIC_BASE_URL = publicUrl;
 // ---- avatar-minting config. OFF unless MINT_ENABLED=1 (and, on mainnet, MINT_MAINNET=1 as a second deliberate switch). ----
+const { jupRoot: _jupRoot } = require('./solana/src/jupclient'); const JUP_ROOT = _jupRoot(process.env.JUPITER_BASE);
 const mint = {
   network: NETWORK, rpcUrl: process.env.RPC_URL || process.env.SOLANA_RPC_URL || RPC_DEFAULT[NETWORK], mint: (NETWORK === 'mainnet-beta' ? process.env.VWFEST_MINT : (process.env.DEVNET_VWFEST_MINT || process.env.VWFEST_MINT)) || '', decimals: num(process.env.VWFEST_DECIMALS, 6),
   feeUsd: num(process.env.MINT_FEE_USD, 5), rideUsd: num(process.env.RIDE_MINT_USD, 5), slippageBps: Math.min(Math.max(num(process.env.MINT_SLIPPAGE_BPS, 50), 10), 500),
   devWallet: (() => { const w = process.env.DEV_WALLET || require('./solana/src/config').loadConfig(process.env).devWallet; return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(w || '') ? w : ''; })(), devFeePct: Math.min(Math.max(num(process.env.DEV_FEE_PCT, require('./solana/src/config').DEFAULT_DEV_FEE_PCT), 0), 50), discountPct: Math.min(Math.max(num(process.env.VWFEST_DISCOUNT_PCT, 50), 0), 90), devnetTokensPerUsd: num(process.env.DEVNET_TOKENS_PER_USD, 10), fixedSolUsd: num(process.env.FIXED_SOL_USD, 0),
   devnetBurn: num(process.env.DEVNET_BURN_TOKENS, 1),
-  jupiter: process.env.JUPITER_BASE || 'https://lite-api.jup.ag/swap/v1',
+  // ONE JUPITER_BASE (default https://api.jup.ag; optional JUPITER_API_KEY goes out as x-api-key, server-side only): /swap/v1 and /price/v3 are derived from it, never doubled
+  jupiterBase: JUP_ROOT, jupiterApiKey: process.env.JUPITER_API_KEY || '', jupiter: JUP_ROOT + '/swap/v1',
   explorer(id, kind) { const q = NETWORK === 'devnet' ? '?cluster=devnet' : ''; return NETWORK === 'localnet' ? null : `https://solscan.io/${kind}/${id}${q}`; },
 };
 // Embedded wallet (Google sign-in -> non-custodial Solana wallet) via Web3Auth / MetaMask Embedded Wallets. The client id is public by design.
@@ -82,6 +84,7 @@ const { Moderation } = require('./lib/moderation'); const mod = new Moderation()
 const dj = new DJ({ hub, env: process.env }); hub.onLeave = (p) => dj.drop(p);
 const rides = new Rides();
 const pay = new Pay(mint);
+const { JupClient } = require('./solana/src/jupclient'); const jupc = JupClient.for({ jupiterBase: mint.jupiterBase, jupiterApiKey: mint.jupiterApiKey, jupiterRps: num(process.env.JUPITER_RPS, 0) }); // the same instance solana/'s Prices and swap builder use (keyed by base+key)
 const SHOP = catalog();
 const vendors = new Vendors({ plots: vcfg.plots, days: vcfg.days, imgKb: vcfg.imgKb, autoHide: vcfg.autoHide, premod: vcfg.premod });
 const conns = new Set(), ipCount = new Map();
@@ -101,7 +104,7 @@ app.use(helmet({
     directives: {
       defaultSrc: ["'self'"], scriptSrc: ["'self'", "'wasm-unsafe-eval'"], styleSrc: ["'self'"], styleSrcAttr: ["'unsafe-inline'"], // inline style ATTRIBUTES only (the Web3Auth frame sets them); <style> elements stay blocked
        imgSrc: ["'self'", 'data:', 'blob:', 'https://vwfestmemecoin.com'], fontSrc: ["'self'", 'data:'],
-      connectSrc: [...RPC_HOSTS, ...(mint.embedded ? W3A : []), ...OWN_WS, 'https://lite-api.jup.ag', 'https://api.coinbase.com', ...(PROD ? [] : ['ws://127.0.0.1:*', 'ws://localhost:*'])],
+      connectSrc: [...RPC_HOSTS, ...(mint.embedded ? W3A : []), ...OWN_WS, 'https://api.coinbase.com', ...(PROD ? [] : ['ws://127.0.0.1:*', 'ws://localhost:*'])],
       frameAncestors: (process.env.FRAME_ANCESTORS || "'none'").split(',').map((x) => x.trim()).filter(Boolean), // nobody may frame the pages we serve (clickjacking); FRAME_ANCESTORS lists exceptions
       frameSrc: mint.embedded ? W3A.filter((x) => x.startsWith('https:')) : ["'none'"], workerSrc: ["'self'", 'blob:'], mediaSrc: ["'self'"], objectSrc: ["'none'"], baseUri: ["'none'"], formAction: ["'none'"],
       upgradeInsecureRequests: PROD ? [] : null,
@@ -120,6 +123,8 @@ const cors = (req, res, next) => {
 };
 app.get('/healthz', (req, res) => res.type('text').send('ok'));
 app.use('/api', rateLimit({ windowMs: 60e3, limit: 240, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests' } }), cors);
+// the browser reaches Jupiter only through this server: the API key stays server-side and every browser shares ONE limiter + cache
+require('./lib/jupproxy').mount(app, { jup: jupc, vwMint: mint.mint, origins: ORIGINS, rateLimit, express });
 const mem0 = () => process.memoryUsage().rss;
 app.get('/api/status', (req, res) => {
   const s = hub.stats; res.set('Cache-Control', 'public, max-age=3').json({ ok: true, profiles: profiles.size, rides: rides.byId.size, online: hub.size, cap: cfg.maxPlayers, full: hub.size >= cfg.maxPlayers, uptime: Math.round(process.uptime()), burned: burns.summary(0).totalBurned,
@@ -136,7 +141,7 @@ const iceServers = (p, now = Date.now()) => {
   return out;
 };
 const shopView = () => SHOP.map((i) => ({ ...i, vwfestUsd: Math.round(i.usd * (1 - mint.discountPct / 100) * 100) / 100 }));
-const payFlags = () => ({ dj: { on: dj.enabled && dj.playlist.length > 0, slotMs: dj.slotMs, queueMax: dj.queueMax }, nftAvatars: nftav.enabled, publicRpcUrl: PUBLIC_RPC, enabled: mint.enabled, reason: mint.reason, network: mint.network, mint: mint.mint, decimals: mint.decimals, feeUsd: mint.feeUsd, rideUsd: mint.rideUsd, slippageBps: mint.slippageBps, discountPct: mint.discountPct, devFeePct: mint.devFeePct, solShopEnabled: !!mint.devWallet, jupiter: mint.jupiter, embedded: mint.embedded, onramp: onramp.providers().map(({ id, name, how }) => ({ id, name, how })), entryUsd: mint.entryUsd, entryMinBurnPct: mint.entryMinBurnPct, payTokens: mint.payTokens, devnetTokensPerUsd: mint.devnetTokensPerUsd, base: publicUrl, vendor: { feeUsd: vcfg.feeUsd, days: vcfg.days, plots: vcfg.plots, imgKb: vcfg.imgKb, maxProducts: vcfg.maxProducts, devFeePct: mint.devFeePct, solAvailable: !!mint.devWallet, premod: vcfg.premod } });
+const payFlags = () => ({ dj: { on: dj.enabled && dj.playlist.length > 0, slotMs: dj.slotMs, queueMax: dj.queueMax }, nftAvatars: nftav.enabled, publicRpcUrl: PUBLIC_RPC, enabled: mint.enabled, reason: mint.reason, network: mint.network, mint: mint.mint, decimals: mint.decimals, feeUsd: mint.feeUsd, rideUsd: mint.rideUsd, slippageBps: mint.slippageBps, discountPct: mint.discountPct, devFeePct: mint.devFeePct, solShopEnabled: !!mint.devWallet, jupiter: publicUrl + '/api/jup', embedded: mint.embedded, onramp: onramp.providers().map(({ id, name, how }) => ({ id, name, how })), entryUsd: mint.entryUsd, entryMinBurnPct: mint.entryMinBurnPct, payTokens: mint.payTokens, devnetTokensPerUsd: mint.devnetTokensPerUsd, base: publicUrl, vendor: { feeUsd: vcfg.feeUsd, days: vcfg.days, plots: vcfg.plots, imgKb: vcfg.imgKb, maxProducts: vcfg.maxProducts, devFeePct: mint.devFeePct, solAvailable: !!mint.devWallet, premod: vcfg.premod } });
 app.get('/api/config', (req, res) => res.set('Cache-Control', 'no-store').json({
   ...payFlags(), shop: shopView(), odds: R.TIERS.map((t, i) => ({ tier: t, pct: R.ODDS[i] })), iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }], turn: !!process.env.TURN_URL, /* TURN credentials are only sent over the authenticated WebSocket after join */ voiceRange: VOICE_RANGE, maxPlayers: cfg.maxPlayers,
 }));

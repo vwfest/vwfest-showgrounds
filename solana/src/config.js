@@ -11,6 +11,7 @@ const TOKEN_2022_PROGRAM = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
 const ATA_PROGRAM = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL';
 const MEMO_PROGRAM = 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr';
 const MPL_CORE_PROGRAM = 'CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d';
+const { jupRoot } = require('./jupclient');
 const DEFAULT_DEV_FEE_PCT = 50; // the ONE default for the creator-fee share (env DEV_FEE_PCT may lower it; it can never exceed 50)
 const JUPITER_PROGRAM = 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4';
 
@@ -58,8 +59,9 @@ function loadConfig(env = process.env) {
     devWallet, devFeePct: clamp(num(env.DEV_FEE_PCT, DEFAULT_DEV_FEE_PCT), 0, 50), // creator fee on SOL / other-token payments: 50% to DEV_WALLET, the other 50% is swapped to $VWFEST and burned
     discountPct: clamp(num(env.VWFEST_DISCOUNT_PCT, 50), 0, 90),
     slippageBps: clamp(Math.round(num(env.SLIPPAGE_BPS, 300)), 10, 2000),
-    jupiterBase: (env.JUPITER_BASE || 'https://lite-api.jup.ag').replace(/\/$/, ''),
-    jupiterApiKey: env.JUPITER_API_KEY || '',
+    jupiterBase: jupRoot(env.JUPITER_BASE), // ONE base (default https://api.jup.ag; the retired legacy host is no longer a default); /swap/v1 and /price/v3 are derived from it
+    jupiterApiKey: env.JUPITER_API_KEY || '', // optional: sent as x-api-key, server-side only. Free key = 1 req/s per organisation, keyless 0.5 req/s
+    jupiterRps: num(env.JUPITER_RPS, 0),
     fixedSolUsd: num(env.FIXED_SOL_USD, 0),
     devnetTokensPerUsd: num(env.DEVNET_TOKENS_PER_USD, 10),
     quoteTtlMs: clamp(num(env.QUOTE_TTL_SEC, 300), 30, 1800) * 1000,

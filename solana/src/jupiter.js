@@ -2,7 +2,7 @@
 // Jupiter swap-instruction fetch + audit. The user's wallet signs whatever we build, so every instruction Jupiter returns is checked
 // against an allowlist (programs, instruction types, and SOL movement) BEFORE it is placed in a transaction.
 const { PublicKey, TransactionInstruction, AddressLookupTableAccount, SystemProgram, ComputeBudgetProgram } = require('@solana/web3.js');
-const C = require('./config');
+const C = require('./config'); const { JupClient } = require('./jupclient');
 const { getAssociatedTokenAddressSync } = require('@solana/spl-token');
 
 const ALLOWED_PROGRAMS = new Set([SystemProgram.programId.toBase58(), ComputeBudgetProgram.programId.toBase58(), C.TOKEN_PROGRAM, C.TOKEN_2022_PROGRAM, C.ATA_PROGRAM, C.JUPITER_PROGRAM]);
@@ -89,14 +89,9 @@ async function swapInstructions({ cfg, prices, conn, user, inputMint, amount, ma
   const quote = await prices.jupQuote({ inputMint, outputMint: cfg.vwfestMint, amount: amount.toString(), extra: '&maxAccounts=40' });
   if (!quote || !quote.outAmount) throw new Error('No swap route available right now');
   if (Number(quote.priceImpactPct || 0) > 0.05) throw new Error('Price impact too high right now. Try a smaller amount or later.');
-  const headers = { 'content-type': 'application/json', ...(cfg.jupiterApiKey ? { 'x-api-key': cfg.jupiterApiKey } : {}) };
-  let r;
-  for (let i = 0; i < 3; i++) { // free tiers rate-limit: brief back-off on 429/5xx
-    r = await fetchImpl(`${cfg.jupiterBase}/swap/v1/swap-instructions`, { method: 'POST', headers, body: JSON.stringify({ quoteResponse: quote, userPublicKey: user, wrapAndUnwrapSol: true, dynamicComputeUnitLimit: true }), signal: AbortSignal.timeout(10000) });
-    if (r.ok || (r.status !== 429 && r.status < 500)) break; await new Promise((res) => setTimeout(res, 1200 * (i + 1)));
-  }
-  if (!r.ok) throw new Error('Swap service error (' + r.status + ')');
-  const j = await r.json(); if (j.error) throw new Error('Swap service: ' + String(j.error).slice(0, 80));
+  const jup = fetchImpl !== fetch ? JupClient.for(cfg, fetchImpl) : (prices && prices.jup) || JupClient.for(cfg); // same gateway as the quote above: key header, pacing, 429 reset handling
+  let j; try { j = await jup.post(`${jup.swap}/swap-instructions`, { quoteResponse: quote, userPublicKey: user, wrapAndUnwrapSol: true, dynamicComputeUnitLimit: true }); } catch (e) { throw new Error('Swap service error (' + (e.status || 'unreachable') + ')'); }
+  if (j.error) throw new Error('Swap service: ' + String(j.error).slice(0, 80));
   const wsolAta = getAssociatedTokenAddressSync(new PublicKey(C.WSOL), new PublicKey(user), true).toBase58();
   const swapIx = iso ? pinSource(j.swapInstruction, iso.temp, iso.main) : j.swapInstruction; // token swaps: take the input from the isolated account, never the player's own
   const list = [...(j.setupInstructions || []), swapIx, ...(j.cleanupInstruction ? [j.cleanupInstruction] : [])];
