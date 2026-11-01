@@ -28,7 +28,7 @@ class Builder {
   async buildPay(q) {
     const cfg = this.cfg; const user = new PublicKey(q.wallet); const mint = new PublicKey(cfg.vwfestMint); const prog = await this.tokenProgramOf(cfg.vwfestMint);
     const ata = spl.getAssociatedTokenAddressSync(mint, user, false, prog);
-    const ixs = [ComputeBudgetProgram.setComputeUnitLimit({ units: q.swap ? 600000 : 120000 })]; let alts = []; let burn = BigInt(q.burnRaw), swapInfo = null;
+    const ixs = [ComputeBudgetProgram.setComputeUnitLimit({ units: q.swap ? 600000 : 200000 })]; let alts = []; let burn = BigInt(q.burnRaw), swapInfo = null;
     if (q.devLamports && BigInt(q.devLamports) > 0n) ixs.push(SystemProgram.transfer({ fromPubkey: user, toPubkey: new PublicKey(q.devWallet), lamports: BigInt(q.devLamports) }));
     if (q.devTokenRaw && BigInt(q.devTokenRaw) > 0n) {
       const tm = new PublicKey(q.devTokenMint); const tp = await this.tokenProgramOf(q.devTokenMint); const dev = new PublicKey(q.devWallet);
@@ -66,7 +66,7 @@ class Builder {
     const cfg = this.cfg; const col = cfg.collections[kind]; if (!col.address) throw new Error('Collection not configured: run scripts/create-collections.js');
     if (!cfg.authority) throw new Error('AUTHORITY_SECRET_KEY missing');
     const user = new PublicKey(wallet); const asset = nft.assetKeypair(cfg.serverSecret, col.address, assetKey);
-    const ixs = [ComputeBudgetProgram.setComputeUnitLimit({ units: 120000 }), nft.createAssetIx({ asset: asset.publicKey, collection: new PublicKey(col.address), authority: cfg.authority.publicKey, payer: user, owner: user, name, uri })];
+    const ixs = [ComputeBudgetProgram.setComputeUnitLimit({ units: 200000 }), nft.createAssetIx({ asset: asset.publicKey, collection: new PublicKey(col.address), authority: cfg.authority.publicKey, payer: user, owner: user, name, uri })];
     const f = await this.finish({ payer: user, ixs, signers: [asset, cfg.authority] });
     return { tx: Buffer.from(f.tx.serialize()).toString('base64'), asset: asset.publicKey.toBase58(), lastValidBlockHeight: f.lastValidBlockHeight, size: f.size };
   }

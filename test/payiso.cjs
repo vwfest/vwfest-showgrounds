@@ -3,6 +3,7 @@
 const assert = require('assert'); const http = require('http'); const path = require('path'); const fs = require('fs'); const os = require('os');
 const { Keypair, PublicKey, VersionedTransaction } = require('@solana/web3.js');
 const TOKEN = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', JUP = 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4', ATA = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'), TOK = new PublicKey(TOKEN);
+const bud = (d) => ({ programId: 'ComputeBudget111111111111111111111111111111', accounts: [], data: Buffer.from(d).toString('base64') }); const JUPBUD = [bud([2, 0x50, 0xc3, 0, 0]), bud([3, 0xe8, 0x03, 0, 0, 0, 0, 0, 0])]; // Jupiter's swap-only limit (50k units) + a 1000 microlamport price
 const REAL_IN = '5RfLl3rjrSoBAAAAsgFkAAGA8PoCAAAAACU+SQAAAAAAZAAA'; const MAXIN = 5000000n, HAVE = 20000000n;
 const ata = (o, m) => PublicKey.findProgramAddressSync([o.toBytes(), TOK.toBytes(), m.toBytes()], ATA)[0];
 (async () => {
@@ -10,7 +11,7 @@ const ata = (o, m) => PublicKey.findProgramAddressSync([o.toBytes(), TOK.toBytes
   await require('esbuild').build({ entryPoints: [path.join(__dirname, '..', 'src', 'pay.js')], bundle: true, platform: 'node', format: 'cjs', outfile: out, logLevel: 'silent', define: { global: 'globalThis' }, external: [] });
   globalThis.window = {}; const pay = require(out);
   const user = Keypair.generate().publicKey, payMint = Keypair.generate().publicKey, vwMint = Keypair.generate().publicKey, amm = [1, 2, 3].map(() => Keypair.generate().publicKey), dest = Keypair.generate().publicKey;
-  const main = ata(user, payMint), vwAta = ata(user, vwMint); let mode = 'honest', stray = null; const calls = [];
+  const main = ata(user, payMint), vwAta = ata(user, vwMint); let mode = 'honest', stray = null, simUnits = 200000; const calls = [];
   const tokenAcctData = (owner, amt) => { const b = Buffer.alloc(165); owner.toBuffer().copy(b, 32); b.writeBigUInt64LE(amt, 64); return b; };
   const acc = (data, owner = TOKEN) => ({ data: [Buffer.from(data).toString('base64'), 'base64'], executable: false, lamports: 1461600, owner, rentEpoch: 0 });
   const key = (p, s = false, w = false) => ({ pubkey: p.toBase58(), isSigner: s, isWritable: w });
@@ -24,11 +25,11 @@ const ata = (o, m) => PublicKey.findProgramAddressSync([o.toBytes(), TOK.toBytes
     case 'getMultipleAccounts': return p[0].map((k) => (stray && k === stray.toBase58() ? acc(tokenAcctData(user, 777n)) : null));
     case 'getLatestBlockhash': return { blockhash: Keypair.generate().publicKey.toBase58(), lastValidBlockHeight: 1000 };
     case 'getBalance': return 1000000000;
-    case 'simulateTransaction': return { err: null, logs: [], accounts: [acc(Buffer.alloc(0)), acc(tokenAcctData(user, HAVE - MAXIN))], unitsConsumed: 200000 };
+    case 'simulateTransaction': return { err: null, logs: [], accounts: [acc(Buffer.alloc(0)), acc(tokenAcctData(user, HAVE - MAXIN))], unitsConsumed: simUnits };
     default: throw new Error('mock rpc: ' + m); } };
   const srv = http.createServer((rq, rs) => { let b = ''; rq.on('data', (c) => (b += c)); rq.on('end', () => { const u = new URL(rq.url, 'http://x'); rs.setHeader('content-type', 'application/json');
     if (u.pathname === '/quote') { const exactOut = u.searchParams.get('swapMode') === 'ExactOut'; return rs.end(JSON.stringify(exactOut ? { inAmount: '4975000', outAmount: u.searchParams.get('amount'), otherAmountThreshold: MAXIN.toString() } : { inAmount: u.searchParams.get('amount'), outAmount: '996000000', otherAmountThreshold: '991000000' })); }
-    if (u.pathname === '/swap-instructions') return rs.end(JSON.stringify({ computeBudgetInstructions: [], setupInstructions: [], swapInstruction: routeIx(), cleanupInstruction: null, addressLookupTableAddresses: [] }));
+    if (u.pathname === '/swap-instructions') return rs.end(JSON.stringify({ computeBudgetInstructions: JUPBUD, setupInstructions: [], swapInstruction: routeIx(), cleanupInstruction: null, addressLookupTableAddresses: [] }));
     const j = JSON.parse(b); const one = (r) => { try { const v = rpc(r.method, r.params || []); const wrap = ['getAccountInfo', 'getTokenAccountBalance', 'getMultipleAccounts', 'getBalance', 'getLatestBlockhash', 'simulateTransaction'].includes(r.method); return { jsonrpc: '2.0', id: r.id, result: wrap ? { context: { slot: 1 }, value: v } : v }; } catch (e) { return { jsonrpc: '2.0', id: r.id, error: { code: -32000, message: e.message } }; } };
     rs.end(JSON.stringify(Array.isArray(j) ? j.map(one) : one(j))); }); });
   await new Promise((r) => srv.listen(0, '127.0.0.1', r)); const base = 'http://127.0.0.1:' + srv.address().port;
@@ -38,10 +39,18 @@ const ata = (o, m) => PublicKey.findProgramAddressSync([o.toBytes(), TOK.toBytes
   const go = () => pay.prepare({ q, cfg, server: base, pubkey: user, payToken: pt });
   await t('honest Jupiter reply: token pay builds the isolated swap (create, init, transferChecked exactly maxIn, route on temp, close), burn = ExactIn minOut, audit passes', async () => {
     mode = 'honest'; const p = await go(); const tx = VersionedTransaction.deserialize(p.tx.serialize()); const ak = tx.message.getAccountKeys(); const progs = tx.message.compiledInstructions.map((i) => ak.get(i.programIdIndex).toBase58().slice(0, 4));
-    assert.deepStrictEqual(progs, ['1111', 'Toke', 'Toke', 'JUP6', 'Toke', 'Toke', 'Memo']); // create-with-seed, InitializeAccount3, transferChecked, route, closeAccount, burnChecked, memo
+    assert.deepStrictEqual(progs, ['Comp', 'Comp', '1111', 'Toke', 'Toke', 'JUP6', 'Toke', 'Toke', 'Memo']); /* our limit first, Jupiter's price kept, Jupiter's 50k limit dropped */ // create-with-seed, InitializeAccount3, transferChecked, route, closeAccount, burnChecked, memo
     assert.strictEqual(p.swapInfo.maxIn, MAXIN); assert.strictEqual(p.burn, 991000000n); assert(pay.auditTx(tx, p.auditCtx)); assert(p.auditCtx.c.swap.iso && p.auditCtx.c.swap.iso.amount === MAXIN);
     const route = tx.message.compiledInstructions.find((i) => ak.get(i.programIdIndex).toBase58() === JUP); assert.notStrictEqual(ak.get(route.accountKeyIndexes[2]).toBase58(), main.toBase58(), 'route source is NOT the player\'s own account');
     assert(!tx.message.compiledInstructions.some((i) => ak.get(i.programIdIndex).toBase58() === JUP && Array.from(i.accountKeyIndexes).some((x) => ak.get(x).toBase58() === main.toBase58())), 'player\'s own token account is in no route instruction'); });
+  await t('CU limit: Jupiter\'s swap-only limit (50k) is dropped; ours is simulated units x 1.3 + 20k (200000 -> 280000), the audit accepts it, and the memo fits', async () => {
+    mode = 'honest'; const p = await go(); const tx = VersionedTransaction.deserialize(p.tx.serialize()); const ak = tx.message.getAccountKeys();
+    const lim = tx.message.compiledInstructions.filter((i) => ak.get(i.programIdIndex).toBase58().startsWith('Comp') && i.data[0] === 2); assert.strictEqual(lim.length, 1, 'exactly one SetComputeUnitLimit'); const units = Buffer.from(lim[0].data).readUInt32LE(1);
+    assert.strictEqual(units, 280000); assert.strictEqual(p.cuLimit, 280000); assert(units > 50000 + 24000 + 20000, 'room for the memo (~24k) beyond a swap-only limit'); assert(pay.auditTx(tx, p.auditCtx)); });
+  await t('CU limit, no-swap paths (pay in $VWFEST, avatar NFT mint / ride): our limit is first, = units x 1.3 + 20k, floored at 100k and capped at 1.4M; no measurement -> 400k floor', async () => {
+    const lim = async (units, extra) => { simUnits = units; const qq = { ...q, swap: false, method: 'vwfest', burnRaw: '1000000', burnMin: '1000000', uri: 'https://x.example/nft/C1.json', name: 'VW FEST Avatar', ...extra }; const p = await pay.prepare({ q: qq, cfg, server: base, pubkey: user }); const tx = VersionedTransaction.deserialize(p.tx.serialize()); const ak = tx.message.getAccountKeys();
+      const i0 = tx.message.compiledInstructions[0]; assert.strictEqual(ak.get(i0.programIdIndex).toBase58(), 'ComputeBudget111111111111111111111111111111'); assert.strictEqual(i0.data[0], 2); assert(pay.auditTx(tx, p.auditCtx)); return Buffer.from(i0.data).readUInt32LE(1); };
+    assert.strictEqual(await lim(60000), 100000, 'CU_MIN'); assert.strictEqual(await lim(150000), 215000); assert.strictEqual(await lim(1390000), 1400000, 'cap'); assert.strictEqual(await lim(undefined), 400000, 'no measurement -> floor'); simUnits = 200000; });
   await t('real multi-hop route: Jupiter lists the player\'s source account again inside the AMM accounts; every reference is moved to the temp account and the build passes the audit', async () => {
     mode = 'multihop'; const p = await go(); const tx = VersionedTransaction.deserialize(p.tx.serialize()); const ak = tx.message.getAccountKeys();
     assert(!tx.message.compiledInstructions.some((i) => ak.get(i.programIdIndex).toBase58() === JUP && Array.from(i.accountKeyIndexes).some((x) => ak.get(x).toBase58() === main.toBase58())), 'no route instruction references the player\'s own token account'); assert(pay.auditTx(tx, p.auditCtx)); });

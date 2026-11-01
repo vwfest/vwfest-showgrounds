@@ -5,6 +5,7 @@ import { rpcFetch, jupFetch } from './rpc.mjs';
 import { sendAndConfirm } from './rebroadcast.mjs';
 import { tokenQuotes } from './swapquote.mjs';
 import { assertTop } from './frame.js';
+import { padUnits, withoutLimit, CU_FLOOR, CU_MAX } from './cu.mjs';
 import { Connection, PublicKey, Keypair, TransactionInstruction, TransactionMessage, VersionedTransaction, SystemProgram, ComputeBudgetProgram, AddressLookupTableAccount } from '@solana/web3.js';
 
 const TOKEN = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'), TOKEN22 = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
@@ -40,7 +41,6 @@ async function jget(url) { const r = await jupFetch(url); // through the server'
 //  opts.payToken: { mint, sym, dec } to pay with an SPL token instead of SOL (e.g. USDC, BONK).
 async function build({ q, cfg, conn, user, mint, tokenProg, ata, swapLamports, payToken, onStep, maxAccounts = 40 }) {
   const ixs = []; const alts = []; let burn = BigInt(q.burnRaw), swapInfo = null, simTok = null;
-  const budget = ComputeBudgetProgram.setComputeUnitLimit({ units: 600000 });
   const wsolAta = PublicKey.findProgramAddressSync([user.toBytes(), TOKEN.toBytes(), WSOL_MINT.toBytes()], ATA_PROG)[0].toBase58(); let swapCtx = null;
   const isoPre = [], isoPost = []; // isolation prelude/postlude for token-funded swaps (see below)
   // iso (token-funded swaps only): { temp, main, mint, dec, amount, maxRent }. Jupiter's route is rewritten to take its input from the isolated temp account; the player's own token account (main) may appear in no route instruction.
@@ -48,11 +48,12 @@ async function build({ q, cfg, conn, user, mint, tokenProg, ata, swapLamports, p
     const res = await jupFetch(`${cfg.jupiter}/swap-instructions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ quoteResponse: qs, userPublicKey: user.toBase58(), wrapAndUnwrapSol: true, dynamicComputeUnitLimit: true, dynamicSlippage: false }) });
     if (!res.ok) throw new Error('Swap service error (' + res.status + ')'); const j = await res.json(); if (j.error) throw new Error('Swap service: ' + j.error);
     const swapIx = iso ? pinSource(j.swapInstruction, iso.temp, iso.main) : j.swapInstruction; // the route as Jupiter built it must have used the player's own account; we move it to the isolated one
-    const all = [...(j.computeBudgetInstructions || []), ...(j.setupInstructions || []), swapIx, ...(j.cleanupInstruction ? [j.cleanupInstruction] : [])]; const route = { dest: ata.toBase58(), minOut: BigInt(qs.otherAmountThreshold), maxSlippageBps: cfg.slippageBps, quotedOut: BigInt(qs.outAmount) }; // the output must land in the player's own $VWFEST account and cover the burn
+    const jbud = withoutLimit(j.computeBudgetInstructions); // Jupiter's compute-unit LIMIT covers the swap only: ours is set below, after a simulation
+    const all = [...jbud, ...(j.setupInstructions || []), swapIx, ...(j.cleanupInstruction ? [j.cleanupInstruction] : [])]; const route = { dest: ata.toBase58(), minOut: BigInt(qs.otherAmountThreshold), maxSlippageBps: cfg.slippageBps, quotedOut: BigInt(qs.outAmount) }; // the output must land in the player's own $VWFEST account and cover the burn
     audit(all, maxLamports, { user: user.toBase58(), wsolAta, maxSwapIn, source: iso ? iso.temp : wsolAta, forbid: iso ? [iso.main] : undefined, ...route }); swapCtx = { maxLamports, maxSwapIn, wsolAta, dest: route.dest, maxSlippageBps: route.maxSlippageBps, quotedOut: route.quotedOut, iso: iso || null };
     await assertNoStrayUserTokenAccounts(conn, [swapIx], user, [wsolAta, ata.toBase58(), ...(iso ? [iso.temp] : [])]);
     for (const a of j.addressLookupTableAddresses || []) { const acc = await conn.getAccountInfo(new PublicKey(a)); if (acc) alts.push(new AddressLookupTableAccount({ key: new PublicKey(a), state: AddressLookupTableAccount.deserialize(acc.data) })); }
-    for (const i of j.computeBudgetInstructions || []) ixs.push(ix(i)); for (const i of isoPre) ixs.push(i); for (const i of j.setupInstructions || []) ixs.push(ix(i)); ixs.push(ix(swapIx)); if (j.cleanupInstruction) ixs.push(ix(j.cleanupInstruction)); for (const i of isoPost) ixs.push(i);
+    for (const i of jbud) ixs.push(ix(i)); for (const i of isoPre) ixs.push(i); for (const i of j.setupInstructions || []) ixs.push(ix(i)); ixs.push(ix(swapIx)); if (j.cleanupInstruction) ixs.push(ix(j.cleanupInstruction)); for (const i of isoPost) ixs.push(i);
   };
   if (payToken) {
     if (!q.swap) throw new Error('Paying with other tokens needs mainnet liquidity (test networks have none).');
@@ -81,7 +82,6 @@ async function build({ q, cfg, conn, user, mint, tokenProg, ata, swapLamports, p
     const minOut = BigInt(qs.otherAmountThreshold); if (minOut < BigInt(q.burnMin)) throw new Error('The $VWFEST price moved, or your wallet holds too little SOL for this purchase. Please start again.');
     await swapIxs(qs, sw + 6000000n, sw); burn = minOut; swapInfo = { expectOut: BigInt(qs.outAmount), minOut, swapLamports: sw };
   } else {
-    ixs.push(budget);
     if (q.method === 'vwfest' || !q.swap) { // paying in tokens you already hold (or test-network mode)
       const bal = await conn.getTokenAccountBalance(ata).catch(() => null); const have = bal ? BigInt(bal.value.amount) : 0n;
       if (have < burn) throw new Error(cfg.network !== 'mainnet-beta' && !q.swap ? `Test network (${cfg.network}): purchases burn TEST $VWFEST (no real money, and no swap exists on a test network). This wallet holds ${Number(have) / 10 ** cfg.decimals} test $VWFEST and needs ${Number(burn) / 10 ** cfg.decimals}. Ask the team for test tokens.` : `You need ${Number(burn) / 10 ** cfg.decimals} $VWFEST in this wallet, but it holds ${Number(have) / 10 ** cfg.decimals}.`);
@@ -95,16 +95,20 @@ async function build({ q, cfg, conn, user, mint, tokenProg, ata, swapLamports, p
   ixs.push(new TransactionInstruction({ programId: MEMO, keys: [{ pubkey: user, isSigner: true, isWritable: false }], data: new TextEncoder().encode('vwfest:' + q.id) }));
   onStep && onStep('Checking the transaction…');
   const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash('confirmed');
-  const msg = new TransactionMessage({ payerKey: user, recentBlockhash: blockhash, instructions: ixs }).compileToV0Message(alts); let tx; const tooBig = (size) => Object.assign(new Error(`Transaction too large${size ? ' (' + size + ' bytes)' : ''}` + (payToken ? '. This route is too complex to fit in one transaction; try paying with SOL or $VWFEST.' : '. Try again; the route may have changed.')), { tooLarge: true, size });
-  try { tx = new VersionedTransaction(msg); if (asset) tx.sign([asset]); } catch (e) { if (e instanceof RangeError) throw tooBig(0); throw e; } // web3.js cannot even serialize a message past the packet size: that is the same "too large", not a crash
+  const tooBig = (size) => Object.assign(new Error(`Transaction too large${size ? ' (' + size + ' bytes)' : ''}` + (payToken ? '. This route is too complex to fit in one transaction; try paying with SOL or $VWFEST.' : '. Try again; the route may have changed.')), { tooLarge: true, size });
+  const compile = (units) => { const msg = new TransactionMessage({ payerKey: user, recentBlockhash: blockhash, instructions: [ComputeBudgetProgram.setComputeUnitLimit({ units }), ...ixs] }).compileToV0Message(alts); let t;
+    try { t = new VersionedTransaction(msg); if (asset) t.sign([asset]); } catch (e) { if (e instanceof RangeError) throw tooBig(0); throw e; } return t; }; // web3.js cannot even serialize a message past the packet size: that is the same "too large", not a crash
   const auditCtx = { alts, c: { user: user.toBase58(), mint: cfg.mint, ata: ata.toBase58(), decimals: cfg.decimals, burn, memo: 'vwfest:' + q.id, devWallet: BigInt(q.devLamports) > 0n ? q.devWallet : '', devLamports: BigInt(q.devLamports), asset: asset ? asset.publicKey.toBase58() : null, name: q.name || 'VW FEST NFT', uri: q.uri || '', swap: swapCtx } };
-  auditTx(tx, auditCtx); // 1st audit: the compiled transaction, before it is simulated or shown
-  let size; try { size = tx.serialize().length; } catch (e) { if (e instanceof RangeError) throw tooBig(0); throw e; } if (size > 1232) throw tooBig(size);
-  const pre = await conn.getBalance(user, 'confirmed'); const sim = await conn.simulateTransaction(tx, { sigVerify: false, replaceRecentBlockhash: true, commitment: 'confirmed', accounts: { encoding: 'base64', addresses: [user.toBase58(), ...(simTok ? [simTok.addr.toBase58()] : [])] } });
+  const sizeOf = (t) => { let n; try { n = t.serialize().length; } catch (e) { if (e instanceof RangeError) throw tooBig(0); throw e; } if (n > 1232) throw tooBig(n); return n; };
+  let tx = compile(CU_FLOOR); auditTx(tx, auditCtx); // 1st audit: the compiled transaction, before it is simulated or shown
+  sizeOf(tx);
+  const simTx = compile(CU_MAX); // measured under the maximum so that a heavy route never fails the simulation just because the limit was tight
+  const pre = await conn.getBalance(user, 'confirmed'); const sim = await conn.simulateTransaction(simTx, { sigVerify: false, replaceRecentBlockhash: true, commitment: 'confirmed', accounts: { encoding: 'base64', addresses: [user.toBase58(), ...(simTok ? [simTok.addr.toBase58()] : [])] } });
   if (sim.value.err) throw new Error('This purchase would fail on-chain: ' + JSON.stringify(sim.value.err).slice(0, 140) + (sim.value.logs ? ' · ' + (sim.value.logs.filter((l) => /error|insufficient|failed/i.test(l)).slice(-1)[0] || '') : ''));
   if (simTok) { const a1 = sim.value.accounts && sim.value.accounts[1]; if (!a1 || !a1.data) throw new Error('Could not check how much of your token the swap uses. Aborted.'); const raw = Uint8Array.from(atob(a1.data[0]), (c) => c.charCodeAt(0)); const after = new DataView(raw.buffer).getBigUint64(64, true); if (simTok.before - after > simTok.max) throw new Error('Simulation shows the swap taking more of your token than quoted. Aborted.'); } // belt and braces on top of the instruction-data bound
+  const cuLimit = padUnits(sim.value.unitsConsumed); tx = compile(cuLimit); auditTx(tx, auditCtx); const size = sizeOf(tx); // the limit we sign = measured units * 1.3 + 20k; audited again (priority fee = price x limit)
   const post = sim.value.accounts && sim.value.accounts[0] ? sim.value.accounts[0].lamports : null; const spentLamports = post === null ? null : pre - post;
-  return { q, auditCtx, tx, asset, conn, burn, blockhash, lastValidBlockHeight, swapInfo, spentLamports, size, units: sim.value.unitsConsumed, user, ata, balance: BigInt(pre) };
+  return { q, auditCtx, tx, asset, conn, burn, blockhash, lastValidBlockHeight, swapInfo, spentLamports, size, units: sim.value.unitsConsumed, cuLimit, user, ata, balance: BigInt(pre) };
 }
 export async function prepare({ q, cfg, server, pubkey, onStep, payToken }) {
   if (q && q.expires && Date.now() > q.expires - 20000) throw new Error('This price quote has expired. Close this window and start the purchase again.');
