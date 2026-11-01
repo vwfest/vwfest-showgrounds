@@ -28,7 +28,8 @@ export function jupSource(i, d) { const idx = SOURCE_IDX[hex(d)]; if (idx === un
 export function pinSource(swapIx, account, expected) {
   const d = bytes(swapIx.data); const idx = SOURCE_IDX[hex(d)]; if (idx === undefined || !swapIx.accounts[idx]) throw new Error('Unrecognised swap route type. Aborted for your safety.');
   if (expected && swapIx.accounts[idx].pubkey !== expected) throw new Error('Swap route does not take its input from your own token account. Aborted for your safety.');
-  const accounts = swapIx.accounts.map((a, n) => (n === idx ? { ...a, pubkey: account } : a)); return { ...swapIx, accounts };
+  // Jupiter lists the source account again inside the per-hop AMM accounts of a multi-hop route: EVERY reference to the player's own token account moves to the temp account (same as solana/src/jupiter.js).
+  const from = expected || swapIx.accounts[idx].pubkey; const accounts = swapIx.accounts.map((a, n) => (n === idx || a.pubkey === from ? { ...a, pubkey: account } : a)); return { ...swapIx, accounts };
 }
 // Route layouts from the Jupiter v6 IDL (jup-ag/jupiter-cpi idl.json): route [0 token_program, 1 user_transfer_authority, 2 user_source_token_account, 3 user_destination_token_account, 4 destination_token_account (optional: the program id when unused), 5 destination_mint, 6 platform_fee_account, ...]
 // shared_accounts_route [0 token_program, 1 program_authority, 2 user_transfer_authority, 3 source_token_account, 4 program_source, 5 program_destination, 6 destination_token_account, 7 source_mint, 8 destination_mint, 9 platform_fee_account, ...]. Data tail: [in_amount u64][quoted_out_amount u64][slippage_bps u16][platform_fee_bps u8].

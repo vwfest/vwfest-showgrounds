@@ -15,7 +15,7 @@ const ata = (o, m) => PublicKey.findProgramAddressSync([o.toBytes(), TOK.toBytes
   const acc = (data, owner = TOKEN) => ({ data: [Buffer.from(data).toString('base64'), 'base64'], executable: false, lamports: 1461600, owner, rentEpoch: 0 });
   const key = (p, s = false, w = false) => ({ pubkey: p.toBase58(), isSigner: s, isWritable: w });
   const routeIx = () => { const src = mode === 'foreign' ? dest : main; const d = Buffer.from(REAL_IN, 'base64'); d.writeBigUInt64LE(mode === 'overspend' ? MAXIN * 3n : MAXIN, d.length - 19); d.writeBigUInt64LE(996000000n, d.length - 11); d.writeUInt16LE(mode === 'slippage' ? 3000 : 50, d.length - 3); // quoted_out_amount / slippage_bps as the mock quote says
-    const extra = mode === 'smuggle' ? [key(main, false, true)] : mode === 'stray' ? [key(stray, false, true)] : [];
+    const extra = mode === 'multihop' ? [key(main, false, true)] : mode === 'smuggle' ? [key(main, false, true)] : mode === 'stray' ? [key(stray, false, true)] : [];
     return { programId: JUP, accounts: [key(TOK), key(user, true), key(src, false, true), key(mode === 'redirect' ? dest : vwAta, false, true), key(mode === 'second' ? dest : new PublicKey(JUP)), key(vwMint), key(new PublicKey(JUP)), ...amm.map((a) => key(a, false, true)), ...extra], data: d.toString('base64') }; };
   const rpc = (m, p) => { calls.push(m); switch (m) {
     case 'getAccountInfo': { const k = p[0]; if (k === vwMint.toBase58() || k === payMint.toBase58()) return acc(Buffer.alloc(82)); return null; }
@@ -42,9 +42,11 @@ const ata = (o, m) => PublicKey.findProgramAddressSync([o.toBytes(), TOK.toBytes
     assert.strictEqual(p.swapInfo.maxIn, MAXIN); assert.strictEqual(p.burn, 991000000n); assert(pay.auditTx(tx, p.auditCtx)); assert(p.auditCtx.c.swap.iso && p.auditCtx.c.swap.iso.amount === MAXIN);
     const route = tx.message.compiledInstructions.find((i) => ak.get(i.programIdIndex).toBase58() === JUP); assert.notStrictEqual(ak.get(route.accountKeyIndexes[2]).toBase58(), main.toBase58(), 'route source is NOT the player\'s own account');
     assert(!tx.message.compiledInstructions.some((i) => ak.get(i.programIdIndex).toBase58() === JUP && Array.from(i.accountKeyIndexes).some((x) => ak.get(x).toBase58() === main.toBase58())), 'player\'s own token account is in no route instruction'); });
+  await t('real multi-hop route: Jupiter lists the player\'s source account again inside the AMM accounts; every reference is moved to the temp account and the build passes the audit', async () => {
+    mode = 'multihop'; const p = await go(); const tx = VersionedTransaction.deserialize(p.tx.serialize()); const ak = tx.message.getAccountKeys();
+    assert(!tx.message.compiledInstructions.some((i) => ak.get(i.programIdIndex).toBase58() === JUP && Array.from(i.accountKeyIndexes).some((x) => ak.get(x).toBase58() === main.toBase58())), 'no route instruction references the player\'s own token account'); assert(pay.auditTx(tx, p.auditCtx)); });
   await t('MALICIOUS Jupiter: in_amount x3 is refused before anything is shown to the wallet', async () => { mode = 'overspend'; await assert.rejects(go(), /spend more/); });
   await t('MALICIOUS Jupiter: route input from a different account than the player\'s own is refused', async () => { mode = 'foreign'; await assert.rejects(go(), /own token account/); });
-  await t('MALICIOUS Jupiter: player\'s own token account smuggled into the route accounts is refused', async () => { mode = 'smuggle'; await assert.rejects(go(), /must not use/); });
   await t('MALICIOUS Jupiter: ANOTHER token account owned by the player in the route is refused (RPC owner check)', async () => { mode = 'stray'; stray = Keypair.generate().publicKey; await assert.rejects(go(), /another token account of yours/); stray = null; });
   await t('MALICIOUS Jupiter: output redirected to the attacker (route idx 3), a second destination (idx 4), or more slippage than the quote is refused', async () => {
     mode = 'redirect'; await assert.rejects(go(), /somewhere other than your own account/); mode = 'second'; await assert.rejects(go(), /second destination/); mode = 'slippage'; await assert.rejects(go(), /more slippage/); });
