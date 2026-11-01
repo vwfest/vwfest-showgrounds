@@ -54,7 +54,7 @@ class Facade {
     this.store = await new Store(db ? poolBackend(db, env.DB_SCHEMA || 'showgrounds') : null).init();
     this.conn = conn || new Connection(cfg.rpcUrl, 'confirmed'); this.prices = new Prices(cfg, fetchImpl || fetch); this.f = fetchImpl || fetch;
     this.tracker = new BurnTracker({ store: this.store, cfg });
-    this.pending = new Set(); this.codes = new Set(); for (const b of this.tracker.all()) if (b.code) this.codes.add(b.code);
+    this.pending = new Set(); this.codes = new Set(); this.quoteIds = new Set(); for (const b of this.tracker.all()) { if (b.code) this.codes.add(b.code); if (b.quoteId) this.quoteIds.add(b.quoteId); }
     const secret = cfg.serverSecret; this.authLib = secret && secret.length >= 32 ? new Auth({ store: this.store, secret }) : null; /* >= 32 chars, never padded */ this.ready = true; return this;
   }
   config() {
@@ -86,8 +86,10 @@ class Facade {
     if (this.store.has('burn', sig) || this.pending.has('sig:' + sig)) return { ok: false, why: 'Already recorded', dup: true };
     const code = kind === 'mint' && expect.code ? String(expect.code) : null;
     if (code && (this.codes.has(code) || this.pending.has('code:' + code))) return { ok: false, why: 'This avatar has already been minted', dup: true };
-    this.pending.add('sig:' + sig); if (code) this.pending.add('code:' + code);
-    const release = () => { this.pending.delete('sig:' + sig); if (code) this.pending.delete('code:' + code); };
+    // a quote is redeemed by exactly ONE burn: a second transaction carrying the same (signed) quote id is refused, so one quote can never credit twice; each burn signature is recorded once
+    if (nonce && (this.quoteIds.has(nonce) || this.pending.has('q:' + nonce))) return { ok: false, why: 'This quote was already used by another transaction', dup: true, quoteUsed: true };
+    this.pending.add('sig:' + sig); if (code) this.pending.add('code:' + code); if (nonce) this.pending.add('q:' + nonce);
+    const release = () => { this.pending.delete('sig:' + sig); if (code) this.pending.delete('code:' + code); if (nonce) this.pending.delete('q:' + nonce); };
     try {
       if (this.fake) { const w = expect.wallet || 'FAKE'; const rec0 = { sig, amount: String(expect.burnMin || 1), wallet: w, kind, ts: Date.now() }; return this._commit({ ...rec0, pid, nick, item, rideId, code, quoteId: nonce, method: 'fake', devLamports: '0' }, code, release); }
       const tx = await verify.fetchTx(this.conn, sig, { tries: 8, delayMs: 1500 });
@@ -100,8 +102,9 @@ class Facade {
       return this._commit({ sig, swapSig: swapOk, kind, item: item || null, pid, nick, code, rideId, quoteId: nonce, wallet: r.wallet, amount: r.amount, devLamports: r.devLamports, asset: r.asset || undefined, method: 'tx', ts: (r.blockTime || Math.floor(Date.now() / 1000)) * 1000 }, code, release);
     } catch (e) { release(); return { ok: false, retry: true, why: 'Could not check the blockchain right now. Try again.' }; }
   }
+  ledgerRec(sig) { return this.store.get('burn', sig) || null; } // the recorded burn (crash recovery: re-run the idempotent grant for a burn that was recorded but never delivered)
   _commit(rec, code, release) { // synchronous: the burn ledger write IS the permanent reservation
-    rec.nick = String(rec.nick || 'anon').slice(0, 14); const ok = this.tracker.record(rec); if (code) this.codes.add(code); release(); if (!ok) return { ok: false, why: 'Already recorded', dup: true }; return { ok: true, rec }; }
+    rec.nick = String(rec.nick || 'anon').slice(0, 14); const ok = this.tracker.record(rec); if (ok && code) this.codes.add(code); if (ok && rec.quoteId) this.quoteIds.add(rec.quoteId); release(); if (!ok) return { ok: false, why: 'Already recorded', dup: true }; return { ok: true, rec }; }
   get burnsApi() { const f = this; return {
     stats() { const s = f.tracker.summary(15); const top = {}; for (const b of f.tracker.all()) top[b.nick || 'anon'] = (top[b.nick || 'anon'] || 0n) + BigInt(b.amount);
       return { total: f.tracker.total().toString(), count: s.count, top: Object.entries(top).sort((a, b) => (b[1] > a[1] ? 1 : -1)).slice(0, 5).map(([nick, amount]) => ({ nick, amount: amount.toString() })), recent: s.recent.map((r) => ({ nick: r.nick, kind: r.kind, amount: r.amount, sig: r.sig, ts: r.ts, url: r.url })), codes: f.codes, totalBurned: s.totalBurned, network: s.network, mint: s.mint, decimals: s.decimals }; },

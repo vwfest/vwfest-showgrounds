@@ -7,7 +7,7 @@ const F = new Facade();
 const need = () => { if (!F.ready) throw new Error('chain.init() has not been called'); };
 module.exports = {
   ...native, createRouter, Facade, inspectPurchaseTx: inspect,
-  init: (o) => F.init(o), config: () => (need(), F.config()), quote: (o) => (need(), F.quote(o)), solUsd: () => (need(), F.solUsd()), verifyPurchase: (o) => (need(), F.verifyPurchase(o)),
+  init: (o) => F.init(o), config: () => (need(), F.config()), quote: (o) => (need(), F.quote(o)), solUsd: () => (need(), F.solUsd()), verifyPurchase: (o) => (need(), F.verifyPurchase(o)), ledgerRec: (sig) => (need(), F.ledgerRec(sig)),
   get burns() { need(); return F.burnsApi; }, get auth() { need(); return F.authApi; }, get onramp() { need(); return F.onrampApi; },
   // Mounts the read-only compat routes + the native router. (No transaction-sending / RPC-proxy route exists in this module.)
   mountRoutes(app, { express = require('express'), rateLimit = require('express-rate-limit'), allowedOrigins = [], solana = null } = {}) {

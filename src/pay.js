@@ -2,6 +2,7 @@
 //  tx = [compute budget] + [Jupiter swap SOL -> $VWFEST for the swap share] + [SOL fee to creator wallet, if any] + SPL burn + [Core NFT create] + memo
 import { audit, auditMessage, sameMessage, pinSource } from './txaudit.mjs';
 import { rpcFetch } from './rpc.mjs';
+import { sendAndConfirm } from './rebroadcast.mjs';
 import { assertTop } from './frame.js';
 import { Connection, PublicKey, Keypair, TransactionInstruction, TransactionMessage, VersionedTransaction, SystemProgram, ComputeBudgetProgram, AddressLookupTableAccount } from '@solana/web3.js';
 
@@ -102,9 +103,10 @@ async function build({ q, cfg, conn, user, mint, tokenProg, ata, swapLamports, p
   if (sim.value.err) throw new Error('This purchase would fail on-chain: ' + JSON.stringify(sim.value.err).slice(0, 140) + (sim.value.logs ? ' · ' + (sim.value.logs.filter((l) => /error|insufficient|failed/i.test(l)).slice(-1)[0] || '') : ''));
   if (simTok) { const a1 = sim.value.accounts && sim.value.accounts[1]; if (!a1 || !a1.data) throw new Error('Could not check how much of your token the swap uses. Aborted.'); const raw = Uint8Array.from(atob(a1.data[0]), (c) => c.charCodeAt(0)); const after = new DataView(raw.buffer).getBigUint64(64, true); if (simTok.before - after > simTok.max) throw new Error('Simulation shows the swap taking more of your token than quoted. Aborted.'); } // belt and braces on top of the instruction-data bound
   const post = sim.value.accounts && sim.value.accounts[0] ? sim.value.accounts[0].lamports : null; const spentLamports = post === null ? null : pre - post;
-  return { auditCtx, tx, asset, conn, burn, blockhash, lastValidBlockHeight, swapInfo, spentLamports, size, units: sim.value.unitsConsumed, user, ata, balance: BigInt(pre) };
+  return { q, auditCtx, tx, asset, conn, burn, blockhash, lastValidBlockHeight, swapInfo, spentLamports, size, units: sim.value.unitsConsumed, user, ata, balance: BigInt(pre) };
 }
 export async function prepare({ q, cfg, server, pubkey, onStep, payToken }) {
+  if (q && q.expires && Date.now() > q.expires - 20000) throw new Error('This price quote has expired. Close this window and start the purchase again.');
   assertTop();
   // The browser talks to the public RPC directly (simulate + broadcast): the game server has no transaction relay by design. Reads could use /api/rpc, but one endpoint keeps it simple.
   const cbase = { commitment: 'confirmed', disableRetryOnRateLimit: true }; // simulate + broadcast MUST go to the public RPC (the proxy is read-only); the proxy (with the session token) is only a fallback for reads when no public RPC is configured
@@ -117,19 +119,13 @@ export async function prepare({ q, cfg, server, pubkey, onStep, payToken }) {
 }
 export async function signAndSend(prep, provider, onStep) {
   assertTop();
+  // quotes expire: refuse to even open the wallet prompt on a stale one (a burn that matches a signed quote is still honored server-side, but starting a payment needs a live quote)
+  if (prep.q && prep.q.expires && Date.now() > prep.q.expires - 20000) throw new Error('This price quote has expired. Close this window and start the purchase again.');
   onStep && onStep('Approve in your wallet…');
   // Re-audit the EXACT bytes that go to the wallet: decode them afresh, audit that, sign that, and require the wallet to return the same message.
   const toSign = VersionedTransaction.deserialize(prep.tx.serialize()); auditTx(toSign, prep.auditCtx); const audited = toSign.message.serialize();
   const signed = await provider.signTransaction(toSign);
   if (!signed || !signed.message || !sameMessage(signed.message.serialize(), audited)) throw new Error('Your wallet returned a different transaction than the one shown. Nothing was sent.');
   onStep && onStep('Sending…');
-  const raw = signed.serialize(); const sig = await prep.conn.sendRawTransaction(raw, { skipPreflight: false, maxRetries: 3 });
-  onStep && onStep('Confirming on Solana…'); const t0 = Date.now();
-  for (;;) {
-    const st = await prep.conn.getSignatureStatuses([sig], { searchTransactionHistory: false }); const v = st.value[0];
-    if (v && v.err) throw new Error('Transaction failed on-chain: ' + JSON.stringify(v.err).slice(0, 120));
-    if (v && (v.confirmationStatus === 'confirmed' || v.confirmationStatus === 'finalized')) return sig;
-    if (Date.now() - t0 > 75000) throw Object.assign(new Error('Still confirming. Your transaction was sent; check Solscan, then press Retry to record it.'), { sig, pending: true });
-    await new Promise((r) => setTimeout(r, 1500));
-  }
+  const { sig } = await sendAndConfirm({ conn: prep.conn, raw: signed.serialize(), lastValidBlockHeight: prep.lastValidBlockHeight, onStep: (t) => onStep && onStep(t) }); return sig;
 }
