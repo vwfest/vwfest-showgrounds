@@ -39,7 +39,7 @@ async function jget(url) { const r = await jupFetch(url); // through the server'
 
 // Funding sources: 'sol' (Jupiter ExactIn SOL -> $VWFEST), 'token' (Jupiter ExactOut: any SPL token -> exactly the burn amount), 'direct' ($VWFEST already held / test mode).
 //  opts.payToken: { mint, sym, dec } to pay with an SPL token instead of SOL (e.g. USDC, BONK).
-async function build({ q, cfg, conn, user, mint, tokenProg, ata, swapLamports, payToken, onStep, maxAccounts = 40 }) {
+async function build({ q, cfg, conn, readers, user, mint, tokenProg, ata, swapLamports, payToken, onStep, maxAccounts = 40 }) {
   const ixs = []; const alts = []; let burn = BigInt(q.burnRaw), swapInfo = null, simTok = null;
   const wsolAta = PublicKey.findProgramAddressSync([user.toBytes(), TOKEN.toBytes(), WSOL_MINT.toBytes()], ATA_PROG)[0].toBase58(); let swapCtx = null;
   const isoPre = [], isoPost = []; // isolation prelude/postlude for token-funded swaps (see below)
@@ -108,7 +108,7 @@ async function build({ q, cfg, conn, user, mint, tokenProg, ata, swapLamports, p
   if (simTok) { const a1 = sim.value.accounts && sim.value.accounts[1]; if (!a1 || !a1.data) throw new Error('Could not check how much of your token the swap uses. Aborted.'); const raw = Uint8Array.from(atob(a1.data[0]), (c) => c.charCodeAt(0)); const after = new DataView(raw.buffer).getBigUint64(64, true); if (simTok.before - after > simTok.max) throw new Error('Simulation shows the swap taking more of your token than quoted. Aborted.'); } // belt and braces on top of the instruction-data bound
   const cuLimit = padUnits(sim.value.unitsConsumed); tx = compile(cuLimit); auditTx(tx, auditCtx); const size = sizeOf(tx); // the limit we sign = measured units * 1.3 + 20k; audited again (priority fee = price x limit)
   const post = sim.value.accounts && sim.value.accounts[0] ? sim.value.accounts[0].lamports : null; const spentLamports = post === null ? null : pre - post;
-  return { q, auditCtx, tx, asset, conn, burn, blockhash, lastValidBlockHeight, swapInfo, spentLamports, size, units: sim.value.unitsConsumed, cuLimit, user, ata, balance: BigInt(pre) };
+  return { q, auditCtx, tx, asset, conn, readers, burn, blockhash, lastValidBlockHeight, swapInfo, spentLamports, size, units: sim.value.unitsConsumed, cuLimit, user, ata, balance: BigInt(pre) };
 }
 export async function prepare({ q, cfg, server, pubkey, onStep, payToken }) {
   if (q && q.expires && Date.now() > q.expires - 20000) throw new Error('This price quote has expired. Close this window and start the purchase again.');
@@ -116,10 +116,11 @@ export async function prepare({ q, cfg, server, pubkey, onStep, payToken }) {
   // The browser talks to the public RPC directly (simulate + broadcast): the game server has no transaction relay by design. Reads could use /api/rpc, but one endpoint keeps it simple.
   const cbase = { commitment: 'confirmed', disableRetryOnRateLimit: true }; // simulate + broadcast MUST go to the public RPC (the proxy is read-only); the proxy (with the session token) is only a fallback for reads when no public RPC is configured
   const conn = cfg.publicRpcUrl ? new Connection(cfg.publicRpcUrl, cbase) : new Connection(server + '/api/rpc', { ...cbase, fetch: rpcFetch });
+  const readers = cfg.publicRpcUrl ? [new Connection(server + '/api/rpc', { ...cbase, fetch: rpcFetch })] : []; // a second, independent view (the server's RPC) used only to double-check before a payment is ever called expired
   const mint = new PublicKey(cfg.mint), user = pubkey; const mintInfo = await conn.getAccountInfo(mint); if (!mintInfo) throw new Error('$VWFEST mint not found on this network.');
   const tokenProg = mintInfo.owner.equals(TOKEN22) ? TOKEN22 : TOKEN;
   const [ata] = PublicKey.findProgramAddressSync([user.toBytes(), tokenProg.toBytes(), mint.toBytes()], ATA_PROG);
-  const base = { q, cfg, conn, user, mint, tokenProg, ata, payToken, onStep };
+  const base = { q, cfg, conn, readers, user, mint, tokenProg, ata, payToken, onStep };
   // A token-funded swap can come back as a route that does not fit the 1232-byte packet (the memo, the isolation account and an NFT mint all take room): ask Jupiter for fewer accounts and try again, then give up with a clear message.
   const tries = payToken ? [40, 32, 26] : [40]; let last;
   for (const ma of tries) { try { return await build({ ...base, swapLamports: BigInt(q.swapLamports), maxAccounts: ma }); } catch (e) { if (last && !(e && e.tooLarge)) throw last; /* a simpler route may not exist: report the real problem */ if (!(e && e.tooLarge) || ma === tries[tries.length - 1]) throw e; last = e; onStep && onStep('That route is too big for one transaction, looking for a simpler one…'); } }
@@ -135,5 +136,5 @@ export async function signAndSend(prep, provider, onStep, onSent) {
   const signed = await provider.signTransaction(toSign);
   if (!signed || !signed.message || !sameMessage(signed.message.serialize(), audited)) throw new Error('Your wallet returned a different transaction than the one shown. Nothing was sent.');
   onStep && onStep('Sending…');
-  const { sig } = await sendAndConfirm({ conn: prep.conn, raw: signed.serialize(), lastValidBlockHeight: prep.lastValidBlockHeight, onSent, onStep: (t) => onStep && onStep(t) }); return sig;
+  const { sig } = await sendAndConfirm({ conn: prep.conn, readers: prep.readers || [], raw: signed.serialize(), lastValidBlockHeight: prep.lastValidBlockHeight, onSent, onStep: (t) => onStep && onStep(t) }); return sig;
 }

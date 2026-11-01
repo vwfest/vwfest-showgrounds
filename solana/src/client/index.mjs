@@ -3,6 +3,7 @@
 // through the player's own RPC (config.rpcUrl). The server is never asked to send anything.
 import { Connection, VersionedTransaction } from '@solana/web3.js';
 import { auditPayTx, auditMintTx, fetchAlts } from '../audit.js';
+import { checkExpiry, plausibleHeight } from '../../../src/expiry.mjs';
 
 const b64 = (u8) => { let s = ''; for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]); return btoa(s); };
 const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
@@ -43,16 +44,26 @@ export function discoverWallets(win = globalThis.window) {
 }
 export function detectPhantom(win = globalThis.window) { const p = win && ((win.phantom && win.phantom.solana) || win.solana); return p && p.isPhantom ? phantomAdapter(p) : null; }
 
-// Poll-based confirmation (no websocket needed, works behind any proxy).
-async function waitConfirmed(conn, sig, lastValidBlockHeight, raw) {
+// Poll-based confirmation (no websocket needed, works behind any proxy). "Expired / nothing charged" is only ever said when checkExpiry() proves it (see src/expiry.mjs): no status anywhere
+// AND a plausible FINALIZED block height past lastValidBlockHeight, twice in a row. Anything else keeps waiting and finally says the payment may still land.
+async function waitConfirmed(conn, sig, lastValidBlockHeight, raw, readers = []) {
+  let expiredSeen = 0;
   for (let i = 0; i < 90; i++) {
     if (raw && i > 0 && i % 3 === 0) { try { await conn.sendRawTransaction(raw, { skipPreflight: true, maxRetries: 0 }); } catch {} } // re-broadcast (same signature, idempotent) until it lands or the blockhash expires
-    const st = (await conn.getSignatureStatuses([sig])).value[0];
+    let st = null; try { st = (await conn.getSignatureStatuses([sig])).value[0]; } catch {}
     if (st) { if (st.err) throw new Error('Transaction failed: ' + JSON.stringify(st.err)); if (st.confirmationStatus === 'confirmed' || st.confirmationStatus === 'finalized') return; }
-    if (lastValidBlockHeight && (await conn.getBlockHeight('confirmed')) > lastValidBlockHeight) { const again = (await conn.getSignatureStatuses([sig], { searchTransactionHistory: true })).value[0]; if (again && !again.err) return; throw new Error('Transaction expired before it landed. Nothing was charged; try again.'); }
+    if (lastValidBlockHeight) {
+      const h = await plausibleHeight(conn, Number(lastValidBlockHeight));
+      if (h !== null && h > Number(lastValidBlockHeight)) {
+        const c = await checkExpiry({ conns: [conn, ...readers], sig, lastValidBlockHeight });
+        if (c.state === 'landed') return; if (c.state === 'failed') throw new Error('Transaction failed: ' + JSON.stringify(c.err));
+        if (c.state === 'expired' && ++expiredSeen >= 2) throw Object.assign(new Error('Transaction expired before it landed. Nothing was charged; try again.'), { expired: true, sig });
+        if (c.state !== 'expired') expiredSeen = 0;
+      } else expiredSeen = 0;
+    }
     await new Promise((r) => setTimeout(r, 700));
   }
-  throw new Error('Timed out waiting for confirmation: ' + sig);
+  throw Object.assign(new Error('Still confirming; the payment may still land: ' + sig + '. Do not pay again until you have checked it on Solscan.'), { pending: true, sig });
 }
 export function createClient({ base = '/api/solana', wallet = null, fetchImpl = (...a) => fetch(...a), connection = null, origin = null } = {}) {
   let cfg = null, token = null, conn = connection; let adapter = wallet;

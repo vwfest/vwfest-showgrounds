@@ -95,6 +95,9 @@ const join = async (nick) => { const c = await client(); await c.wait('hi'); c.s
   { const fs = require('fs'); const W3A = require('../shared/w3a'); const html = fs.readFileSync(path.join(ROOT, 'docs/index.html'), 'utf8'); const meta = /Content-Security-Policy" content="([^"]+)"/.exec(html)[1];
     rec('CSP', 'medium', 'Pages meta CSP allows exactly the shared Web3Auth origins (connect-src)', W3A.every((o) => meta.split('connect-src')[1].split(';')[0].split(' ').includes(o)));
     rec('CSP', 'medium', 'no *.tor.us / *.toruslabs.com / *.metamask.io / *.web3auth.com wildcards anywhere', !/\*\.(tor\.us|toruslabs\.com|metamask\.io|web3auth\.com)/.test(meta + W3A.join(' ')));
+    { const cs = meta.split('connect-src')[1].split(';')[0].split(' '); const hosts = ['https://solana-rpc.publicnode.com', 'https://api.mainnet-beta.solana.com', 'https://api.devnet.solana.com', 'https://vwfest-showgrounds.onrender.com', 'wss://vwfest-showgrounds.onrender.com', 'https://api.coinbase.com'];
+      rec('CSP', 'high', 'Pages connect-src allows every host the client fetches: the live public RPC (publicnode), the game server (https + wss; /api/jup and /api/rpc live there), mainnet/devnet RPC, coinbase', hosts.every((h) => cs.includes(h)), 'missing: ' + hosts.filter((h) => !cs.includes(h)).join(' '));
+      const live = (() => { try { return new URL(fs.readFileSync(path.join(ROOT, 'render.yaml'), 'utf8').match(/PUBLIC_RPC_URL[^\n]*value:\s*(\S+)/)?.[1] || 'https://solana-rpc.publicnode.com').origin; } catch { return null; } })(); rec('CSP', 'high', 'the PUBLIC_RPC_URL in render.yaml (if it has a value) is in the Pages connect-src', !live || cs.includes(live)); }
     rec('CSP', 'medium', 'no *.onrender.com wildcard in the Pages CSP', !/\*\.onrender\.com/.test(meta)); }
   console.log(res.every((r) => r.ok) ? `all ${res.length} audit tests passed` : 'AUDIT TESTS FAILED');
   process.exit(process.exitCode || 0);

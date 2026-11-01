@@ -509,7 +509,8 @@ async function handle(c, m) {
       return hub.json(c, { t: 'wok', ok, pubkey: m.pubkey, why: ok ? undefined : 'Could not verify the wallet signature' });
     }
     case 'buy': { // client reports a signed+sent purchase tx; nothing is granted until the confirmed tx is verified on-chain
-      if (!p || !mint.enabled || typeof m.qid !== 'string') return;
+      if (!p || typeof m.qid !== 'string') return;
+      if (!mint.enabled) return hub.json(c, { t: 'buyres', ok: false, why: 'Purchases are switched off right now. If you already paid your payment is safe: it is credited when purchases are back on.', qid: m.qid, retry: true }); // never silent: a payment that already landed must stay replayable
       if (paused()) return hub.json(c, { t: 'buyres', ok: false, why: 'Purchases are paused for a moment while the database catches up. Your payment is safe; this retries automatically.', qid: m.qid, retry: true });
       // The quote id is signed (lib/quoteid.js): it is rebuilt from the id alone, so a restart or an evicted quote still finds it. A burn MADE WHILE the quote was live (block time <= expiry + 5 min) is honored at any later time; a burn made after that is refused (solana/ inspect).
       const q = pay.recover(m.qid, quoteUri, usdFor, p.prof.id);
