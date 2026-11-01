@@ -41,7 +41,7 @@
       { "p": "Every burn is recorded publicly. Walk to the Burn Plaza or press the 🔥 Burns button for the total $VWFEST burned and links to each transaction on Solscan so you can verify it. Payments in SOL, other tokens or by card all end the same way: the amount that is not the {devFeePct} creator fee is burned." }
     ] },
     { "id": "vendors", "icon": "🏪", "title": "Vendor booths", "blocks": [
-      { "p": "Vendor Row has {boothCount} booth plots behind the stage. Claim one by buying and burning {vendorFeeUsd} of $VWFEST. A booth stays open for {vendorDays} and can be renewed any time (renewals add {vendorDays} to what is left). There is no {discountPct} token discount on booths; paying in $VWFEST burns the full {vendorFeeUsd}, and the {devFeePct} creator fee applies only when you pay in SOL or another token." },
+      { "p": "Vendor Row has {boothCount} booth plots behind the stage. Claim one for {vendorFeeUsd}. A booth stays open for {vendorDays} and can be renewed any time (renewals add {vendorDays} to what is left). There is no {discountPct} token discount on booths; paying in $VWFEST burns the full {vendorFeeUsd} straight from your wallet; paying in SOL or another token sends {devFeePct} to the creator wallet as a fee and the other {burnPct} buys back and burns $VWFEST." },
       { "ul": ["Customize it: name, banner and logo, up to {maxProducts} product pictures, a description, a link (https only) and tent style and colors.", "Visitors walk up to your booth to see the panel. Links open only after a 'you are leaving the site' warning.", "Images must be JPEGs under {imgKb} KB (the game shrinks them for you). Reports from {reportsToHide} different players hide a booth until a moderator reviews it.", "Vendors are independent and fully responsible for what they sell and say. VW FEST does not sell, endorse or guarantee anything on Vendor Row. Buy at your own risk and never send your seed phrase to anyone."] }
     ] },
     { "id": "pay", "icon": "💳", "title": "Paying by card, Google or your own wallet", "blocks": [
@@ -56,7 +56,7 @@
     ] },
     { "id": "faq", "icon": "❓", "title": "FAQ", "blocks": [
       { "q": "Do I need a wallet to play?", "a": "No. Walking around, chat, voice and the arcade are free. You only need a wallet to buy things." },
-      { "q": "Where does my payment go?", "a": "The part that is not the creator fee is swapped for $VWFEST and burned in the same transaction you sign: {avatarBurnPct} for avatar mints and for $VWFEST payments, {burnPct} for SOL or token payments in the shop, rides and booths." },
+      { "q": "Where does my payment go?", "a": "The part that is not the creator fee is swapped for $VWFEST and burned in the same transaction you sign: {avatarBurnPct} for avatar mints, mystery rides and $VWFEST payments, {burnPct} for SOL or token payments in the shop and for booths." },
       { "q": "Why can't I use my avatar?", "a": "Avatars are unique. If someone minted the exact same look it is locked to them; change one trait in the editor." },
       { "q": "Why is a purchase disabled?", "a": "Purchases are switched on by the team once everything is ready. When off, everything else still works." },
       { "q": "How many people fit?", "a": "{maxPlayers} at a time. If the grounds are full you will see a waiting screen; try again in a minute." },
