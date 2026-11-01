@@ -22,7 +22,8 @@
     "test:nft": "node test/nft.cjs",
     "test:credentials": "node test/credentials.cjs",
     "test:realtime": "node test/realtime.cjs",
-    "test:ui": "node test/ui.cjs"
+    "test:ui": "node test/ui.cjs",
+    "test:localnet": "bash scripts/qa-localnet.sh"
   },
   "dependencies": {
     "compression": "^1.8.2",
