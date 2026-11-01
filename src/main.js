@@ -7,6 +7,7 @@ import { carFor, avatarCarSpec, rideSpec, hydraulics, PLATE_UNI } from './cars.j
 import { Net, decodeSnapshot } from './net.js';
 import { setRpcToken, onRpcRefresh, clearRpcToken } from './rpc.mjs';
 import { rejoinDelay } from './rejoin.mjs';
+import { JoinFlow } from './joinflow.mjs';
 import { Voice } from './voice.js';
 import { $, h, clear, modal, toast, fmt } from './dom.js';
 import { buildQuiz, defaultQuiz, buildEditor } from './editor.js';
@@ -15,6 +16,7 @@ import * as V from './vendors.js';
 import { walkAngle, walkDir } from './move.mjs';
 import { attachNft, animateNft } from './nftgfx.js';
 import { nftAvatarModal } from './nftui.js';
+import { recoverModal } from './recover.js';
 import { DjClient } from './dj.js';
 import { mountChip, djModal } from './djui.js';
 import { FIELDS, VIBES, DEFAULT } from '../shared/traits.js';
@@ -41,7 +43,7 @@ addEventListener('pointerdown', () => dj.unlock(), { once: true }); addEventList
 function hype() { if (!joined) return; doEmote(4); dj.hype(); }
 const on = (t, f) => { const prev = net.on[t]; net.on[t] = (m) => { if (prev) prev(m); f(m); }; };
 // resolve waiters
-for (const t of ['quote', 'quoteerr', 'buyres', 'wchal', 'wok', 'nfts', 'nftres']) on(t, (m) => { const w = waiters[t]; if (w && w.length) { waiters[t] = []; w.forEach((f) => f(m)); } });
+for (const t of ['quote', 'quoteerr', 'buyres', 'wchal', 'wok', 'nfts', 'nftres', 'rchal', 'rres', 'rcred']) on(t, (m) => { const w = waiters[t]; if (w && w.length) { waiters[t] = []; w.forEach((f) => f(m)); } });
 
 // ---------- renderer / scene ----------
 let gfx = null;
@@ -211,16 +213,16 @@ function bindChat() {
 // ---------- net events ----------
 function bindNet() {
   on('hi', (m) => { state.online = m.online; state.cap = m.cap; state.burns = m.burns; if (world) world.drawBurn(m.burns); hud(); });
-  on('full', (m) => { joinDone(); showFull(m); });
-  let rejoinTries = 0; on('joinerr', (m) => { joinDone(); const d = rejoinDelay(m, rejoinTries); if (d !== null && net.lastJoin) { rejoinTries++; joinMsg('Reconnecting…'); const j = net.lastJoin; setTimeout(() => { if (!joined && net.open) net.json(j); }, d); return; } if (m.err === 'stale') { localStorage.removeItem('vwfest-sg'); state.creds = null; showJoin(true); } joinMsg(m.why || 'Could not join', true); if (['badnick', 'taken'].includes(m.err)) nickProblem(); });
-  on('welcome', (m) => { joinDone(); rejoinTries = 0; setRpcToken(m.rpcToken); onWelcome(m); setTimeout(() => UI.resumePurchases(ctx).catch(() => {}), 2500); if (voice && voice.on) voice.optIn(); });
-  on('rpctok', (m) => setRpcToken(m.rpcToken)); onRpcRefresh(() => { if (net.open && joined) net.json({ t: 'rpctok' }); });
+  on('full', (m) => { joinFlow.done(); showFull(m); });
+  let rejoinTries = 0; on('joinerr', (m) => { const d = rejoinDelay(m, rejoinTries); if (d !== null && joinFlow.pending) { rejoinTries++; joinFlow.retryIn(d); return; } joinFlow.done(); rejoinTries = 0; if (m.err === 'stale') { localStorage.removeItem('vwfest-sg'); state.creds = null; showJoin(true); } joinMsg(m.why || 'Could not join', true); if (['badnick', 'taken'].includes(m.err)) nickProblem(); });
+  on('welcome', (m) => { joinFlow.done(); rejoinTries = 0; setRpcToken(m.rpcToken); onWelcome(m); setTimeout(() => UI.resumePurchases(ctx).catch(() => {}), 2500); if (voice && voice.on) voice.optIn(); });
+  on('rpctok', (m) => setRpcToken(m.rpcToken)); onRpcRefresh(() => { if (net.ready && joined) net.json({ t: 'rpctok' }); });
   on('p+', (m) => { if (!state.me || m.id === state.me.id && !joined) return; updateInfo(m); });
   on('p-', (m) => { state.roster.delete(m.id); const e = players.get(m.id); if (e) { scene.remove(e.person.root); scene.remove(e.car); players.delete(m.id); } const pk = parked.get(m.id); if (pk) { scene.remove(pk); parked.delete(m.id); } if (voice) voice.drop(m.id, true); });
   on('dj', (m) => dj.onState(m)); on('djh', () => { if (world.stage) world.stage.fx.flash = 1; });
   on('bin', (dv) => { if (dv.getUint8(0) === 4) return dj.onMicPacket(dv); const snap = decodeSnapshot(dv); const seen = new Set(); for (const s of snap.list) { seen.add(s.id); let e = players.get(s.id); if (!e) { const info = state.roster.get(s.id); if (!info) continue; e = spawnEntity(info); e.x = s.x; e.y = s.y; e.z = s.z; e.yaw = s.yaw; players.set(s.id, e); } e.tx = s.x; e.ty = s.y; e.tz = s.z; e.tyaw = s.yaw; e.flags = s.flags; } if (snap.key) for (const [id, e] of players) if (!seen.has(id)) { scene.remove(e.person.root); scene.remove(e.car); players.delete(id); } });
   on('chat', (m) => { addChat(m); const e = m.id === state.me.id ? me3 : players.get(m.id); if (e && !(voice && voice.isBlocked(e.key))) say(e, m.text); });
-  on('sys', (m) => { state.online = m.online; hud(); if (m.kind !== 'leave') addChat({ text: m.text, kind: m.kind }); });
+  let lastSys = { text: '', at: 0 }; on('sys', (m) => { state.online = m.online; hud(); if (m.kind === 'leave') return; const now = Date.now(); if (m.kind === 'join' && m.text === lastSys.text && now - lastSys.at < 15000) return; lastSys = { text: m.text, at: now }; addChat({ text: m.text, kind: m.kind }); }); // the same "X arrived" twice in a row (reconnect / second tab) is shown once
   on('chaterr', (m) => toast(m.why)); on('toast', (m) => toast(m.text));
   on('emote', (m) => { const e = m.id === state.me.id ? null : players.get(m.id); if (e) { e.emote = m.e; e.emoteT = 0; } });
   on('nft', (m) => { const nf = m.nf || null; const rec = m.id === state.me.id ? state.me : state.roster.get(m.id); if (rec) rec.nf = nf; const e = m.id === state.me.id ? me3 : players.get(m.id); if (e) { e.nf = nf; build(e); } });
@@ -234,8 +236,9 @@ function bindNet() {
   on('profile', (m) => UI.profileCardModal(ctx, m));
   on('avres', (m) => { /* handled by editor promise */ if (waiters.avres) { const w = waiters.avres; waiters.avres = []; w.forEach((f) => f(m)); } });
   on('rtc', (m) => { if (voice) voice.onSignal(m, players, { x: L.x, z: L.z, id: state.me.id }); });
-  on('close', (m) => { clearRpcToken(); if (!joined && !pendingJoin && !m.was && !net.noReconnect) { const e = $('#msgjoin'); if (e && !e.textContent) joinMsg('The server is not answering yet. Retrying…'); } if (joined && !net.noReconnect) { joinMsg('Connection lost, reconnecting…', true); joined = false; $('#hudwrap').classList.add('dim'); } });
-  on('open', () => { if (pendingJoin) { const j = pendingJoin; pendingJoin = null; clearTimeout(joinWatch); joinMsg('Connecting…'); net.json(j); return; } if (state.me && state.creds && !joined) { net.json({ t: 'join', id: state.creds.id, secret: state.creds.secret, nick: state.creds.nick }); } });
+  on('close', (m) => { clearRpcToken(); if (joined && !net.noReconnect) { joined = false; $('#hudwrap').classList.add('dim'); if (state.creds && state.creds.id) joinFlow.start({ t: 'join', id: state.creds.id, secret: state.creds.secret, nick: state.creds.nick }, { quiet: true }); else joinMsg('Connection lost, reconnecting…', true); }
+    if (!net.noReconnect) joinFlow.onClose(); });
+  on('open', () => joinFlow.onOpen());
 }
 function onWelcome(m) {
   if (m.cred) { state.creds = { id: m.cred.id, secret: m.cred.secret, nick: m.nick }; try { localStorage.setItem('vwfest-sg', JSON.stringify(state.creds)); } catch {} }
@@ -246,7 +249,7 @@ function onWelcome(m) {
   for (const r of m.roster) { if (r.pk) setParked(r); }
   const mine = m.inv.rides.find((r) => r.id === m.inv.ride); if (mine) { me3.rd = mine.spec; build(me3); }
   world.setShowroom(m.inv.rides.map((r) => ({ spec: r.spec })));
-  for (const c of m.chat) addChat(c); joined = true; state.online = m.online; hud(); $('#join').classList.add('hidden'); $('#hudwrap').classList.remove('dim'); $('#hudwrap').classList.remove('hidden'); $('#msgjoin').textContent = '';
+  clear($('#chatlog')); for (const c of m.chat) addChat(c); joined = true; state.online = m.online; hud(); $('#join').classList.add('hidden'); $('#hudwrap').classList.remove('dim'); $('#hudwrap').classList.remove('hidden'); $('#msgjoin').textContent = '';
   setupEmoteBar(); updateVoiceHud(); toast(m.created ? `Welcome, ${m.nick}! Your profile ID is ${m.pid}.` : `Welcome back, ${m.nick}!`);
   if (!localStorage.getItem('sg-help')) { localStorage.setItem('sg-help', '1'); helpModal(); }
 }
@@ -255,17 +258,16 @@ function setupEmoteBar() { const v = VIBES[state.me.av.vibe] || VIBES[0]; const 
 // ---------- screens ----------
 function hud() { $('#online').textContent = `${state.online}/${state.cap} online`; }
 function joinMsg(t, bad) { const e = $('#msgjoin'); if (!e) return; e.textContent = t; e.className = 'msg' + (bad ? ' bad' : ''); }
-// A join that is clicked while the socket is not open yet (server asleep on free hosting, or down) used to be dropped silently, leaving "Connecting…" forever.
-// Now it is held and sent the moment the socket opens, with honest progress text while we wait.
-let pendingJoin = null, joinWatch = 0, nickEl = null;
-function sendJoin(msg) {
-  pendingJoin = msg; clearTimeout(joinWatch);
-  if (net.open) { pendingJoin = null; joinMsg('Connecting…'); net.json(msg); return; }
-  joinMsg('Reaching the server…');
-  joinWatch = setTimeout(() => { if (!pendingJoin) return; joinMsg('The server is waking up (free hosting can take up to a minute). Hang tight: you will join automatically.');
-    joinWatch = setTimeout(() => { if (pendingJoin) joinMsg("Still can't reach the server. We keep retrying in the background. You can also try again in a minute.", true); }, 45000); }, 4000);
-}
-function joinDone() { pendingJoin = null; clearTimeout(joinWatch); }
+// Join handshake (src/joinflow.mjs): the join is held until the server answers, re-sent on every new socket, retried with a fresh connection when
+// there is no answer, and ends in a clear error + "Try again" button instead of "Connecting…" forever.
+let nickEl = null;
+const JOIN_TEXT = { reaching: ['Reaching the server…'], reconnecting: ['Connection lost, reconnecting…', true], connecting: ['Connecting…'], retrying: ['Still connecting… retrying with a fresh connection.'], cooldown: ['Reconnecting…'],
+  waking: ['The server is waking up (free hosting can take up to a minute). Hang tight: you will join automatically.'], unreachable: ["Still can't reach the server. We keep retrying in the background. You can also try again in a minute.", true] };
+const joinFlow = new JoinFlow(net, { status: (k) => {
+  if (k === 'failed') { joinMsg('The server did not answer. Check your connection and try again.', true); const e = $('#msgjoin'); if (e) e.append(' ', h('button', { class: 'btn', text: 'Try again', onclick: () => joinFlow.retry() })); return; }
+  const t = JOIN_TEXT[k]; if (t) joinMsg(t[0], t[1]); } });
+function sendJoin(msg) { joinFlow.start(msg); }
+function onRecovered(cred) { state.creds = cred; try { localStorage.setItem('vwfest-sg', JSON.stringify(cred)); } catch {} showJoin(false); sendJoin({ t: 'join', id: cred.id, secret: cred.secret, nick: cred.nick }); }
 function nickProblem() { if (nickEl && nickEl.isConnected) { nickEl.scrollIntoView({ block: 'center', behavior: 'smooth' }); nickEl.focus({ preventScroll: true }); nickEl.select(); } }
 function showFull(m) { net.noReconnect = true; const j = $('#join'); j.classList.remove('hidden'); clear($('#joinbody')).append(h('div', { class: 'full' }, h('h2', { text: '🚐 The grounds are full' }), h('p', { text: `${m.online} of ${m.cap} people are here right now. We will keep trying for you.` }), h('button', { class: 'btn primary', text: 'Try again now', onclick: () => location.reload() }), h('p', { class: 'muted', text: 'Meanwhile: the Arcade Room games are always open.' }), h('a', { class: 'btn', href: 'https://vwfest.github.io/vwfest-arcade/', text: '🎮 Arcade Room' }))); setTimeout(() => location.reload(), 20000); }
 function showKicked(why) { const j = $('#join'); j.classList.remove('hidden'); clear($('#joinbody')).append(h('div', { class: 'full' }, h('h2', { text: 'You left the grounds' }), h('p', { text: why || '' }), h('button', { class: 'btn primary', text: 'Rejoin', onclick: () => location.reload() }))); }
@@ -274,11 +276,11 @@ function showJoin(forceNew) {
   const status = h('p', { id: 'msgjoin', class: 'msg' });
   if (saved && saved.id && !forceNew) { state.creds = saved; body.append(h('h2', { text: `Welcome back, ${saved.nick}` }), h('p', { class: 'muted', text: `Profile ${saved.id}` }), h('div', { class: 'row' }, h('button', { class: 'btn primary big', text: '▶ Enter the grounds', onclick: () => { sendJoin({ t: 'join', id: saved.id, secret: saved.secret, nick: saved.nick }); } }), h('button', { class: 'btn', text: 'New profile', onclick: () => showJoin(true) })), status); return; }
   const quiz = defaultQuiz(); const nick = h('input', { type: 'text', maxlength: 14, placeholder: 'Your nickname (3-14 letters, numbers, space _ -)', autocomplete: 'off', autocapitalize: 'words', spellcheck: 'false', 'aria-label': 'Nickname', value: forceNew ? '' : (saved && saved.nick) || '' }); nickEl = nick; // 'New profile' must start EMPTY: a prefilled old name made typing append to it and the 14-char limit silently cut the new name (ShotBot -> ShotBo)
-  nick.addEventListener('focus', () => nick.select());
+  { let typed = false; nick.addEventListener('input', () => { typed = true; }); nick.addEventListener('focus', () => { if (!typed && nick.value) nick.select(); }); } // select-on-focus only for an untouched prefilled name: on a slow device focus can fire AFTER the first keystrokes, and selecting then made the next key replace them (truncated nicknames)
   body.append(h('h2', { text: 'Create your profile' }), h('p', { class: 'muted', text: 'Free, no sign-up. Answer a few questions and we will build your one-of-a-kind avatar (fine details like freckles, tattoos and your outfit are rolled from your profile ID). You can customize everything afterwards.' }), nick);
   const qz = h('div', { class: 'quizwrap' }); body.append(qz); buildQuiz(qz, quiz);
   const go = h('button', { class: 'btn primary big', text: '▶ Create profile & enter', onclick: () => { const n = nick.value.trim(); if (n.length < 3) { joinMsg('Pick a nickname first (3-14 characters).', true); return nickProblem(); } state.creds = { nick: n }; sendJoin({ t: 'join', nick: n, quiz }); } });
-  body.append(h('div', { class: 'row' }, go, saved ? h('button', { class: 'btn', text: 'Use saved profile', onclick: () => showJoin(false) }) : null), status);
+  body.append(h('div', { class: 'row' }, go, saved ? h('button', { class: 'btn', text: 'Use saved profile', onclick: () => showJoin(false) }) : null, h('button', { class: 'btn', text: '🔑 Lost your profile? Recover with wallet', onclick: () => recoverModal(ctx, onRecovered) })), status);
 }
 function openEditor() {
   const body = h('div', { class: 'editor' }); const sig = state.me.av;
