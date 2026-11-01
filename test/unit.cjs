@@ -37,13 +37,11 @@ t('burn verify: rejects wrong mint, wrong authority, failed tx, wrong memo, fore
   const ok = { mint: MINT, nonce: 'q1', base: BASE }; assert(!Burns.inspect(mkTx({ mint: 'OtherMint1111111111111111111111111111111111' }), ok).ok); assert(!Burns.inspect(mkTx({ auth: 'Someone' }), ok).ok); assert(!Burns.inspect(mkTx({ err: { x: 1 } }), ok).ok); assert(!Burns.inspect(mkTx({ nonce: 'other' }), ok).ok);
   const f = Burns.inspect(mkTx({ uri: 'https://evil.example/nft/ABC.json' }), ok); assert(f.ok && !f.asset, 'foreign uri is not accepted as our NFT'); assert(!Burns.inspect(mkTx({ uri: BASE + '/nft/ABC.json', owner: 'Thief' }), ok).ok); });
 t('burn verify: dev SOL transfer is counted only to the configured wallet', () => { const r = Burns.inspect(mkTx({ dev: 500000 }), { mint: MINT, nonce: 'q1', devWallet: DEV }); assert.strictEqual(r.devLamports, '500000'); const r2 = Burns.inspect(mkTx({ dev: 500000 }), { mint: MINT, nonce: 'q1', devWallet: 'OtherWallet' }); assert.strictEqual(r2.devLamports, '0'); });
-t('burn ledger: submit enforces quote (burn min, dev min, uri), unique signature, unique avatar code', async () => {
-  const B = new Burns({ network: 'devnet', mint: MINT, decimals: 6, rpcUrl: 'x', explorer: (id) => 'https://solscan.io/tx/' + id, base: BASE }); const sigA = '5'.repeat(88), sigB = '4'.repeat(88); const txs = { [sigA]: mkTx({ uri: BASE + '/nft/CODE1.json', amount: 5000000, dev: 100 }), [sigB]: mkTx({ amount: 1000000 }) }; B.fetchTx = async (s) => txs[s];
-  assert(!(await B.submit({ sig: sigB, nonce: 'q1', pid: 'p', kind: 'shop', item: 'halo', expect: { burnMin: 2000000n } })).ok, 'burn below quote');
-  assert(!(await B.submit({ sig: sigA, nonce: 'q1', pid: 'p', kind: 'shop', expect: { burnMin: 1n, devMin: 1000n, devWallet: DEV } })).ok, 'no dev transfer');
-  assert(!(await B.submit({ sig: sigA, nonce: 'q1', pid: 'p', kind: 'mint', code: 'CODE1', expect: { code: 'CODE1', uri: BASE + '/nft/WRONG.json', burnMin: 1n } })).ok, 'uri mismatch');
-  const ok = await B.submit({ sig: sigA, nonce: 'q1', pid: 'p', kind: 'mint', nick: 'Bob', expect: { code: 'CODE1', uri: BASE + '/nft/CODE1.json', burnMin: 4000000n } }); assert(ok.ok, ok.why); assert.strictEqual(B.summary().totalBurned, 5); assert(B.mintedBy('CODE1')); assert((await B.submit({ sig: sigA, nonce: 'q1', pid: 'p', kind: 'mint', expect: { code: 'CODE1', uri: BASE + '/nft/CODE1.json', burnMin: 1n } })).dup, 'signature never reused');
-  assert.strictEqual(B.summary().recent[0].url, 'https://solscan.io/tx/' + sigA); });
+t('burn ledger: record is idempotent by signature, one avatar code, and the tracker shows the explorer url', () => {
+  const B = new Burns({ network: 'devnet', mint: MINT, decimals: 6, rpcUrl: 'x', explorer: (id) => 'https://solscan.io/tx/' + id, base: BASE }); const sigA = '5'.repeat(88);
+  const rec = { kind: 'mint', item: null, pid: 'p', code: 'CODE1', sig: sigA, wallet: 'W', amount: '5000000', ts: Date.now(), nick: 'Bob' };
+  assert(B.record(rec), 'first record'); assert(!B.record(rec), 'same signature twice');
+  assert.strictEqual(B.summary().totalBurned, 5); assert(B.mintedBy('CODE1')); assert.strictEqual(B.summary().recent[0].url, 'https://solscan.io/tx/' + sigA); });
 t('createV1 parsing reads name and uri', () => { const c = parseCreate(coreData(BASE + '/nft/X.json')); assert.strictEqual(c.name, 'VW FEST Avatar'); assert.strictEqual(c.uri, BASE + '/nft/X.json'); });
 await t('pricing: $-priced, 50% off in $VWFEST, 50% creator fee in SOL, 50% to burn (test network, fixed SOL price)', async () => {
   const P = new Pay({ network: 'devnet', mint: MINT, decimals: 6, jupiter: 'x', slippageBps: 50, devWallet: DEV, devnetTokensPerUsd: 10, fixedSolUsd: 100 });

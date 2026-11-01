@@ -5,7 +5,8 @@ import { VIBES, NAMES, DEFAULT } from '../shared/traits.js';
 import RIDES from '../shared/rides.js';
 import { framed, FRAME_MSG, openDirect } from './frame.js';
 import { pendingStore, replay } from './pending.mjs';
-const store = () => { try { return pendingStore(localStorage); } catch { return pendingStore({ getItem: () => null, setItem: () => { throw new Error('no storage'); } }); } };
+let pendingPid = ''; // the joined profile (set from ctx on purchase / resume)
+const store = () => { try { return pendingStore(localStorage, { pid: pendingPid }); } catch { return pendingStore({ getItem: () => null, setItem: () => { throw new Error('no storage'); } }, { pid: pendingPid }); } };
 
 export const packAv = (av, FIELDS) => { const b = FIELDS.map((k) => av[k]); let s = ''; for (const x of b) s += String.fromCharCode(x); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); };
 const solscan = (cfg, id, kind = 'tx') => (cfg.network === 'localnet' ? null : `https://solscan.io/${kind}/${id}${cfg.network === 'devnet' ? '?cluster=devnet' : ''}`);
@@ -107,6 +108,7 @@ export const waitFor = (ctx, type, ms = 20000) => { let cancel; const p = new Pr
 // First of several message types; the losing waiters are removed so they cannot swallow the NEXT message of their type.
 export const waitAny = async (ctx, types, ms = 20000) => { const ps = types.map((t) => waitFor(ctx, t, ms)); try { return await Promise.race(ps); } finally { ps.forEach((p) => p.cancel()); } };
 export async function purchaseFlow(ctx, kind, opts) {
+  pendingPid = (ctx.state.me && ctx.state.me.pid) || '';
   if (framed) { toast('⚠ ' + FRAME_MSG); openDirect(); return; } // framed pages never show wallet / pay UI (clickjacking)
   const { cfg } = ctx; const body = h('div', { class: 'buy' }); const m = modal(opts.title || 'Purchase', body, { sticky: true });
   const say = (t, cls) => { clear(body); body.append(h('p', { class: cls || '', text: t })); };
@@ -124,7 +126,8 @@ export async function purchaseFlow(ctx, kind, opts) {
       else if (payTok) { lines.push([`Pay with ${payTok.sym} (≈ $${q.paidUsd.toFixed(2)})`, prep ? `up to ${fmt(Number(prep.swapInfo.maxIn) / 10 ** payTok.dec, 4)} ${payTok.sym}` : `≈ $${(q.paidUsd * (1 - q.devPct / 100)).toFixed(2)} of ${payTok.sym}`, 'hl'], [`↳ swapped to $VWFEST via Jupiter and burned`, `≈ ${fmt(q.burnUi * 0.995, 2)} $VWFEST 🔥`]); if (BigInt(q.devLamports) > 0n) lines.push([`↳ ${q.devPct}% creator fee (SOL) to the creator wallet (full address below)`, `${fmt(Number(BigInt(q.devLamports)) / 1e9, 4)} SOL`]); }
       else { lines.push([`Pay in SOL (SOL = $${solUsd.toFixed(2)})`, `${fmt(Number(tot) / 1e9, 4)} SOL`, 'hl']); const sw = Number(swapL(prep)) / 1e9; if (q.swap) lines.push([`↳ ${fmt(sw, 4)} SOL swapped to $VWFEST via Jupiter and burned`, `≈ ${fmt(Number(prep ? prep.swapInfo.minOut : BigInt(q.burnMin)) / 10 ** cfg.decimals, 2)}+ $VWFEST 🔥`]); else lines.push([`↳ ${cfg.network} test mode: burns test tokens you hold`, `${fmt(q.burnUi, 2)} 🔥`]); if (BigInt(q.devLamports) > 0n) lines.push([`↳ ${q.devPct}% creator fee (SOL) to the creator wallet (full address below)`, `${fmt(Number(BigInt(q.devLamports)) / 1e9, 4)} SOL`]); else lines.push(['↳ 100% goes to buying back & burning $VWFEST', '']); }
       if (prep && prep.spentLamports !== null) { const net = prep.spentLamports - (q.method === 'sol' && !payTok ? tot : 0n); lines.push(['Network fees' + (q.uri ? ' + NFT account rent' : ''), `≈ ${fmt(Number(net) / 1e9, 5)} SOL`]); lines.push(['Total leaving your wallet', `≈ ${fmt(Number(prep.spentLamports) / 1e9, 4)} SOL` + (q.method === 'vwfest' ? ` + ${fmt(q.burnUi, 2)} $VWFEST` : ''), 'hl']); }
-      if (!prep && q.method === 'sol' && q.swap && cfg.payTokens && cfg.payTokens.length) { const sel = h('select', { class: 'sel', 'aria-label': 'Pay with' }, h('option', { value: '', text: 'Pay with: SOL' }), ...cfg.payTokens.map((t) => h('option', { value: t.mint, text: 'Pay with: ' + t.sym }))); sel.value = payTok ? payTok.mint : ''; sel.onchange = () => { payTok = cfg.payTokens.find((t) => t.mint === sel.value) || null; draw(null); }; body.append(sel); }
+      if (!prep && q.method === 'sol' && q.swap && kind === 'shop' && cfg.payTokens && cfg.payTokens.length) { // SPL pay is shop-only: avatar/ride NFT mints (temp account + createV1 + memo) overrun the 1232-byte packet
+       const sel = h('select', { class: 'sel', 'aria-label': 'Pay with' }, h('option', { value: '', text: 'Pay with: SOL' }), ...cfg.payTokens.map((t) => h('option', { value: t.mint, text: 'Pay with: ' + t.sym }))); sel.value = payTok ? payTok.mint : ''; sel.onchange = () => { payTok = cfg.payTokens.find((t) => t.mint === sel.value) || null; draw(null); }; body.append(sel); }
       body.append(...rows(lines));
       if (q.devWallet && BigInt(q.devLamports || 0) > 0n) { const cb = h('button', { class: 'chip', text: 'Copy', 'aria-label': 'Copy creator wallet address' }); cb.onclick = () => copy(q.devWallet, cb); body.append(h('div', { class: 'brow addr' }, h('span', { text: 'Creator-fee wallet (full address, compare before you sign)' }), h('code', { text: q.devWallet }), cb)); }
       if (q.commit) body.append(h('p', { class: 'small mono', text: `Randomness commitment (SHA-256 of secret seed):\n${q.commit}` }), h('p', { class: 'small muted', text: 'Your ride is rolled from this seed + your transaction signature, so it cannot be rigged. The seed is revealed after minting.' }));
@@ -212,6 +215,7 @@ export async function entryModal(ctx, o = {}) {
 // ---------- finish purchases that were paid but never credited (closed tab, crash, restart, flaky connection) ----------
 let resuming = false;
 export async function resumePurchases(ctx) {
+  pendingPid = (ctx.state.me && ctx.state.me.pid) || '';
   const ps = store(); if (resuming || !ps.list().length || !ctx.cfg.enabled) return; resuming = true;
   try {
     for (let round = 0; round < 6; round++) {
