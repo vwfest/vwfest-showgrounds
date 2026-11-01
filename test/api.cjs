@@ -1,5 +1,5 @@
 // In-process API tests: vendor booths (grant rules, editing, moderation, images, admin) and the Info Booth guide.
-process.env.SERVER_SECRET = 'api-secret'; process.env.ADMIN_SECRET = 'admin-secret-0123456789'; process.env.PORT = '3198'; process.env.VENDOR_BOOTHS = '8'; process.env.MINT_NETWORK = 'devnet'; process.env.VENDOR_RATE_LIMIT = '1000';
+process.env.SERVER_SECRET = 'api-secret'; process.env.ADMIN_SECRET = 'admin-secret-0123456789'; process.env.PORT = '3198'; process.env.REPORT_MIN_AGE_MS = '0';  process.env.VENDOR_BOOTHS = '8'; process.env.MINT_NETWORK = 'devnet'; process.env.VENDOR_RATE_LIMIT = '1000';
 const assert = require('assert'); const crypto = require('crypto'); const S = require('../server.js');
 const BASE = 'http://127.0.0.1:3198', H = { origin: BASE, 'content-type': 'application/json' };
 const jpeg = (w, h, pad = 300) => { const sof = Buffer.from([0xff, 0xc0, 0, 17, 8, h >> 8, h & 255, w >> 8, w & 255, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1]); return Buffer.concat([Buffer.from([0xff, 0xd8]), Buffer.from([0xff, 0xe0, 0, 4, 0, 0]), sof, crypto.randomBytes(pad), Buffer.from([0xff, 0xd9])]); };

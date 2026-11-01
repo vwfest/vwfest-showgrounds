@@ -130,7 +130,7 @@ app.get('/api/status', (req, res) => {
   const s = hub.stats; res.set('Cache-Control', 'public, max-age=3').json({ ok: true, profiles: profiles.size, rides: rides.byId.size, online: hub.size, cap: cfg.maxPlayers, full: hub.size >= cfg.maxPlayers, uptime: Math.round(process.uptime()), burned: burns.summary(0).totalBurned,
     perf: { cpu: process.cpuUsage(), rss: mem0(), tx: s.tx, rx: s.rx, snaps: s.snaps, avgTickMs: s.ticks ? s.tickMsSum / s.ticks : 0, rejectedMoves: s.rejectedMoves, kicks: s.kicks } });
 });
-app.get('/api/burns', (req, res) => res.set('Cache-Control', 'public, max-age=5').json({ ok: true, ...burns.summary(Math.min(+req.query.limit || 15, 50)) }));
+app.get('/api/burns', (req, res) => res.set('Cache-Control', 'public, max-age=5').json({ ok: true, ...burns.summary(Math.min(Math.max(1, Math.floor(+req.query.limit) || 15), 50)) }));
 // Public STUN only goes out to everyone. TURN is a paid relay: its credentials are minted per session (short-lived HMAC, coturn use-auth-secret) and only after the player opts in to voice.
 // There is NO static shared TURN user/password any more (TURN_USERNAME/TURN_CREDENTIAL are ignored): set TURN_URL + TURN_SECRET.
 const STUN = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
@@ -160,6 +160,8 @@ app.get('/api/guide', (req, res) => {
   res.set('Cache-Control', 'public, max-age=30').json({ ok: true, sections: g.sections, changelog: guide.changelog(guideSrc.md, v), values: v, enabled: mint.enabled, network: mint.network });
 });
 // ---- Vendor Row ----
+// weight of a booth report: brand-new accounts count 0, established accounts 1, accounts with a minted avatar/ride badge 2
+const reportWeight = (prof) => (burns.forProfile(prof.id).length > 0 || rides.forProfile(prof.id).length > 0 ? 2 : Date.now() - (prof.created || 0) >= num(process.env.REPORT_MIN_AGE_MS, 24 * 3600e3) ? 1 : 0);
 const vauth = (b) => { if (!b || typeof b.id !== 'string' || typeof b.secret !== 'string') return null; return profiles.login(b.id, b.secret); };
 const vLimit = rateLimit({ windowMs: 60e3, limit: num(process.env.VENDOR_RATE_LIMIT, 20), standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests' } });
 const vOrigin = (req, res, next) => { const o = req.get('origin'); if (!o || !ORIGINS.has(o)) return res.status(403).json({ error: 'forbidden' }); next(); };
@@ -181,8 +183,8 @@ app.post('/api/vendor/save', vLimit, vOrigin, express.json({ limit: '8kb' }), as
 });
 app.post('/api/vendor/mine', vLimit, vOrigin, express.json({ limit: '1kb' }), (req, res) => { const p = vauth(req.body); if (!p) return res.status(401).json({ ok: false }); res.set('Cache-Control', 'no-store').json({ ok: true, mine: vendors.mine(p.id) }); });
 app.post('/api/vendor/report', vLimit, vOrigin, express.json({ limit: '1kb' }), async (req, res) => {
-  const p = vauth(req.body); if (!p) return res.status(401).json({ ok: false, why: 'Please sign in again.' }); const r = vendors.report(p.id, req.body.plot); if (!r.ok) return res.status(400).json(r);
-  console.warn(`[vendor] report plot ${req.body.plot} by ${p.id} (${r.count} total${r.auto ? ', AUTO-HIDDEN' : ''})`); await vendors.save(r.booth); if (r.auto) broadcastVendors(); res.json({ ok: true });
+  const p = vauth(req.body); if (!p) return res.status(401).json({ ok: false, why: 'Please sign in again.' }); const r = vendors.report(p.id, req.body.plot, reportWeight(p)); if (!r.ok) return res.status(400).json(r);
+  console.warn(`[vendor] report plot ${req.body.plot} by ${p.id} (${r.count} total, weighted ${r.score}${r.auto ? ', AUTO-HIDDEN' : ''})`); await vendors.save(r.booth); if (r.auto) broadcastVendors(); res.json({ ok: true });
 });
 // Moderation API. Disabled unless ADMIN_SECRET (>= 16 chars) is set. Send it in the x-admin-secret header.
 const sha = (x) => crypto.createHash('sha256').update(String(x)).digest(); // compare fixed-length digests: no length leak
@@ -217,6 +219,8 @@ app.post('/api/admin/vendors/:plot', adminLimit, adminAuth, express.json({ limit
 // Public/anonymous callers get 401 and use PUBLIC_RPC_URL directly (the client falls back to it). Budgets: per session, per IP and global; batches and getMultipleAccounts key counts are capped (lib/rpcguard.js).
 const { RpcGuard } = require('./lib/rpcguard');
 const rpcGuard = new RpcGuard({ ttlSec: num(process.env.RPC_TOKEN_TTL_SEC, 600), perSession: num(process.env.RPC_SESSION_PER_MIN, 60), perIp: num(process.env.RPC_IP_PER_MIN, 120), global: num(process.env.RPC_GLOBAL_PER_MIN, 3000), maxBatch: num(process.env.RPC_MAX_BATCH, 5), maxKeys: num(process.env.RPC_MAX_ACCOUNTS, 25) });
+const hasProof = (p) => { if (!p.proven) return false; const now = Date.now(); for (const exp of p.proven.values()) if (exp > now) return true; return false; };
+const joinedAt = new Map(); // profile id -> last successful join
 const budgets = new Map(); // (profile creation etc.)
 const budget = (key, limit, windowMs = 60e3) => { const now = Date.now(); const a = (budgets.get(key) || []).filter((t) => now - t < windowMs); if (a.length >= limit) { budgets.set(key, a); return false; } a.push(now); budgets.set(key, a); return true; };
 setInterval(() => { const now = Date.now(); for (const [k, a] of budgets) if (!a.length || now - a[a.length - 1] > 120e3) budgets.delete(k); }, 60e3).unref();
@@ -275,6 +279,12 @@ app.use((req, res) => res.status(404).type('text').send('Not found'));
 const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true, maxPayload: 6144, perMessageDeflate: false });
 const ipOf = (req) => String(clientIp(req) || '?').slice(0, 64);
+// Final Express error handler: a thrown route error or a bad JSON body answers with a short JSON error (never a stack trace, never an HTML page) and is logged once.
+app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
+  const status = err && Number.isInteger(err.status) && err.status >= 400 && err.status < 600 ? err.status : err && err.type === 'entity.too.large' ? 413 : 500;
+  if (status >= 500) console.error('[http] unhandled error on', req.method, String(req.path).slice(0, 80), '-', err && err.stack || err); if (res.headersSent) return next(err);
+  res.status(status).json({ error: status === 413 ? 'Request too large' : status >= 500 ? 'Server error' : 'Bad request' });
+});
 server.on('upgrade', (req, socket, head) => {
   const reject = (code, msg) => { socket.write(`HTTP/1.1 ${code} ${msg}\r\nConnection: close\r\n\r\n`); socket.destroy(); };
   let url; try { url = new URL(req.url, 'http://x'); } catch { return reject(400, 'Bad Request'); }
@@ -282,6 +292,7 @@ server.on('upgrade', (req, socket, head) => {
   const origin = req.headers.origin; if (!origin || !ORIGINS.has(origin)) return reject(403, 'Forbidden');
   const ip = ipOf(req);
   if (conns.size >= cfg.maxConns || (ipCount.get(ip) || 0) >= cfg.maxConnsPerIp) return reject(429, 'Too Many Requests');
+  if ((process.env.CONNECT_LIMIT_LOOPBACK === '1' || !/^(127\.0\.0\.1|::1|::ffff:127\.0\.0\.1)$/.test(ip)) && !budget('conn:' + ip, num(process.env.CONNECT_PER_MIN, 30), 60e3)) return reject(429, 'Too Many Requests'); // connect FLOOD guard: new sockets per address per minute
   wss.handleUpgrade(req, socket, head, (ws) => onConnect(ws, ip, origin));
 });
 const str = (v, max) => typeof v === 'string' && v.length <= max;
@@ -333,12 +344,12 @@ function onConnect(ws, ip, origin) {
   ws.on('close', () => { clearTimeout(c.joinTimer); rpcGuard.revoke(c); conns.delete(c); const n = (ipCount.get(ip) || 1) - 1; if (n <= 0) ipCount.delete(ip); else ipCount.set(ip, n); if (c.player) hub.leave(c.player); });
   ws.on('error', () => {});
 }
-setInterval(() => { for (const c of conns) { if (!c.alive) { c.ws.terminate(); continue; } c.alive = false; try { c.ws.ping(); } catch {} } }, 20000).unref();
+setInterval(() => { try { for (const c of conns) { if (!c.alive) { c.ws.terminate(); continue; } c.alive = false; try { c.ws.ping(); } catch {} } } catch (e) { console.error('[ws] heartbeat failed:', e && e.message); } }, 20000).unref();
 let vSig = '';
 const vendorMsg = () => ({ t: 'vendors', v: vendors.version, plots: vcfg.plots, list: vendors.list() });
 function broadcastVendors() { const m = vendorMsg(); vSig = JSON.stringify(m.list); hub.all(m); }
-setInterval(() => { const sig = JSON.stringify(vendors.list()); if (sig !== vSig) broadcastVendors(); }, 30000).unref(); // also catches expiries
-setInterval(() => { if (burns.version !== burnVer) { burnVer = burns.version; hub.all({ t: 'burns', burns: burns.summary() }); } }, 2000).unref();
+setInterval(() => { try { const sig = JSON.stringify(vendors.list()); if (sig !== vSig) broadcastVendors(); } catch (e) { console.error('[vendors] broadcast failed:', e && e.message); } }, 30000).unref(); // also catches expiries
+setInterval(() => { try { if (burns.version !== burnVer) { burnVer = burns.version; hub.all({ t: 'burns', burns: burns.summary() }); } } catch (e) { console.error('[burns] feed failed:', e && e.message); } }, 2000).unref();
 
 const ownedItems = (prof) => [...prof.items.keys()];
 const profileCard = (q) => {
@@ -384,7 +395,8 @@ async function handle(c, m) {
         const r = profiles.create(m.nick, m.quiz); if (!r.ok) return hub.json(c, { t: 'joinerr', err: r.err, why: r.why });
         prof = r.prof; created = { id: prof.id, secret: r.secret };
       }
-      const r = hub.join(c, prof, burns.forProfile(prof.id).length > 0 || rides.forProfile(prof.id).length > 0);
+      { const cd = PROD ? Math.max(3000, num(process.env.JOIN_COOLDOWN_MS, 3000)) : num(process.env.JOIN_COOLDOWN_MS, 3000); const last = joinedAt.get(prof.id) || 0; if (cd > 0 && Date.now() - last < cd) return hub.json(c, { t: 'joinerr', err: 'rate', why: 'Reconnecting too fast. Wait a few seconds and try again.' }); } // per-PROFILE join cooldown (>= 3 s in production): a connect/disconnect loop cannot spam the room
+      const r = hub.join(c, prof, burns.forProfile(prof.id).length > 0 || rides.forProfile(prof.id).length > 0); if (r.ok) { joinedAt.set(prof.id, Date.now()); if (joinedAt.size > 5000) for (const [k, t] of joinedAt) if (Date.now() - t > 60e3) joinedAt.delete(k); }
       if (r.full) { hub.json(c, { t: 'full', online: hub.size, cap: cfg.maxPlayers }); return setTimeout(() => c.ws.close(1000, 'full'), 200); }
       if (r.err) return hub.json(c, { t: 'joinerr', err: r.err, why: r.why });
       clearTimeout(c.joinTimer); setRide(r.p, prof.ride); hub.json(c, vendorMsg()); nftav.restore && setTimeout(() => nftav.restore(r.p), 50); setTimeout(() => dj.hello(r.p), 80); hub.welcome(r.p, { rpcToken: rpcGuard.issue(c, r.p, c.origin), iceServers: STUN, cred: created, created: prof.created, inv: inv(r.p), vibe: prof.av.vibe });
@@ -458,7 +470,8 @@ async function handle(c, m) {
         } else if (kind === 'vendor') { // booth: no token discount (burn the full fee); the creator fee applies only when paying in SOL / other tokens
           if (method === 'sol' && !mint.devWallet && mint.devFeePct > 0) return hub.json(c, { t: 'quoteerr', why: 'Paying in SOL is not available right now. Use $VWFEST.' });
           const cb = vendors.canBuy(p.prof.id, m.plot); if (!cb.ok) return hub.json(c, { t: 'quoteerr', why: cb.why });
-          usd = vcfg.feeUsd; discountPct = 0; extra = { plot: cb.plot, mode: cb.mode, days: vcfg.days }; if (cb.mode === 'claim') vendors.hold(cb.plot, p.prof.id);
+          usd = vcfg.feeUsd; discountPct = 0; extra = { plot: cb.plot, mode: cb.mode, days: vcfg.days };
+          if (cb.mode === 'claim') { p.wantPlot = cb.plot; if (hasProof(p) && !vendors.hold(cb.plot, p.prof.id, undefined, c.ip)) return hub.json(c, { t: 'quoteerr', why: 'Too many booth reservations from your network right now. Try again in a few minutes.' }); } // a plot is only RESERVED for a player whose wallet is proven (below, or as soon as the proof arrives)
         } else return;
         const again = pay.reuse({ pid: p.prof.id, kind, item: item && item.id, plot: extra.plot, code, method }); // a second click inside the cache window gets the SAME quote (no new price lookup, no second open quote)
         if (again && again.view) return hub.json(c, { t: 'quote', q: again.view });
@@ -486,7 +499,7 @@ async function handle(c, m) {
     }
     case 'wproof': {
       if (!p || !budget('wproof:' + p.id, 12)) return; const ok = walletauth.verify({ nonce: m.nonce, pubkey: m.pubkey, signature: m.sig, pid: p.prof.id, origin: c.origin });
-      if (ok) { (p.proven || (p.proven = new Map())).set(m.pubkey, Date.now() + 30 * 60e3); if (p.proven.size > 5) p.proven.delete(p.proven.keys().next().value); }
+      if (ok) { (p.proven || (p.proven = new Map())).set(m.pubkey, Date.now() + 30 * 60e3); if (p.proven.size > 5) p.proven.delete(p.proven.keys().next().value); if (p.wantPlot) { const cb = vendors.canBuy(p.prof.id, p.wantPlot); if (cb.ok && cb.mode === 'claim') vendors.hold(cb.plot, p.prof.id, undefined, c.ip); } }
       return hub.json(c, { t: 'wok', ok, pubkey: m.pubkey, why: ok ? undefined : 'Could not verify the wallet signature' });
     }
     case 'buy': { // client reports a signed+sent purchase tx; nothing is granted until the confirmed tx is verified on-chain
@@ -517,16 +530,26 @@ async function handle(c, m) {
   }
 }
 
+// On-chain fallback for the burn tracker: burns of the $VWFEST mint made by the watched wallets OUTSIDE the game (scripts, tests, manual burns) are read from the chain and listed too.
+// Wallets: BURN_WATCH_WALLETS (comma separated) + the configured authority wallet of this cluster (public key only). Off when none is configured. Never throws.
+const watchWallets = () => { const w = (process.env.BURN_WATCH_WALLETS || '').split(',').map((s) => s.trim()).filter(Boolean); try { const a = require('./solana/src/config').loadConfig(process.env).authority; if (a) w.push(a.publicKey.toBase58()); } catch { /* no authority key: nothing to add */ } return [...new Set(w)]; };
+function startBurnWatch() {
+  if (!mint.mint || !watchWallets().length) return; const run = async () => { try { const n = await burns.syncOnchain(watchWallets()); if (n) console.log(`[burns] on-chain fallback added ${n} external burn(s)`); } catch (e) { console.error('[burns] on-chain sync failed', String((e && e.message) || e).slice(0, 100)); } };
+  run(); setInterval(run, Math.max(60e3, num(process.env.BURN_WATCH_SEC, 300) * 1000)).unref();
+}
 async function init() {
   await burns.init();
   await chain.init({ env: process.env, db: require('./lib/db').pool() }); // one shared TLS-verified pg pool; memory-only without DATABASE_URL
   chain.mountRoutes(chainRouter, { express, rateLimit, allowedOrigins: [...ORIGINS] });
   await vendors.init(); await rides.init(); await profiles.init(); await nftav.init();
+  startBurnWatch();
   try { await require('./lib/moderation').setupModeration(mod, { q: profiles.q, env: process.env, schema: process.env.DB_SCHEMA || 'showgrounds', prod: PROD }); } // bans/mutes survive restarts: the profiles database, else MOD_FILE, else memory (production fails closed)
   catch (e) { if (e && e.fatal) { process.exitCode = 1; throw e; } console.error('[moderation]', e); }
-  if (profiles.q) require('./lib/rls').enableRls(profiles.q, (process.env.DB_SCHEMA || 'showgrounds').replace(/[^a-z0-9_]/gi, '')).then((t) => t.length && console.log('[rls] enabled on', t.join(', '))); // best-effort, never blocks boot
+  if (profiles.q) { const t = await require('./lib/rls').enableRls(profiles.q, (process.env.DB_SCHEMA || 'showgrounds').replace(/[^a-z0-9_]/gi, '')); if (t.length) console.log('[rls] RLS on + public grants revoked on', t.join(', ')); } // awaited (it never throws: failures are logged per table)
 }
 if (require.main === module) {
+  process.on('unhandledRejection', (e) => console.error('[process] unhandledRejection:', e && e.stack || e)); // logged; the process keeps serving
+  process.on('uncaughtException', (e) => { console.error('[process] uncaughtException (exiting so the platform restarts a clean process):', e && e.stack || e); process.exitCode = 1; setTimeout(() => process.exit(1), 500).unref(); try { server.close(); } catch {} });
   init().then(() => {
     server.listen(PORT, '0.0.0.0', () => console.log(`[showgrounds] listening on ${PORT} (cap ${cfg.maxPlayers}, purchases ${mint.enabled ? 'ENABLED on ' + NETWORK : 'off: ' + mint.reason}, SOL shop ${mint.devWallet ? 'on' : 'off (DEV_WALLET unset)'})`));
 
