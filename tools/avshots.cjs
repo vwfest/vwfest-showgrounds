@@ -11,7 +11,7 @@ let NB = 0; async function boot(pg) { await pg.goto(BASE + '?quality=high&phase=
 (async () => {
   await S.init(); await new Promise((r) => S.server.listen(3392, '127.0.0.1', r)); const b = await launch(); const res = { errors: [] };
   try {
-    const ctx = await b.newContext({ viewport: { width: 1000, height: 1000 } }); const pg = await ctx.newPage(); pg.on('pageerror', (e) => res.errors.push(e.message));
+    const ctx = await b.newContext({ viewport: { width: 1000, height: 1000 } }); const pg = await ctx.newPage(); if (process.env.NOHAT) await pg.addInitScript(() => { window.__noHat = true; }); pg.on('pageerror', (e) => res.errors.push(e.message));
     const t0 = Date.now(); await boot(pg); res.loadMs = Date.now() - t0;
     await pg.evaluate(() => { window.__sg.goto(0, 5); window.__sg.setCam(0, 0.2); window.__sg.setDist(4); }); await pg.waitForTimeout(12000); // let HD avatar bake in
     for (const [n, y, d, fov] of SHOTS) for (const [an, a] of ANG) {

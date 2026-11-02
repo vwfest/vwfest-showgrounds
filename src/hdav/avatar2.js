@@ -153,7 +153,7 @@ async function buildOnce(av, { lod = 0, eq = {} } = {}, bodyOverride = 0) {
   geo.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(out.si, 4)); geo.setAttribute('skinWeight', new THREE.Float32BufferAttribute(out.sw, 4));
   const idx = []; groups.forEach((g, m) => { geo.addGroup(idx.length, g.length, m); idx.push(...g); }); geo.setIndex(idx);
   // ----- materials -----
-  const cloth = (col, map, rough = 0.88, rep = 2) => { const nm = foldNormal(1, 0.55); nm.repeat.set(rep * 0.5, rep * 0.7); /* r3: real folds, not only weave */ return new THREE.MeshPhysicalMaterial({ color: map ? 0xffffff : col, map: map || null, roughness: rough, sheen: 0.6, sheenColor: new THREE.Color(col).lerp(new THREE.Color('#ffffff'), 0.4), sheenRoughness: 0.7, normalMap: nm, normalScale: new THREE.Vector2(1.0, 1.0) }); };
+  const cloth = (col, map, rough = 0.88, rep = 2) => { const nm = foldNormal(1, 0.9); nm.repeat.set(rep * 0.5, rep * 0.7); /* r6: deeper folds + crisper weave */ return new THREE.MeshPhysicalMaterial({ color: map ? 0xffffff : col, map: map || null, roughness: rough, sheen: 0.6, sheenColor: new THREE.Color(col).lerp(new THREE.Color('#ffffff'), 0.4), sheenRoughness: 0.7, normalMap: nm, normalScale: new THREE.Vector2(1.5, 1.5) }); };
   const skin = skinMaterial(skinC, {});
   const shirtMat = cloth(shirtC, shirtMap('#' + shirtC.getHexString(), av.pattern, outfit));
   const pantsMat = cloth(overalls ? denim : pantsC, null, 0.9, 3);
@@ -249,7 +249,7 @@ async function buildOnce(av, { lod = 0, eq = {} } = {}, bodyOverride = 0) {
   // ----- hats (head-centre frame) -----
   const sd = (n) => Math.max(8, Math.round(n * [1, 0.6, 0.3][lod]));
   const hatMat = (c) => cloth(new THREE.Color(c), null, 0.8, 1); const hy = 0.085; const shopHat = eq.hat && eq.hat !== 'halo';
-  if (!shopHat) {
+  if (!shopHat && !(typeof window !== 'undefined' && window.__noHat)) { // __noHat: local close-up harness only
     if (av.hat === 1) { const m = hatMat('#' + shirtC.getHexString()); const cr = M(new THREE.SphereGeometry(0.13, sd(32), sd(16), 0, Math.PI * 2, 0, Math.PI * 0.5), m); cr.position.set(0, hy - 0.035, -0.005); cr.scale.set(0.93, 0.85, 1.03); const br = M(new THREE.CylinderGeometry(0.1, 0.1, 0.007, sd(24), 1, false, -Math.PI / 2, Math.PI), m); br.position.set(0, hy - 0.03, 0.085); br.rotation.x = 0.16; br.scale.set(0.92, 1, 1.05); M(new THREE.SphereGeometry(0.009, 8, 6), m).position.set(0, hy + 0.077, -0.005); }
     else if (av.hat === 2) { const m = hatMat('#e9dcc3'); M(new THREE.CylinderGeometry(0.108, 0.122, 0.1, sd(28)), m).position.y = hy + 0.03; const b = M(new THREE.CylinderGeometry(0.122, 0.18, 0.04, sd(28), 1, true), m); b.position.y = hy - 0.035; b.material.side = THREE.DoubleSide; }
     else if (av.hat === 3) { const m = new THREE.MeshStandardMaterial({ color: '#7a4b22', roughness: 0.75, side: THREE.DoubleSide }); M(new THREE.LatheGeometry([[0.0, 0.12], [0.07, 0.11], [0.115, 0.08], [0.12, 0.0]].map(([r, y]) => new THREE.Vector2(r, y)), sd(28)), m).position.y = hy - 0.01; const br = M(new THREE.LatheGeometry([[0.12, 0.0], [0.2, 0.0], [0.24, 0.035]].map(([r, y]) => new THREE.Vector2(r, y)), sd(32)), m); br.position.y = hy - 0.015; br.scale.z = 0.85; }

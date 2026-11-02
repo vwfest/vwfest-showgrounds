@@ -17,7 +17,7 @@ function poreTex() { if (PORE) return PORE; const N = 512, cv = document.createE
   for (let i = 0; i < 5200; i++) { const x = rnd() * N, y = rnd() * N, rr = 0.8 + rnd() * 1.4; const gr = g.createRadialGradient(x, y, 0, x, y, rr * 1.8); gr.addColorStop(0, 'rgba(0,0,0,0.55)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(x - rr * 2, y - rr * 2, rr * 4, rr * 4); }
   PORE = new THREE.CanvasTexture(cv); PORE.wrapS = PORE.wrapT = THREE.RepeatWrapping; PORE.anisotropy = 8; return PORE; }
 export function skinMaterial(color, o = {}) {
-  const m = new THREE.MeshPhysicalMaterial({ color, roughness: 0.56, sheen: 0.22, sheenColor: new THREE.Color('#ff9f86'), sheenRoughness: 0.7, clearcoat: 0.05, clearcoatRoughness: 0.5 });
+  const m = new THREE.MeshPhysicalMaterial({ color, roughness: 0.52, sheen: 0.3, sheenColor: new THREE.Color('#ff9f86'), sheenRoughness: 0.6, clearcoat: 0.08, clearcoatRoughness: 0.5 });
   const U = { hairC: { value: new THREE.Color(o.hairC || '#222') }, beardC: { value: new THREE.Color(o.beardC || o.hairC || '#222') }, lipC: { value: new THREE.Color(color).lerp(new THREE.Color('#a24a46'), 0.7) }, sss: { value: o.sss ?? 0.85 }, poreT: { value: poreTex() } };
   const D = []; if (o.head) D.push('HEAD'); if (o.scalp) D.push('SCALP'); if (o.mohawk) D.push('MOHAWK'); if (o.stubble) D.push('STUBBLE'); if (o.beard) D.push('BEARD'); if (o.chops) D.push('CHOPS'); if (o.freckles) D.push('FRECKLES');
   m.onBeforeCompile = (sh) => {
