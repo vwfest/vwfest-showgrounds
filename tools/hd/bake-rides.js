@@ -2,6 +2,7 @@
 // splits it into layers (body / each extra / wheels), merges per material role, makes a far LOD, quantizes, emits m<N>.bin.
 import * as THREE from 'three';
 import { MeshoptSimplifier } from 'meshoptimizer';
+import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { buildGhia } from './src/rides/ghia.js';
 import { buildBug } from './src/rides/bug.js';
 import { buildCamper } from './src/rides/camper.js';
@@ -13,10 +14,19 @@ const C1 = '#ff0001', C2 = '#00ff02', ROLES = ['paint', 'paint2', 'metal', 'matt
 const roleOf = (m) => { const c = m.color ? '#' + m.color.getHexString() : '';
   if (c === C1 && !m.map) return 'paint'; if (c === C2 && !m.map) return 'paint2'; if (m.map) return 'plate'; if (m.transparent) return 'glass';
   if (m.emissive && m.emissiveIntensity > 0 && m.emissive.getHex() !== 0) return 'lamp'; if ((m.metalness || 0) >= 0.5) return 'metal'; return 'matte'; };
+// materials with clipping planes (two-tone split at the belt): bake the clip into the geometry (exact triangle split)
+function clipGeo(g, planes) { g = g.index ? g.toNonIndexed() : g; const P = g.attributes.position, N = g.attributes.normal, out = [], on = [];
+  const v = (i) => ({ p: new THREE.Vector3(P.getX(i), P.getY(i), P.getZ(i)), n: new THREE.Vector3(N.getX(i), N.getY(i), N.getZ(i)) });
+  let tris = []; for (let i = 0; i < P.count; i += 3) tris.push([v(i), v(i + 1), v(i + 2)]);
+  for (const pl of planes) { const nt = []; for (const t of tris) { const d = t.map((x) => pl.distanceToPoint(x.p)); const poly = [];
+      for (let k = 0; k < 3; k++) { const a = t[k], b = t[(k + 1) % 3], da = d[k], db = d[(k + 1) % 3]; if (da >= 0) poly.push(a); if ((da >= 0) !== (db >= 0)) { const u = da / (da - db); poly.push({ p: a.p.clone().lerp(b.p, u), n: a.n.clone().lerp(b.n, u).normalize() }); } }
+      for (let k = 1; k + 1 < poly.length; k++) nt.push([poly[0], poly[k], poly[k + 1]]); } tris = nt; }
+  for (const t of tris) for (const x of t) { out.push(x.p.x, x.p.y, x.p.z); on.push(x.n.x, x.n.y, x.n.z); }
+  const r = new THREE.BufferGeometry(); r.setAttribute('position', new THREE.Float32BufferAttribute(out, 3)); r.setAttribute('normal', new THREE.Float32BufferAttribute(on, 3)); return mergeVertices(r, 1e-5); }
 function collect(car) { car.updateMatrixWorld(true); const out = [];
   const bodyG = (car.userData && car.userData.body) || car.children[0]; car.traverse((o) => { if (!o.isMesh || !o.visible) return; let p = o, inBody = false; while (p) { if (p === bodyG) inBody = true; p = p.parent; }
     const mats = Array.isArray(o.material) ? o.material : [o.material]; let g = o.geometry.index ? o.geometry : o.geometry; g = g.clone().applyMatrix4(o.matrixWorld);
-    if (!g.attributes.normal) g.computeVertexNormals(); const m = mats[0]; const role = roleOf(m); const col = m.color ? m.color.clone() : new THREE.Color(1, 1, 1);
+    if (!g.attributes.normal) g.computeVertexNormals(); const m = mats[0]; if (m.clippingPlanes && m.clippingPlanes.length) { g = clipGeo(g, m.clippingPlanes); if (!g.attributes.position.count) return; } const role = roleOf(m); const col = m.color ? m.color.clone() : new THREE.Color(1, 1, 1);
     if (role === 'lamp') col.lerp(m.emissive, 0.3);
     const P = g.attributes.position; const sig = role + ':' + P.count + ':' + P.getX(0).toFixed(3) + ',' + P.getY(0).toFixed(3) + ',' + P.getZ(0).toFixed(3);
     out.push({ g, role, col, sig, wheel: !inBody, side: m.side }); }); return out; }
