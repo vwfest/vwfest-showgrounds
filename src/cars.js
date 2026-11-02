@@ -154,7 +154,9 @@ export function rideSpec(r) {
   return { model: r.model, paint, c1, c2: r.c2 === 16 ? null : '#' + RIDES.COLORS[r.c2], wheels: r.wheels, stance: r.stance, extras: r.extras, plate: r.plate, stripe: 0, lowrider: r.stance === 4, tier: r.tier };
 }
 // ---- HD rides (pre-baked code-built bodies, see src/hdcars.js). Low-poly stays as the instant placeholder / fallback. ----
-const paintMat = (spec) => spec.paint === 'patina' ? MAT.lambert : spec.paint === 'candy' ? MAT.paintCandy : spec.paint === 'flake' ? MAT.paintFlake : spec.paint === 'metallic' ? MAT.paintMetal : MAT.paint;
+// Camper: own satin-gloss paint (less sky reflection on its big flat panels, so oranges stay rich); other rides keep the shared paints.
+let camperPaint = null; const camperMat = () => camperPaint || (camperPaint = new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.42, metalness: 0, clearcoat: 0.55, clearcoatRoughness: 0.18, envMapIntensity: 0.5 }));
+const paintMat = (spec) => spec.model === 1 && (spec.paint === 'solid' || spec.paint === 'two') ? camperMat() : spec.paint === 'patina' ? MAT.lambert : spec.paint === 'candy' ? MAT.paintCandy : spec.paint === 'flake' ? MAT.paintFlake : spec.paint === 'metallic' ? MAT.paintMetal : MAT.paint;
 export function buildCarHD(spec, d, farOnly = false) {
   const a = assembleHD(d, spec); const mats = { paint: paintMat(spec), metal: MAT.chrome, matte: MAT.tire, glass: MAT.glass, lamp: MAT.lamp, plate: plateMaterial(spec.plate || 0) };
   const level = (geos) => { const grp = new THREE.Group(); for (const r in geos) { const m = new THREE.Mesh(geos[r], mats[r]); m.castShadow = r !== 'glass' && r !== 'plate'; m.receiveShadow = r !== 'glass'; if (r === 'glass') m.renderOrder = 2; grp.add(m); } return grp; };
