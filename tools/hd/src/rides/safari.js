@@ -79,6 +79,10 @@ export function buildSafari(spec, { studio = false, lod = 0 } = {}) {
       const lens = mesh(new THREE.SphereGeometry(0.086, 24, 10, 0, Math.PI * 2, 0, Math.PI / 2), MAT.lens); lens.rotation.x = Math.PI / 2; lens.scale.y = 0.3; g.add(lens); lensDetail(g, 0.086, 0, full); placeOn(h, g, 0.015, V3(0, 0, 3)); }
     const ti = front(s * 0.66, B(0.58)); if (ti) placeOn(ti, mesh(new THREE.BoxGeometry(0.1, 0.05, 0.03), MAT.amber), 0.01);
     const tl = front(s * 0.62, B(0.78), -1); if (tl) { const g = new THREE.Group(); const l = mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.03, 20).rotateX(Math.PI / 2), MAT.tail); g.add(l); tailDetail(g, 0.07, 0, 0.016, true); placeOn(tl, g, 0.01); } }
+  { const h = topd(0, 1.18); if (h) { const sp = new THREE.Group(); { const t = mesh(new THREE.TorusGeometry(0.21, 0.075, 8, 28), MAT.rubber); sp.add(t); const r = mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.1, 20).rotateX(Math.PI / 2), MAT.chrome); sp.add(r); const hb = mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.12, 12).rotateX(Math.PI / 2), MAT.black); sp.add(hb); } sp.rotation.x = -Math.PI / 2 + 0.12; sp.position.copy(h.p).add(V3(0, 0.085, 0)); body.add(sp); } } // r9: spare tyre on the bonnet
+  { const lb = new THREE.Group(); lb.position.set(0, B(1.52), 0.36); body.add(lb); lb.add(mesh(new THREE.BoxGeometry(1.05, 0.05, 0.06), MAT.black)); // r9: roof light bar
+    for (const x of [-0.39, -0.13, 0.13, 0.39]) { const c = mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.06, 16).rotateX(Math.PI / 2), MAT.chrome); c.position.set(x, 0.06, 0.02); lb.add(c); const l = mesh(new THREE.CircleGeometry(0.043, 16), MAT.lens); l.position.set(x, 0.06, 0.051); lb.add(l); }
+    for (const x of [-0.5, 0.5]) { const p = mesh(new THREE.BoxGeometry(0.03, 0.1, 0.03), MAT.black); p.position.set(x, -0.05, 0); lb.add(p); } }
   // ---- bumpers (flat blades on stub brackets) + plates ----
   for (const s of [1, -1]) { const y = B(0.44), z = s * (ZF + 0.04);
     const bl = mesh(new THREE.BoxGeometry(1.66, 0.085, 0.035), MAT.chrome); bl.position.set(0, y, z); body.add(bl);

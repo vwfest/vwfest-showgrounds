@@ -136,7 +136,7 @@ export function buildBug(spec, { studio = false, lod = 0, baja = false } = {}) {
   for (const s of [-1, 1]) { const dh = side(-0.22, belt(-0.22) - 0.07, s); if (dh) { const h = mesh(new THREE.CapsuleGeometry(0.011, 0.1, 4, 8), MAT.chrome); h.rotation.x = Math.PI / 2; h.position.copy(dh.p).addScaledVector(dh.n, 0.012); } }
   if (full) { const mh = side(0.55, belt(0.55) + 0.01, 1); if (mh) { const g = new THREE.Group(); g.position.copy(mh.p); body.add(g); const st = new THREE.Mesh(new THREE.CylinderGeometry(0.007, 0.007, 0.12, 6), MAT.chrome); st.rotation.z = -0.9; st.position.set(0.05, 0.04, 0); g.add(st); const hd = new THREE.Mesh(new THREE.SphereGeometry(0.045, 14, 8), MAT.chrome); hd.scale.set(0.5, 1, 1.2); hd.position.set(0.1, 0.08, 0); g.add(hd); } }
   if (baja) { // tube bumpers, exposed engine, stinger exhaust
-    const T = (pts, r = 0.028) => mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts.map(([x, y, z]) => V3(x, y - drop, z)), false, 'catmullrom', 0.1), full ? 48 : 14, r, full ? 10 : 5), MAT.black);
+    const T = (pts, r = 0.028) => (r *= 1.3, 0) ||  mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts.map(([x, y, z]) => V3(x, y - drop, z)), false, 'catmullrom', 0.1), full ? 48 : 14, r, full ? 10 : 5), MAT.black);
     T([[-0.62, 0.42, 1.45], [-0.62, 0.42, 1.78], [-0.5, 0.42, 1.86], [0.5, 0.42, 1.86], [0.62, 0.42, 1.78], [0.62, 0.42, 1.45]]);
     T([[-0.45, 0.42, 1.86], [-0.42, 0.72, 1.7], [0.42, 0.72, 1.7], [0.45, 0.42, 1.86]], 0.022);
     T([[-0.62, 0.45, -1.5], [-0.62, 0.45, -2.05], [-0.5, 0.45, -2.12], [0.5, 0.45, -2.12], [0.62, 0.45, -2.05], [0.62, 0.45, -1.5]]);
