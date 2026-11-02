@@ -155,7 +155,7 @@ export function rideSpec(r) {
 }
 // ---- HD rides (pre-baked code-built bodies, see src/hdcars.js). Low-poly stays as the instant placeholder / fallback. ----
 // Camper: own satin-gloss paint (less sky reflection on its big flat panels, so oranges stay rich); other rides keep the shared paints.
-let camperPaint = null; const camperMat = () => camperPaint || (camperPaint = new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.42, metalness: 0, clearcoat: 0.55, clearcoatRoughness: 0.18, envMapIntensity: 0.5 }));
+let camperPaint = null; const camperMat = () => camperPaint || (camperPaint = new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.55, metalness: 0, clearcoat: 0.4, clearcoatRoughness: 0.12, specularIntensity: 0.2, envMapIntensity: 0.18 }));
 const paintMat = (spec) => spec.model === 1 && (spec.paint === 'solid' || spec.paint === 'two') ? camperMat() : spec.paint === 'patina' ? MAT.lambert : spec.paint === 'candy' ? MAT.paintCandy : spec.paint === 'flake' ? MAT.paintFlake : spec.paint === 'metallic' ? MAT.paintMetal : MAT.paint;
 export function buildCarHD(spec, d, farOnly = false) {
   const a = assembleHD(d, spec); const mats = { paint: paintMat(spec), metal: MAT.chrome, matte: MAT.tire, glass: MAT.glass, lamp: MAT.lamp, plate: plateMaterial(spec.plate || 0) };

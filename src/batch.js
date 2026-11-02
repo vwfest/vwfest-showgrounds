@@ -37,13 +37,13 @@ export const MAT = {
   lambert: std({ roughness: 0.88, metalness: 0 }),               // world: matte, with image-based lighting
   phong: std({ roughness: 0.38, metalness: 0.45 }),              // metallic / flake paint base
   glossy: new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.18, metalness: 0.35, clearcoat: 1, clearcoatRoughness: 0.04 }),
-  paint: new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.34, metalness: 0.15, clearcoat: 1, clearcoatRoughness: 0.06 }),
-  paintMetal: new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.28, metalness: 0.7, clearcoat: 1, clearcoatRoughness: 0.05 }),
+  paint: new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.42, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.035, ior: 1.5, specularIntensity: 0.6, envMapIntensity: 0.85 }), // r2: dielectric base under a glassy coat (no grey metal sheen)
+  paintMetal: new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.36, metalness: 0.6, clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 1.1 }),
   paintFlake: new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.25, metalness: 0.85, clearcoat: 1, clearcoatRoughness: 0.03, sheen: 0.4, sheenColor: new THREE.Color('#ffffff') }),
   paintCandy: new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.14, metalness: 0.55, clearcoat: 1, clearcoatRoughness: 0.02, iridescence: 0.25, iridescenceIOR: 1.4 }),
-  chrome: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.06, metalness: 1 }),
-  glass: new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.02, metalness: 0, transparent: true, opacity: 0.42, clearcoat: 1, depthWrite: false }),
-  tire: std({ roughness: 0.92, metalness: 0 }),
+  chrome: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.14, metalness: 1, envMapIntensity: 1.35 }), // r2: polished, not a perfect mirror
+  glass: new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.02, metalness: 0, transparent: true, opacity: 0.62, ior: 1.52, specularIntensity: 1, clearcoat: 1, clearcoatRoughness: 0, envMapIntensity: 1.8, depthWrite: false }), // r2: darker tint + strong sky reflection
+  tire: new THREE.MeshPhysicalMaterial({ vertexColors: true, color: 0x8a8a8a, roughness: 0.78, metalness: 0, sheen: 0.35, sheenRoughness: 0.8, sheenColor: new THREE.Color('#5a5a5a'), envMapIntensity: 0.5 }), // r2: rubber: darker, soft satin sidewall
   lamp: std({ roughness: 0.2, metalness: 0, emissive: new THREE.Color('#ffffff'), emissiveIntensity: 1.4 }),
   basic: new THREE.MeshBasicMaterial({ vertexColors: true }),
   neon: new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false, fog: false, color: new THREE.Color(2.2, 2.2, 2.2) }), // >1 = HDR, feeds the bloom

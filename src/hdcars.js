@@ -36,7 +36,7 @@ function concat(items, withUv) {
 }
 // Camper: its big flat panels pick up a lot of sky reflection under the clear coat, which greys strong colours out.
 // Deepen saturated colours on that model only (whites/creams and the other rides are untouched).
-const hsl = {}; function rich(spec, hex) { const c = new THREE.Color(hex); if (spec.model !== 1) return c; c.getHSL(hsl); if (hsl.s < 0.35 || hsl.l > 0.85) return c; return c.setHSL(hsl.h, Math.min(1, hsl.s * 1.12 + 0.05), hsl.l * 0.8); }
+const hsl = {}, DEEP_ORANGE = new THREE.Color('#b83d00'); function rich(spec, hex) { const c = new THREE.Color(hex); if (spec.model !== 1) return c; c.getHSL(hsl); if (hsl.s < 0.35 || hsl.l > 0.85) return c; if (hsl.h > 0.005 && hsl.h < 0.11) return c.copy(DEEP_ORANGE); /* r2: any orange/salmon -> one deep, rich orange (ACES + sky reflection wash lighter oranges to terracotta) */ return c.setHSL(hsl.h, Math.min(1, hsl.s * 1.12 + 0.05), hsl.l * 0.8); }
 const GLASS_TINT = new THREE.Color('#16222b');
 // spec as in cars.js. legacy: {bins} low-poly extras for trait bits the HD bake has no geometry for (keeps every NFT trait visible).
 // Returns { near:{role:geo}, far:{role:geo}, tris:[near,far] }.

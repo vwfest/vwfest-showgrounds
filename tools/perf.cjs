@@ -1,7 +1,7 @@
 // Local-only perf + screenshot harness for the grounds (headless Chrome/SwiftShader). Usage: node tools/perf.cjs <label> [shots]
 process.env.SERVER_SECRET = 'perf-secret-0123456789abcdef'; process.env.PORT = '3391'; process.env.PROFILE_CREATE_PER_HOUR = '1000'; process.env.MAX_CONNS_PER_IP = '200'; process.env.MINT_ENABLED = '0';
 const { launch, until } = require('../test/lib.cjs'); const { devices } = require('playwright'); const S = require('../server.js'); const fs = require('fs');
-const BASE = 'http://127.0.0.1:3391/', label = process.argv[2] || 'run', shots = process.argv[3] === 'shots', OUT = '/workspace/nftmock/grounds/';
+const BASE = 'http://127.0.0.1:3391/', label = process.argv[2] || 'run', shots = process.argv[3] === 'shots', OUT = process.env.SHOT_OUT || '/workspace/nftmock/grounds/';
 (async () => {
   await S.init(); await new Promise((r) => S.server.listen(3391, '127.0.0.1', r)); const b = await launch(); const res = {};
   try {
