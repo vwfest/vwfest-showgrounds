@@ -2,7 +2,7 @@
 // docs/hd/rides/m<N>.bin = quantized layers (body / each extra / wheels) x material roles x 2 LODs (near <=30k tris, far ~5k).
 // Assembly per spec only concatenates arrays + sets vertex colours, then reuses the same 5 shared materials as the low-poly cars.
 import { THREE } from './batch.js';
-const DROP = [0, 0.04, 0.08, -0.12, 0.06], CAP = 30000, FAR = 28;
+const DROP = [0, 0.04, 0.08, -0.12, 0.06], CAP = 34000, FAR = 28;
 const models = new Map(), waiting = new Map();
 const base = () => ((typeof window !== 'undefined' && window.SG_ASSETS) || '') + 'hd/rides/m';
 function parse(buf) {

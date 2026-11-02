@@ -42,7 +42,7 @@ export const MAT = {
   paintFlake: new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.25, metalness: 0.85, clearcoat: 1, clearcoatRoughness: 0.03, sheen: 0.4, sheenColor: new THREE.Color('#ffffff') }),
   paintCandy: new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.14, metalness: 0.55, clearcoat: 1, clearcoatRoughness: 0.02, iridescence: 0.25, iridescenceIOR: 1.4 }),
   chrome: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.14, metalness: 1, envMapIntensity: 1.35 }), // r2: polished, not a perfect mirror
-  glass: new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.02, metalness: 0, transparent: true, opacity: 0.62, ior: 1.52, specularIntensity: 1, clearcoat: 1, clearcoatRoughness: 0, envMapIntensity: 1.8, depthWrite: false }), // r2: darker tint + strong sky reflection
+  glass: new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.02, metalness: 0, transparent: true, opacity: 0.38, ior: 1.52, specularIntensity: 0.45, clearcoat: 0.3, clearcoatRoughness: 0, envMapIntensity: 0.6, depthWrite: false }), // r4: clearer glass so seats + dash read through it (reflection kept, less milky)
   tire: new THREE.MeshPhysicalMaterial({ vertexColors: true, color: 0x8a8a8a, roughness: 0.78, metalness: 0, sheen: 0.35, sheenRoughness: 0.8, sheenColor: new THREE.Color('#5a5a5a'), envMapIntensity: 0.5 }), // r2: rubber: darker, soft satin sidewall
   lamp: std({ roughness: 0.2, metalness: 0, emissive: new THREE.Color('#ffffff'), emissiveIntensity: 1.4 }),
   basic: new THREE.MeshBasicMaterial({ vertexColors: true }),

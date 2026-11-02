@@ -77,3 +77,9 @@ export function plateMat(kind) { const cv = document.createElement('canvas'); cv
   x.fillStyle = kind === 2 ? '#bfe9ff' : kind === 1 ? '#d9dde2' : '#f3efe2'; x.fillRect(0, 0, 256, 84); x.strokeStyle = '#222'; x.lineWidth = 5; x.strokeRect(4, 4, 248, 76);
   x.fillStyle = '#1b2a4a'; x.font = 'bold 50px Arial'; x.textAlign = 'center'; x.fillText('VWFEST', 128, 62); const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace;
   return new THREE.MeshStandardMaterial({ map: t, roughness: kind ? 0.2 : 0.5, metalness: kind === 1 ? 0.6 : 0 }); }
+// r4: headlamp optics read through the lens: chrome reflector rings (Fresnel steps) + bulb, sat on the lens dome.
+// Lens = hemisphere radius R, dome along +z scaled to height h, base at z0. Merges into the metal/lamp roles (no new draw calls).
+export function lensDetail(g, R, z0 = 0, full = true, h = 0.3) { // baked at every LOD
+  for (const k of [0.38, 0.62, 0.84]) { const rho = R * k, z = z0 + R * h * Math.sqrt(1 - k * k) + 0.0015; const t = new THREE.Mesh(new THREE.TorusGeometry(rho, 0.0022, 3, 28), MAT.chrome); t.position.z = z; g.add(t); }
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(R * 0.16, 10, 6), MAT.lens); bulb.position.z = z0 + R * h + 0.004; g.add(bulb);
+  const cap = new THREE.Mesh(new THREE.CircleGeometry(R * 0.1, 12), MAT.chrome); cap.position.z = z0 + R * h + 0.004 + R * 0.165; g.add(cap); }

@@ -1,7 +1,7 @@
 // Code-built "Safari" (early-70s rear-engine open utility). Cage set by eye from published dims:
 // L 3.78, W 1.64, H 1.50 (top up), wheelbase 2.40, track ~1.38, tyres 165-15 (dia ~0.62). Front=+z, metres.
 import * as THREE from 'three';
-import { setCrease, V3, keys, DROP, MAT, cageSurface, ring, kit, plateMat, paintMaterial, wheel } from './common.js';
+import { setCrease, V3, keys, DROP, MAT, cageSurface, ring, kit, plateMat, paintMaterial, wheel , lensDetail } from './common.js';
 const ZF = 1.89, AXF = 1.19, AXR = -1.21, TRACK = 0.69;
 const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 const yb = keys([-1.89, -1.6, -1.0, 0, 1.0, 1.6, 1.89], [0.5, 0.42, 0.36, 0.35, 0.36, 0.42, 0.5]);
@@ -55,7 +55,7 @@ export function buildSafari(spec, { studio = false, lod = 0 } = {}) {
     for (const [w, h, x, y] of [[1.56, 0.05, 0, 0.02], [1.56, 0.045, 0, y1 - y0 - 0.02], [0.05, y1 - y0, -0.76, (y1 - y0) / 2], [0.05, y1 - y0, 0.76, (y1 - y0) / 2]]) { const f = mesh(new THREE.BoxGeometry(w, h, 0.05), paint); f.position.set(x, y, 0); g.add(f); }
     if (full) for (const wx of [-0.55, 0.05]) { const a = mesh(new THREE.BoxGeometry(0.42, 0.012, 0.01), MAT.black); a.position.set(wx + 0.21, 0.09, 0.03); a.rotation.z = 0.15; g.add(a); } }
   // interior visible through the screen
-  if (full) { const dash = mesh(new THREE.BoxGeometry(1.5, 0.12, 0.2), MAT.black); dash.position.set(0, B(1.05), 0.36); body.add(dash);
+  if (true) { /* r4 */ const dash = mesh(new THREE.BoxGeometry(1.5, 0.12, 0.2), MAT.black); dash.position.set(0, B(1.05), 0.36); body.add(dash);
     const sw = mesh(new THREE.TorusGeometry(0.19, 0.014, 8, 40), MAT.black); sw.position.set(0.38, B(1.2), 0.22); sw.rotation.x = -0.9; body.add(sw);
     for (const sx of [-0.38, 0.38]) { const bk = mesh(new THREE.BoxGeometry(0.5, 0.42, 0.1), MAT.leather); bk.position.set(sx, B(1.18), -0.3); body.add(bk); } }
   // ---- soft-top windows ----
@@ -76,7 +76,7 @@ export function buildSafari(spec, { studio = false, lod = 0 } = {}) {
   // ---- lights ----
   for (const s of [-1, 1]) {
     const h = front(s * 0.6, B(0.8)); if (h) { const g = new THREE.Group(); g.add(mesh(new THREE.TorusGeometry(0.09, 0.016, 10, 36), MAT.chrome)); const pod = mesh(new THREE.CylinderGeometry(0.1, 0.11, 0.08, 36, 1, true).rotateX(Math.PI / 2), paint); pod.position.z = -0.03; g.add(pod);
-      const lens = mesh(new THREE.SphereGeometry(0.086, 24, 10, 0, Math.PI * 2, 0, Math.PI / 2), MAT.lens); lens.rotation.x = Math.PI / 2; lens.scale.y = 0.3; g.add(lens); placeOn(h, g, 0.015, V3(0, 0, 3)); }
+      const lens = mesh(new THREE.SphereGeometry(0.086, 24, 10, 0, Math.PI * 2, 0, Math.PI / 2), MAT.lens); lens.rotation.x = Math.PI / 2; lens.scale.y = 0.3; g.add(lens); lensDetail(g, 0.086, 0, full); placeOn(h, g, 0.015, V3(0, 0, 3)); }
     const ti = front(s * 0.66, B(0.58)); if (ti) placeOn(ti, mesh(new THREE.BoxGeometry(0.1, 0.05, 0.03), MAT.amber), 0.01);
     const tl = front(s * 0.62, B(0.78), -1); if (tl) { const g = new THREE.Group(); const l = mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.03, 20).rotateX(Math.PI / 2), MAT.tail); g.add(l); placeOn(tl, g, 0.01); } }
   // ---- bumpers (flat blades on stub brackets) + plates ----
