@@ -29,7 +29,14 @@ const BASE = 'http://127.0.0.1:3391/', label = process.argv[2] || 'run', shots =
       for (let i = 0; i < 6; i++) { await pg.evaluate(() => { window.__sg.goto(0, 12.5); window.__sg.setCam(Math.PI * 0.82, 0.16); window.__sg.setDist(7); }); await pg.waitForTimeout(1200);
         await pg.evaluate((i) => { const cam = window.__sg.cam(), L = window.__sg.L; const dx = L.x - cam.position.x, dz = L.z - cam.position.z, n = Math.hypot(dx, dz), fx = dx / n, fz = dz / n;
           window.__lineup.forEach((c, k) => { c.visible = k === i; c.position.set(L.x + fx * 1.2 - fz * 2.2, 0, L.z + fz * 1.2 + fx * 2.2); c.rotation.y = Math.atan2(fx, fz) + 2.3; }); }, i); await pg.waitForTimeout(2500); await pg.screenshot({ path: OUT + label + '_car_' + names[i] + '.png' }); }
-      res.lineupTris = await pg.evaluate(() => window.__lineup.map((c) => c.userData.tris || null)); await pg.evaluate(() => window.__lineup.forEach((c) => c.parent.remove(c))); }
+      res.lineupTris = await pg.evaluate(() => window.__lineup.map((c) => c.userData.tris || null));
+      await pg.evaluate(() => window.__lineup.forEach((c) => c.parent.remove(c)));
+      await pg.evaluate(() => { const sc = window.__sg.scene(); window.__lineup = [0, 1, 2, 3, 4, 5].map((w) => { const c = window.__sg.carFor({ model: 0, paint: 'solid', c1: '#e63946', c2: null, wheels: w, stance: 0, extras: 0, plate: 0 }); c.visible = false; sc.add(c); return c; }); }); await pg.waitForTimeout(3000);
+      for (let i = 0; i < 6; i++) { await pg.evaluate(() => { window.__sg.goto(0, 12.5); window.__sg.setCam(Math.PI * 0.82, 0.05); window.__sg.setDist(4.2); }); await pg.waitForTimeout(1000);
+        await pg.evaluate((i) => { const cam = window.__sg.cam(), L = window.__sg.L; const dx = L.x - cam.position.x, dz = L.z - cam.position.z, n = Math.hypot(dx, dz), fx = dx / n, fz = dz / n;
+          window.__lineup.forEach((c, k) => { c.visible = k === i; c.position.set(L.x + fx * 0.6 - fz * 1.6, 0, L.z + fz * 0.6 + fx * 1.6); c.rotation.y = Math.atan2(fx, fz) + Math.PI / 2; }); }, i); await pg.waitForTimeout(2500); await pg.screenshot({ path: OUT + label + '_wheel_' + i + '.png' }); }
+      await pg.evaluate(() => window.__lineup.forEach((c) => c.parent.remove(c)));
+       }
     res.errors = errs.slice(0, 8); await ctx.close();
     if (shots) { const ph = await b.newContext({ ...devices['iPhone 13'] }); const mp = await ph.newPage(); await mp.goto(BASE + '?quality=med&phase=0.3'); await until(mp, () => window.__ready, null, 180000);
       await mp.fill('input[aria-label=Nickname]', 'Ph' + Math.floor(Math.random() * 9000 + 1000)); await mp.locator('text=Create profile').evaluate((e) => e.click()); await until(mp, () => window.__sg.state.me && window.__sg.state.me.pid, null, 120000); await mp.waitForTimeout(800); await mp.evaluate(() => document.querySelectorAll('#modals > *').forEach((m) => m.remove()));
