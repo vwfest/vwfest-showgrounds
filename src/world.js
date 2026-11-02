@@ -150,7 +150,7 @@ export function buildWorld(scene, opts = {}) {
   // ---------- showroom tent ----------
   const showroom = new THREE.Group(); scene.add(showroom);
   { const x = 42, z = 22; tent(x, z, 14, 10, '#2b2d42', '#ffd166'); solid.box(14.6, 0.2, 10.6, '#d8dde6', x, 0.1, z); rect(x, z - 4.6, 14.4, 0.8);
-    const t = textTex([{ t: '🚗 SHOWROOM', c: '#ffd166', s: 84, y: 80 }, { t: 'VW FEST SHOW GROUNDS RIDES', c: '#fff', s: 34, y: 150 }], { w: 640, h: 190, bg: '#14141f', border: '#ffd166' }); const m = signMesh(7.6, 2.25, t.t); m.position.set(x, 5.8, z + 5.4); scene.add(m);
+    const t = textTex([{ t: '🚗 SHOWROOM', c: '#ffd166', s: 84, y: 80 }, { t: 'SHOW GROUNDS RIDES', c: '#fff', s: 34, y: 150 }], { w: 640, h: 190, bg: '#14141f', border: '#ffd166' }); const m = signMesh(7.6, 2.25, t.t); m.position.set(x, 5.8, z + 5.4); scene.add(m);
     spots.push({ x, z: z + 7, r: 5, id: 'showroom', label: 'Showroom: open your garage / mint a ride' });
     api.showroomPos = [[x - 4.5, z - 1.2], [x, z - 1.2], [x + 4.5, z - 1.2], [x - 4.5, z + 2.2], [x, z + 2.2], [x + 4.5, z + 2.2]]; api.showroomPos.forEach(([px, pz]) => { solid.cyl(1.5, 0.3, '#2b2230', px, 0.35, pz, 0, 0, 0, 16); solid.cyl(1.4, 0.05, '#ffd166', px, 0.53, pz, 0, 0, 0, 16); }); }
   // ---------- bandstand speakers, hay bales, misc ----------

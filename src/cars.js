@@ -1,4 +1,4 @@
-// Procedural low-poly VWs (Beetle, Bus, Karmann Ghia, Thing, Squareback, Baja) with paint types, wheels, stance, extras, VWFEST plates.
+// Procedural low-poly rides (Bug, Camper, Ghia Coupe, Safari, Wagon, Baja Bug) with paint types, wheels, stance, extras, VWFEST plates.
 import { THREE, Batch, MAT, shade, mix, cTex } from './batch.js';
 import { PAL } from '../shared/traits.js';
 import RIDES from '../shared/rides.js';
@@ -74,20 +74,20 @@ export function buildCar(spec) {
     g(d.W - 0.2, 0.4, 0.04, GLASS, 0, y0 + h * 0.73, L / 2 - 0.02); g(0.04, 0.4, 0.4, GLASS, 0, y0 + h * 0.73, L / 2 - 0.02); // split windshield bar
     g(0.4, 0.18, 0.06, '#f4f1ea', 0, y0 + h * 0.45, L / 2 + 0.02, 0, 0, 0.0); g(0.05, 0.4, 0.07, '#f4f1ea', -0.17, y0 + h * 0.42, L / 2 + 0.02, 0, 0, 0.5); g(0.05, 0.4, 0.07, '#f4f1ea', 0.17, y0 + h * 0.42, L / 2 + 0.02, 0, 0, -0.5); // V
     gr(d.W + 0.1, 0.12, 0.2, CHROME, 0, y0 + 0.1, L / 2 + 0.06); gr(d.W + 0.1, 0.12, 0.2, CHROME, 0, y0 + 0.1, -L / 2 - 0.06);
-  } else if (M === 3) { // Thing
+  } else if (M === 3) { // Safari
     const h = d.H - y0; gr(d.W, h * 0.42, L, c1, 0, y0 + h * 0.21, 0, 0, 0, 0, 0.07); g(0.05, h * 0.3, L * 0.5, c1, -hw + 0.02, y0 + h * 0.57, -0.2); g(0.05, h * 0.3, L * 0.5, c1, hw - 0.02, y0 + h * 0.57, -0.2); g(d.W, h * 0.3, 0.06, c1, 0, y0 + h * 0.57, -L / 2 + 0.05);
     g(d.W - 0.1, 0.05, 0.08, '#222', 0, d.H - 0.2, L * 0.12); g(0.05, 0.36, 0.05, '#222', -hw + 0.1, d.H - 0.38, L * 0.12); g(0.05, 0.36, 0.05, '#222', hw - 0.1, d.H - 0.38, L * 0.12); g(d.W - 0.2, 0.3, 0.03, '#7aa7c7', 0, d.H - 0.4, L * 0.12, 0, -0.25); // windshield
     g(d.W - 0.3, 0.12, 1.2, shade(c1, 0.7), 0, y0 + h * 0.5, 0.3); g(0.45, 0.45, 0.4, shade(c1, 0.7), -0.4, y0 + 0.55, -0.9); g(0.45, 0.45, 0.4, shade(c1, 0.7), 0.4, y0 + 0.55, -0.9);
     gr(d.W + 0.1, 0.1, 0.16, CHROME, 0, y0 + 0.1, L / 2 + 0.05); gr(d.W + 0.1, 0.1, 0.16, CHROME, 0, y0 + 0.1, -L / 2 - 0.05);
-  } else if (M === 2) { // Karmann Ghia
+  } else if (M === 2) { // Ghia Coupe
     const h = d.H - y0; b.sph(hw, h * 0.34, L / 2, low, 0, y0 + h * 0.3, 0, 24); b.sph(hw * 0.88, h * 0.34, L * 0.3, top, 0, y0 + h * 0.62, -0.25, 20);
     g(d.W - 0.15, h * 0.26, 0.9, GLASS, 0, y0 + h * 0.62, 0.06, 0, -0.35); g(d.W - 0.2, 0.2, 0.05, GLASS, 0, y0 + h * 0.62, -0.78); g(0.04, h * 0.2, 1.0, GLASS, hw * 0.88, y0 + h * 0.62, -0.25); g(0.04, h * 0.2, 1.0, GLASS, -hw * 0.88, y0 + h * 0.62, -0.25);
     gr(d.W + 0.05, 0.1, 0.16, CHROME, 0, y0 + 0.14, L / 2 + 0.02); gr(d.W + 0.05, 0.1, 0.16, CHROME, 0, y0 + 0.14, -L / 2 - 0.02);
-  } else if (M === 4) { // Squareback
+  } else if (M === 4) { // Wagon
     const h = d.H - y0; b.sph(hw, h * 0.36, L / 2, low, 0, y0 + h * 0.3, 0, 24); g(d.W - 0.1, h * 0.32, L * 0.5, top, 0, y0 + h * 0.62, -0.5); b.sph(hw * 0.9, h * 0.3, 0.7, top, 0, y0 + h * 0.58, 0.45, 16);
     g(d.W - 0.2, h * 0.2, 0.04, GLASS, 0, y0 + h * 0.62, 0.5, 0, -0.5); for (const s of [-1, 1]) { g(0.04, h * 0.2, 0.85, GLASS, s * (hw - 0.08), y0 + h * 0.62, 0.05); g(0.04, h * 0.2, 0.85, GLASS, s * (hw - 0.08), y0 + h * 0.62, -1.0); }
     gr(d.W + 0.05, 0.1, 0.16, CHROME, 0, y0 + 0.14, L / 2 + 0.02); gr(d.W + 0.05, 0.1, 0.16, CHROME, 0, y0 + 0.14, -L / 2 - 0.02);
-  } else { // Beetle (0) and Baja (5)
+  } else { // Bug (0) and Baja Bug (5)
     const h = d.H - y0; b.sph(hw, h * 0.34, L / 2, low, 0, y0 + h * 0.3, 0, 24);
     if (M === 0) { b.sph(hw * 0.86, h * 0.4, L * 0.27, top, 0, y0 + h * 0.62, -0.1, 24); g(d.W - 0.3, h * 0.2, 0.04, GLASS, 0, y0 + h * 0.62, 0.52, 0, -0.45); g(d.W - 0.4, 0.2, 0.04, GLASS, 0, y0 + h * 0.62, -0.72, 0, 0.45); for (const s of [-1, 1]) g(0.04, h * 0.2, 0.95, GLASS, s * hw * 0.82, y0 + h * 0.62, -0.1); }
     else { g(d.W - 0.5, 0.06, 1.0, '#222', 0, y0 + h * 0.8, -0.2); for (const s of [-1, 1]) { g(0.06, 0.55, 0.06, '#222', s * 0.6, y0 + h * 0.6, 0.25); g(0.06, 0.55, 0.06, '#222', s * 0.6, y0 + h * 0.6, -0.65); } g(d.W - 0.3, h * 0.2, 0.05, GLASS, 0, y0 + h * 0.58, 0.35, 0, -0.6); g(0.9, 0.12, 0.12, '#dddddd', 0, y0 + h * 0.82, 0.1); }

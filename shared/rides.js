@@ -1,6 +1,7 @@
-// VW Fest Show Grounds Rides: trait tables, published odds and the pure roll function (no Node/browser APIs).
+// Show Grounds Rides ($VWFEST): trait tables, published odds and the pure roll function (no Node/browser APIs).
 // roll(bytes): bytes = 64 random bytes derived from HMAC-SHA256(seed, "0"|"1"). Same bytes -> same ride, anywhere.
-const MODELS = ['Beetle', 'Bus', 'Karmann Ghia', 'Thing', 'Squareback', 'Baja Bug'];
+// Display names only: codes/commits encode the INDEX, so order must never change.
+const MODELS = ['Bug', 'Camper', 'Ghia Coupe', 'Safari', 'Wagon', 'Baja Bug'];
 const PAINTS = ['Solid', 'Metallic', 'Candy', 'Flake', 'Two-tone', 'Patina'];
 const COLORS = ['e63946', 'f4a261', 'ffd166', '06d6a0', '118ab2', '9b5de5', 'f15bb5', 'f8f9fa', 'fb8500', '2a9d8f', '80ed99', '3a0ca3', '1d3557', 'a8dadc', 'bc4749', '212529'];
 const COLOR_NAMES = ['Red', 'Orange', 'Yellow', 'Mint', 'Ocean', 'Purple', 'Pink', 'White', 'Tangerine', 'Teal', 'Lime', 'Indigo', 'Navy', 'Sky', 'Brick', 'Black'];
