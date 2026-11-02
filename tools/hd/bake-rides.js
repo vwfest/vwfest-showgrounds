@@ -58,7 +58,7 @@ function pack(model, parts) { // quantized binary
 const b64 = (u8) => { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); };
 window.bake = async (model) => { await MeshoptSimplifier.ready; const spec = (extras, wheels) => ({ model, paint: 'two', c1: C1, c2: C2, wheels, stance: 0, extras, plate: 0, tier: 0 });
   const base = collect(B[model](spec(0, 0), { lod: 1 })); const sigs = new Map(); for (const it of base) sigs.set(it.sig, (sigs.get(it.sig) || 0) + 1);
-  const layers = { body: base.filter((it) => !it.wheel), w0: base.filter((it) => it.wheel), w2: collect(B[model](spec(0, 2), { lod: 1 })).filter((it) => it.wheel) };
+  const layers = { body: base.filter((it) => !it.wheel), w0: base.filter((it) => it.wheel) }; for (let w = 1; w < 6; w++) layers['w' + w] = collect(B[model](spec(0, w), { lod: 1 })).filter((it) => it.wheel);
   for (let bit = 0; bit < 9; bit++) { const all = collect(B[model](spec(1 << bit, 0), { lod: 1 })).filter((it) => !it.wheel); const left = new Map(sigs); const ex = [];
     for (const it of all) { const n = left.get(it.sig) || 0; if (n > 0) left.set(it.sig, n - 1); else ex.push(it); } if (ex.length) layers['x' + bit] = ex; }
   const missing = [0, 1, 2, 3, 4, 5, 6, 7, 8].filter((b) => !layers['x' + b]); Object.assign(layers, genericExtras(layers.body.filter((it) => it.role === 'paint' || it.role === 'paint2'), missing));

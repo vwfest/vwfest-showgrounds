@@ -34,12 +34,15 @@ function concat(items, withUv) {
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.BufferAttribute(nor, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3)); if (uv) g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
   g.setIndex(new THREE.BufferAttribute(idx, 1)); g.computeBoundingSphere(); g.computeBoundingBox(); return g;
 }
+// Camper: its big flat panels pick up a lot of sky reflection under the clear coat, which greys strong colours out.
+// Deepen saturated colours on that model only (whites/creams and the other rides are untouched).
+const hsl = {}; function rich(spec, hex) { const c = new THREE.Color(hex); if (spec.model !== 1) return c; c.getHSL(hsl); if (hsl.s < 0.35 || hsl.l > 0.85) return c; return c.setHSL(hsl.h, Math.min(1, hsl.s * 1.12 + 0.05), hsl.l * 0.8); }
 const GLASS_TINT = new THREE.Color('#16222b');
 // spec as in cars.js. legacy: {bins} low-poly extras for trait bits the HD bake has no geometry for (keeps every NFT trait visible).
 // Returns { near:{role:geo}, far:{role:geo}, tris:[near,far] }.
 export function assembleHD(d, spec, legacyBins) {
-  const c1 = new THREE.Color(spec.c1), c2 = new THREE.Color(spec.c2 || spec.c1), yOff = -(DROP[spec.stance] || 0), E = spec.extras || 0;
-  const wl = spec.wheels === 2 ? 'w2' : 'w0'; const xs = d.extras.filter((b) => E & (1 << b)).map((b) => 'x' + b);
+  const c1 = rich(spec, spec.c1), c2 = rich(spec, spec.c2 || spec.c1), yOff = -(DROP[spec.stance] || 0), E = spec.extras || 0;
+  const wl = d.parts['w' + spec.wheels] ? 'w' + spec.wheels : 'w0'; // six distinct baked wheel types const xs = d.extras.filter((b) => E & (1 << b)).map((b) => 'x' + b);
   const pick = (layer, lod) => (d.parts[layer] || [[], []])[lod] || [];
   const sum = (layers, lods) => layers.reduce((a, L, i) => a + pick(L, lods[i]).reduce((s, p) => s + p.tris, 0), 0);
   // near budget: body + wheels + extras <= 30k; heavy extras fall back to their far LOD first, then the wheels.

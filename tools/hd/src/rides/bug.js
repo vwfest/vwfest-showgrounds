@@ -171,7 +171,7 @@ export function buildBug(spec, { studio = false, lod = 0, baja = false } = {}) {
     for (const fx of [-0.45, 0.45]) for (const fz of [-0.65, 0.35]) { const h = topd(fx, fz); if (!h) continue; const ht = ry - h.p.y; const f = new THREE.Mesh(new THREE.BoxGeometry(0.04, ht, 0.06), MAT.black); f.position.set(fx * 1.06, -ht / 2, fz + 0.15); r.add(f); const pad = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.015, 0.1), MAT.rubber); pad.position.set(fx * 1.06, -ht, fz + 0.15); r.add(pad); } for (const x of [-0.5, 0.5]) { const b = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, 1.3), MAT.chrome); b.position.x = x; r.add(b); } for (let i = 0; i < 5; i++) { const b = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.02, 0.03), MAT.black); b.position.z = -0.55 + i * 0.275; r.add(b); } }
   // wheels (stance-aware track)
   const tr = TRACK + (baja ? 0.06 : 0) + (spec.stance === 2 || spec.stance === 4 ? 0.02 : 0);
-  for (const sx of [-1, 1]) for (const az of [AXF, AXR]) { const w = spec.wheels <= 1 ? steelie(spec, wr, full, paint) : wheel(spec.wheels, wr, full); if (baja) { w.scale.z = 1.4; if (full || true) knobs(w, wr, full); } w.position.set(sx * tr, wr, az); w.rotation.y = sx * Math.PI / 2; car.add(w); }
+  for (const sx of [-1, 1]) for (const az of [AXF, AXR]) { const w = spec.wheels === 1 ? steelie(spec, wr, full, paint) : wheel(spec.wheels, wr, full); if (baja) { w.scale.z = 1.4; if (full || true) knobs(w, wr, full); } w.position.set(sx * tr, wr, az); w.rotation.y = sx * Math.PI / 2; car.add(w); }
   mesh(new THREE.BoxGeometry(1.0, 0.05, 3.0), MAT.black).position.set(0, yb(0) + 0.03, -0.05);
   car.userData = { body }; return car;
 }

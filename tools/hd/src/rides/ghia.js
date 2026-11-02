@@ -43,6 +43,8 @@ export const MAT = {
   tail: new THREE.MeshPhysicalMaterial({ color: '#a50f19', roughness: 0.12, emissive: '#5a0006', emissiveIntensity: 0.6, clearcoat: 1 }),
   leather: new THREE.MeshStandardMaterial({ color: '#4a3326', roughness: 0.6 }),
   ivory: new THREE.MeshStandardMaterial({ color: '#e8e0c8', roughness: 0.35 }),
+  goldS: new THREE.MeshStandardMaterial({ color: '#ffd76a', roughness: 0.25, metalness: 0.9 }),
+  steel: new THREE.MeshStandardMaterial({ color: '#2b2d31', roughness: 0.45, metalness: 0.2 }),
   gold: new THREE.MeshStandardMaterial({ color: '#ffd76a', roughness: 0.3, metalness: 0.5, side: THREE.DoubleSide }),
   white: new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.4, side: THREE.DoubleSide }),
   flameO: new THREE.MeshPhysicalMaterial({ color: '#ff4d00', roughness: 0.25, clearcoat: 1, side: THREE.DoubleSide }),
@@ -200,7 +202,28 @@ export function wheel(type, r, full = true) {
     const sh = new THREE.Shape(); const n = 5, a0 = 0.3, a1 = 0.2; sh.moveTo(0.06, 0);
     for (let i = 0; i < n; i++) { const c = i / n * Math.PI * 2; sh.lineTo(Math.cos(c - a1) * 0.065, Math.sin(c - a1) * 0.065); sh.lineTo(Math.cos(c - a0) * rim * 0.97, Math.sin(c - a0) * rim * 0.97); sh.absarc(0, 0, rim * 0.97, c - a0, c + a0); sh.lineTo(Math.cos(c + a1) * 0.065, Math.sin(c + a1) * 0.065); }
     const sp = m(new THREE.ExtrudeGeometry(sh, { depth: 0.016, bevelEnabled: true, bevelThickness: 0.006, bevelSize: 0.005, bevelSegments: full ? 3 : 1, curveSegments: full ? 8 : 3 }), MAT.polished); sp.position.z = W / 2 - 0.035;
-  } else { const face = m(new THREE.CircleGeometry(rim, 24), MAT.anod); face.position.z = W / 2 - 0.03; for (let i = 0; i < 5; i++) { const b = m(new THREE.BoxGeometry(0.04, rim * 1.8, 0.02), MAT.polished); b.rotation.z = i * Math.PI / 5; b.position.z = W / 2 - 0.02; } }
+  } else if (type === 0) { // stock: domed polished hubcap over a painted-steel rim
+    const face = m(new THREE.CircleGeometry(rim, 24), MAT.black); face.position.z = W / 2 - 0.03;
+    const cap = m(new THREE.SphereGeometry(0.16, full ? 32 : 14, full ? 8 : 4, 0, Math.PI * 2, 0, 0.62), MAT.polished); cap.rotation.x = Math.PI / 2; cap.scale.set(1, 0.32, 1); cap.position.z = W / 2 - 0.035;
+    m(new THREE.TorusGeometry(0.155, 0.006, 6, full ? 40 : 16), MAT.chrome).position.z = W / 2 - 0.03;
+  } else if (type === 1) { // steelies: satin-black pressed disc, ring of round vents, small chrome dog-dish
+    const face = m(new THREE.CircleGeometry(rim, full ? 32 : 16), MAT.steel); face.position.z = W / 2 - 0.028;
+    for (let i = 0; i < 8; i++) { const a = i / 8 * Math.PI * 2, h = m(new THREE.CircleGeometry(0.022, 10), MAT.black); h.position.set(Math.cos(a) * 0.12, Math.sin(a) * 0.12, W / 2 - 0.026); }
+    m(new THREE.TorusGeometry(0.095, 0.008, 6, full ? 32 : 12), MAT.steel).position.z = W / 2 - 0.026;
+    const dd = m(new THREE.SphereGeometry(0.075, 20, 6, 0, Math.PI * 2, 0, 0.7), MAT.chrome); dd.rotation.x = Math.PI / 2; dd.scale.set(1, 0.3, 1); dd.position.z = W / 2 - 0.022;
+  } else if (type === 3) { // chrome slotted: mirror disc with 5 long dark slots
+    const face = m(new THREE.CircleGeometry(rim, full ? 40 : 16), MAT.chrome); face.position.z = W / 2 - 0.03;
+    for (let i = 0; i < 5; i++) { const a = i / 5 * Math.PI * 2, s2 = m(new THREE.CircleGeometry(0.02, 12), MAT.black); s2.position.set(Math.cos(a) * 0.125, Math.sin(a) * 0.125, W / 2 - 0.027); s2.rotation.z = a; s2.scale.set(2.2, 0.8, 1); }
+    m(new THREE.TorusGeometry(rim - 0.008, 0.01, 6, full ? 40 : 16), MAT.polished).position.z = W / 2 - 0.022;
+  } else { // 4 / 5: laced wire spokes (chrome or gold), knock-off spinner, whitewall band on the tyre
+    const sm = type === 5 ? MAT.goldS : MAT.chrome, ns = full ? 36 : 18, len = rim - 0.055;
+    const ww = m(new THREE.RingGeometry(rim + 0.035, rim + 0.08, full ? 48 : 20), MAT.white); ww.position.z = W / 2 + 0.002;
+    const back = m(new THREE.CircleGeometry(rim, 20), MAT.black); back.position.z = W / 2 - 0.05;
+    for (let i = 0; i < ns; i++) { const a = i / ns * Math.PI * 2, tw = (i % 2 ? 0.35 : -0.35), sp = m(new THREE.CylinderGeometry(0.0035, 0.0035, len, 4), sm);
+      sp.position.set(Math.cos(a + tw * 0.25) * (0.055 + len / 2), Math.sin(a + tw * 0.25) * (0.055 + len / 2), W / 2 - 0.03 + (i % 2 ? 0.006 : -0.006)); sp.rotation.z = a + tw * 0.25 - Math.PI / 2; }
+    const hub = m(new THREE.CylinderGeometry(0.055, 0.06, 0.05, 20).rotateX(Math.PI / 2), sm); hub.position.z = W / 2 - 0.02;
+    for (let i = 0; i < 2; i++) { const e = m(new THREE.BoxGeometry(0.16, 0.022, 0.014), sm); e.rotation.z = i * Math.PI / 2 + 0.3; e.position.z = W / 2 + 0.012; }
+  }
   m(new THREE.CylinderGeometry(0.048, 0.055, 0.03, 24).rotateX(Math.PI / 2), MAT.chrome).position.z = W / 2 - 0.005;
   for (let i = 0; i < 5; i++) { const a = i / 5 * Math.PI * 2 + Math.PI / 5; const l = m(new THREE.CylinderGeometry(0.01, 0.01, 0.02, 6).rotateX(Math.PI / 2), MAT.chrome); l.position.set(Math.cos(a) * 0.072, Math.sin(a) * 0.072, W / 2 - 0.012); }
   return g;
