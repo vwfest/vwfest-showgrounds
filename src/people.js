@@ -1,6 +1,7 @@
 // Procedural low-poly people from avatar traits (+ shop cosmetics). Parts are merged geometries; a 'far' single-mesh LOD is built too.
 import { THREE, Batch, MAT, shade, mix, cTex } from './batch.js';
 import { PAL, VIBES } from '../shared/traits.js';
+import { hdPerson } from './hdpeople.js';
 
 const C = (k, i) => '#' + PAL[k][i];
 const cache = new Map();
@@ -8,7 +9,7 @@ const neonMat = MAT.neon;
 export function buildPerson(av, eq = {}) {
   const key = JSON.stringify([av, eq]); let hit = cache.get(key);
   if (!hit) { hit = make(av, eq); cache.set(key, hit); if (cache.size > 120) { const k = cache.keys().next().value; const o = cache.get(k); if (!o.shared) {} cache.delete(k); } }
-  return instance(hit);
+  const p = instance(hit); hdPerson(p, av, eq); return p;
 }
 function make(av, eq) {
   const skin = C('skin', av.skin), shirt = C('shirt', av.shirt), pants = C('pants', av.pants), hair = C('hair', av.hair), eye = C('eyes', av.eyes);
@@ -134,7 +135,7 @@ function instance(h) {
   for (const mm of [up, hairMesh, ...[aL, aR, lL, lR].map((g) => g.children[0])]) if (mm) { mm.castShadow = true; mm.receiveShadow = true; }
   return { root, pose, upper, aL, aR, lL, lR, farMesh, nearMeshes: [up, ...(hairMesh ? [hairMesh] : []), ...[aL, aR, lL, lR].map((g) => g.children[0])], aura, glow, halo, upMesh: up, scale: h.scale, hasGlow: !!glow };
 }
-export function setLOD(p, far) { for (const mm of p.nearMeshes) mm.visible = !far; p.farMesh.visible = far; }
+export function setLOD(p, far) { p.far = far; if (p.hd) { p.hd.near.visible = !far; p.hd.far.visible = far; return; } for (const mm of p.nearMeshes) mm.visible = !far; p.farMesh.visible = far; }
 // ---- sprites ----
 const texCache = new Map();
 function tex(key, draw, w, h) { let t = texCache.get(key); if (t) return t; const cv = document.createElement('canvas'); cv.width = w; cv.height = h; draw(cv.getContext('2d'), w, h); t = cTex(cv); texCache.set(key, t); if (texCache.size > 300) { const k = texCache.keys().next().value; texCache.get(k).dispose(); texCache.delete(k); } return t; }
