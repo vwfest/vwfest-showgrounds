@@ -1,6 +1,7 @@
 // Code-built Ghia Coupe ride (classic 1950s-60s sports coupe proportions). Front=+z, up=+y, metres.
 // Real refs: L 4.14, W 1.634, H 1.32, wheelbase 2.40, track ~1.29, tyres 5.60-15 / 155R15 (Ø~0.63).
 import * as THREE from 'three';
+import { lensDetail } from './common.js';
 import { ghiaCage } from './cage.js';
 const keys = (zs, ys) => { const n = zs.length, m = ys.map((_, i) => i === 0 ? (ys[1] - ys[0]) / (zs[1] - zs[0]) : i === n - 1 ? (ys[n - 1] - ys[n - 2]) / (zs[n - 1] - zs[n - 2]) : (ys[i + 1] - ys[i - 1]) / (zs[i + 1] - zs[i - 1]));
   return (z) => { if (z <= zs[0]) return ys[0]; for (let i = 1; i < n; i++) if (z <= zs[i]) { const h = zs[i] - zs[i - 1], t = (z - zs[i - 1]) / h, t2 = t * t, t3 = t2 * t; return (2 * t3 - 3 * t2 + 1) * ys[i - 1] + (t3 - 2 * t2 + t) * h * m[i - 1] + (-2 * t3 + 3 * t2) * ys[i] + (t3 - t2) * h * m[i]; } return ys[n - 1]; }; };
@@ -93,7 +94,7 @@ export function buildGhia(spec, { studio = false, lod = 0 } = {}) {
     for (let i = 0; i <= nu; i++) border.push(at(i, 0)); for (let j = 1; j <= nv; j++) border.push(at(nu, j)); for (let i = nu - 1; i >= 0; i--) border.push(at(i, nv)); for (let j = nv - 1; j >= 0; j--) border.push(at(0, j));
     return border; };
   // ---- interior (seen through tinted glass) ----
-  if (full) { const yb = ybot(0) + 0.06, belt = ytop(0);
+  if (true) { /* r4 */ const yb = ybot(0) + 0.06, belt = ytop(0);
     const floor = mesh(new THREE.BoxGeometry(1.3, 0.04, 2.2), MAT.black); floor.position.set(0, yb, -0.35); body.add(floor);
     for (const sx of [-1, 1]) { const cush = mesh(new THREE.BoxGeometry(0.46, 0.12, 0.48), MAT.leather); cush.position.set(sx * 0.3, yb + 0.2, -0.2); body.add(cush);
       const back = mesh(new THREE.CapsuleGeometry(0.2, 0.22, 4, 10), MAT.leather); back.scale.set(1.1, 1.05, 0.38); back.position.set(sx * 0.3, belt - 0.06, -0.45); back.rotation.x = -0.22; body.add(back); }
@@ -139,7 +140,7 @@ export function buildGhia(spec, { studio = false, lod = 0 } = {}) {
   // ---- lights, nostrils, badge ----
   for (const s of [-1, 1]) {
     const h = front(s * 0.56, 0.66 - drop); if (h) { const g = new THREE.Group(); g.add(mesh(new THREE.TorusGeometry(0.092, 0.017, 10, 36), MAT.chrome)); { const cup = mesh(new THREE.CylinderGeometry(0.1, 0.108, 0.04, 36, 1, true).rotateX(Math.PI / 2), MAT.chrome); cup.position.z = -0.02; g.add(cup); const pod = mesh(new THREE.CylinderGeometry(0.112, 0.15, 0.2, 36, 1, false).rotateX(Math.PI / 2), paint); pod.position.z = -0.12; g.add(pod); } const bowl = mesh(new THREE.SphereGeometry(0.085, 24, 10, 0, Math.PI * 2, 0, Math.PI / 2), MAT.reflector); bowl.rotation.x = -Math.PI / 2; bowl.scale.y = 0.5; bowl.position.z = -0.01; g.add(bowl);
-      const lens = mesh(new THREE.SphereGeometry(0.088, 24, 10, 0, Math.PI * 2, 0, Math.PI / 2), MAT.lens);  lens.rotation.x = Math.PI / 2; lens.scale.y = 0.3; g.add(lens); placeOn(h, g, 0.02, V3(0, 0, 2.2)); }
+      const lens = mesh(new THREE.SphereGeometry(0.088, 24, 10, 0, Math.PI * 2, 0, Math.PI / 2), MAT.lens);  lens.rotation.x = Math.PI / 2; lens.scale.y = 0.3; g.add(lens); lensDetail(g, 0.088, 0, full); placeOn(h, g, 0.02, V3(0, 0, 2.2)); }
     const t = front(s * 0.5, 0.62 - drop, -1); if (t) { const tl = mesh(new THREE.SphereGeometry(0.075, 18, 10), MAT.tail); tl.scale.set(0.6, 1.2, 0.3); const tg = new THREE.Group(); tg.add(tl); const ring = mesh(new THREE.TorusGeometry(0.075, 0.008, 6, 24), MAT.chrome); ring.scale.set(0.6, 1.2, 1); tg.add(ring); placeOn(t, tg, 0.0, V3(0, 0, -0.6)); }
     const gr = front(s * 0.29, 0.47 - drop); if (gr) { const g = new THREE.Group(); const o = mesh(new THREE.TorusGeometry(0.075, 0.011, 8, 28), MAT.chrome); o.scale.set(1.5, 0.5, 1); g.add(o); const b = mesh(new THREE.CircleGeometry(0.075, 24), MAT.anod); b.scale.set(1.5, 0.5, 1); b.position.z = -0.004; g.add(b);
       for (let i = -2; i <= 2; i++) { const bar = mesh(new THREE.BoxGeometry(0.21 * Math.sqrt(1 - (i / 3) ** 2), 0.006, 0.01), MAT.chrome); bar.position.y = i * 0.012; g.add(bar); } placeOn(gr, g, 0.006, V3(0, 0.15, 0)); g.rotateZ(s * 0.1); }
@@ -191,7 +192,9 @@ export function wheel(type, r, full = true) {
   m(new THREE.LatheGeometry([new THREE.Vector2(rim, -W / 2 + 0.012), ...prof, new THREE.Vector2(rim, W / 2 - 0.012)], seg).rotateX(Math.PI / 2), MAT.tire);
   if (full) { for (const k of [-1, 1]) for (let i = 0; i < 3; i++) { const gro = m(new THREE.TorusGeometry(r - 0.001, 0.004, 4, seg), MAT.black); gro.position.z = k * (0.022 + i * 0.022) - 0.0; gro.scale.set(1, 1, 1); }
     m(new THREE.TorusGeometry(rim + 0.06, 0.0035, 4, seg), MAT.wall).position.z = W / 2 - 0.006;
+
     for (let i = 0; i < 28; i++) { if (i % 14 > 9) continue; const a = i / 28 * Math.PI * 2; const l = m(new THREE.BoxGeometry(0.012, 0.018, 0.004), MAT.wall); l.position.set(Math.cos(a) * (rim + 0.085), Math.sin(a) * (rim + 0.085), W / 2 - 0.004); l.rotation.z = a + Math.PI / 2; } }
+  for (const k of [-1, 1]) m(new THREE.TorusGeometry(rim + 0.008, 0.006, 3, 16), MAT.tire).position.z = k * (W / 2 - 0.016); // r5: rim bead lip only (ribs + sipes cut for weight)
   m(new THREE.CylinderGeometry(rim, rim, W - 0.02, full ? 40 : 16, 1, true).rotateX(Math.PI / 2), MAT.polished);
   m(new THREE.TorusGeometry(rim, 0.011, 8, full ? 48 : 16), MAT.polished).position.z = W / 2 - 0.012;
   const drum = m(new THREE.CylinderGeometry(0.15, 0.15, 0.08, full ? 28 : 12).rotateX(Math.PI / 2), MAT.drum); drum.position.z = -0.04;

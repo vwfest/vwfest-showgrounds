@@ -1,7 +1,7 @@
 // Code-built "Camper" (late-60s style rear-engine van). Original cage set by eye from published dims:
 // L 4.42, W 1.72, H 1.95, wheelbase 2.40, track ~1.39, tyres 185R14 (dia ~0.65). Front=+z, metres.
 import * as THREE from 'three';
-import { setCrease, V3, keys, DROP, MAT, cageSurface, ring, kit, plateMat, paintMaterial, wheel } from './common.js';
+import { setCrease, V3, keys, DROP, MAT, cageSurface, ring, kit, plateMat, paintMaterial, wheel , lensDetail, tailDetail } from './common.js';
 const ZF = 2.21, AXF = 1.27, AXR = -1.13, TRACK = 0.7;
 const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 export const BELT = 1.04;
@@ -34,7 +34,7 @@ export function buildCamper(spec, { studio = false, lod = 0 } = {}) {
   const ytop = 1.955 - drop, B = (y) => y - drop;
   for (const az of [AXF, AXR]) for (const lx of [-0.62, 0.62]) { const m = add(new THREE.CylinderGeometry(ra - 0.01, ra - 0.01, 0.42, full ? 24 : 12, 1, true, 0, Math.PI), MAT.liner); m.rotation.z = Math.PI / 2; m.position.set(lx, wr, az); }
   // ---- interior: cab bench, dash, wheel; rear bench + table (camper fit-out)
-  if (full) { const f = B(0.5);
+  if (true) { /* r4 */ const f = B(0.5);
     const floor = mesh(new THREE.BoxGeometry(1.6, 0.04, 4.0), MAT.black); floor.position.set(0, f, 0); body.add(floor);
     const dash = mesh(new THREE.BoxGeometry(1.6, 0.18, 0.3), MAT.black); dash.position.set(0, B(1.02), 1.78); body.add(dash);
     for (const sx of [-0.42, 0.42]) { const c = mesh(new THREE.BoxGeometry(0.62, 0.14, 0.5), MAT.leather); c.position.set(sx, B(0.86), 1.25); body.add(c); const bk = mesh(new THREE.BoxGeometry(0.62, 0.55, 0.1), MAT.leather); bk.position.set(sx, B(1.15), 0.98); bk.rotation.x = -0.12; body.add(bk); }
@@ -75,9 +75,9 @@ export function buildCamper(spec, { studio = false, lod = 0 } = {}) {
   // ---- lights ----
   for (const s of [-1, 1]) {
     const h = front(s * 0.6, B(0.86)); if (h) { const g = new THREE.Group(); g.add(mesh(new THREE.TorusGeometry(0.095, 0.016, 10, 36), MAT.chrome)); const pod = mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.05, 36).rotateX(Math.PI / 2), MAT.chrome); pod.position.z = -0.02; g.add(pod);
-      const lens = mesh(new THREE.SphereGeometry(0.09, 24, 10, 0, Math.PI * 2, 0, Math.PI / 2), MAT.lens); lens.rotation.x = Math.PI / 2; lens.scale.y = 0.3; g.add(lens); placeOn(h, g, 0.01); }
+      const lens = mesh(new THREE.SphereGeometry(0.09, 24, 10, 0, Math.PI * 2, 0, Math.PI / 2), MAT.lens); lens.rotation.x = Math.PI / 2; lens.scale.y = 0.3; g.add(lens); lensDetail(g, 0.09, 0, full); placeOn(h, g, 0.01); }
     const ti = front(s * 0.62, B(1.05)); if (ti) { const t = mesh(new THREE.BoxGeometry(0.16, 0.06, 0.03), MAT.amber); placeOn(ti, t, 0.01); }
-    const tl = front(s * 0.74, B(0.86), -1); if (tl) { const g = new THREE.Group(); const l = mesh(new THREE.BoxGeometry(0.11, 0.26, 0.03), MAT.tail); g.add(l); const a = mesh(new THREE.BoxGeometry(0.11, 0.07, 0.032), MAT.amber); a.position.y = 0.1; g.add(a); placeOn(tl, g, 0.01); }
+    const tl = front(s * 0.74, B(0.86), -1); if (tl) { const g = new THREE.Group(); const l = mesh(new THREE.BoxGeometry(0.11, 0.26, 0.03), MAT.tail); g.add(l); tailDetail(g, 0.11, 0.26); const a = mesh(new THREE.BoxGeometry(0.11, 0.07, 0.032), MAT.amber); a.position.y = 0.1; g.add(a); placeOn(tl, g, 0.01); }
   }
   // ---- bumpers (blade + step), plates ----
   for (const s of [1, -1]) { const y = B(0.44), zf = s * (ZF + 0.02) - (s > 0 ? 0.1 : -0.02);

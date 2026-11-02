@@ -68,7 +68,7 @@ export function kit(body, full) {
   const sideWin = (s, z0, z1, y0, y1, r = 0.06) => { const inR = (z, y) => { const dz = Math.max(z0 + r - z, 0, z - z1 + r), dy = Math.max(y0 + r - y, 0, y - y1 + r); return dz * dz + dy * dy <= r * r + 1e-6; };
     patch((u, v) => { const z = z0 + u * (z1 - z0), y = y0 + v * (y1 - y0); if (!inR(z, y)) { /* clamp to rounded corner */ const cz = Math.min(Math.max(z, z0 + r), z1 - r), cy = Math.min(Math.max(y, y0 + r), y1 - r), a = Math.atan2(y - cy, z - cz); return side(cz + Math.cos(a) * r, cy + Math.sin(a) * r, s); } return side(z, y, s); }, full ? 16 : 6, full ? 8 : 3, MAT.glass, 0.004);
     const loop = []; const n = 40; for (let i = 0; i <= n; i++) { const t = i / n * 4; let z, y; const c = [[z1 - r, y1 - r, 0], [z0 + r, y1 - r, Math.PI / 2], [z0 + r, y0 + r, Math.PI], [z1 - r, y0 + r, 1.5 * Math.PI]]; const k = Math.min(3, Math.floor(t)), a = c[k][2] + (t - k) * Math.PI / 2; z = c[k][0] + Math.cos(a) * r; y = c[k][1] + Math.sin(a) * r; loop.push(side(z, y, s)); }
-    if (full) tubeOn(loop, 0.011, MAT.rubber, 0.002, 80); };
+    tubeOn(loop, full ? 0.011 : 0.012, MAT.rubber, 0.002, full ? 80 : 32); }; // r5: rubber seal baked at every LOD
   const gapV = (s, z, ya, yb) => strip(16, (t) => side(z + 0.0035, ya + t * (yb - ya), s), (t) => side(z - 0.0035, ya + t * (yb - ya), s), MAT.gap, 0.002);
   const gapH = (s, y, za, zb) => strip(30, (t) => side(za + t * (zb - za), y + 0.0035, s), (t) => side(za + t * (zb - za), y - 0.0035, s), MAT.gap, 0.002);
   return { hitRay: hit, add, setSkin: (a) => { skin = a; }, side, front, topd, strip, patch, tubeOn, placeOn, mesh, Z, sideWin, gapV, gapH };
@@ -77,3 +77,14 @@ export function plateMat(kind) { const cv = document.createElement('canvas'); cv
   x.fillStyle = kind === 2 ? '#bfe9ff' : kind === 1 ? '#d9dde2' : '#f3efe2'; x.fillRect(0, 0, 256, 84); x.strokeStyle = '#222'; x.lineWidth = 5; x.strokeRect(4, 4, 248, 76);
   x.fillStyle = '#1b2a4a'; x.font = 'bold 50px Arial'; x.textAlign = 'center'; x.fillText('VWFEST', 128, 62); const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace;
   return new THREE.MeshStandardMaterial({ map: t, roughness: kind ? 0.2 : 0.5, metalness: kind === 1 ? 0.6 : 0 }); }
+// r4: headlamp optics read through the lens: chrome reflector rings (Fresnel steps) + bulb, sat on the lens dome.
+// Lens = hemisphere radius R, dome along +z scaled to height h, base at z0. Merges into the metal/lamp roles (no new draw calls).
+export function lensDetail(g, R, z0 = 0, full = true, h = 0.3) { // baked at every LOD
+  for (const k of [0.38, 0.62, 0.84]) { const rho = R * k, z = z0 + R * h * Math.sqrt(1 - k * k) + 0.0015; const t = new THREE.Mesh(new THREE.TorusGeometry(rho, 0.0022, 3, 28), MAT.chrome); t.position.z = z; g.add(t); }
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(R * 0.16, 10, 6), MAT.lens); bulb.position.z = z0 + R * h + 0.004; g.add(bulb);
+  const cap = new THREE.Mesh(new THREE.CircleGeometry(R * 0.1, 12), MAT.chrome); cap.position.z = z0 + R * h + 0.004 + R * 0.165; g.add(cap); }
+// r5: tail lamp lens detail: chrome bezel + horizontal prism ribs over the red lens (box w x h, face at z)
+export function tailDetail(g, w, h, z = 0.016, round = false) {
+  if (round) { const r = new THREE.Mesh(new THREE.TorusGeometry(w, 0.006, 4, 20), MAT.chrome); r.position.z = z; g.add(r); for (const k of [0.4, 0.7]) { const t = new THREE.Mesh(new THREE.TorusGeometry(w * k, 0.0025, 3, 16), MAT.gap); t.position.z = z + 0.001; g.add(t); } return; }
+  for (const [bw, bh, x, y] of [[w + 0.012, 0.006, 0, h / 2], [w + 0.012, 0.006, 0, -h / 2], [0.006, h, w / 2, 0], [0.006, h, -w / 2, 0]]) { const b = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, 0.01), MAT.chrome); b.position.set(x, y, z - 0.002); g.add(b); }
+  for (let i = 1; i < 5; i++) { const rb = new THREE.Mesh(new THREE.BoxGeometry(w * 0.9, 0.003, 0.004), MAT.gap); rb.position.set(0, -h / 2 + i * h / 5, z + 0.001); g.add(rb); } }

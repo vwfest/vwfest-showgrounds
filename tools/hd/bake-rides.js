@@ -33,7 +33,8 @@ function collect(car) { car.updateMatrixWorld(true); const out = [];
 function merge(list) { // -> {pos,nor,col,uv,idx}
   let nv = 0, ni = 0; for (const it of list) { nv += it.g.attributes.position.count; ni += it.g.index ? it.g.index.count : it.g.attributes.position.count; }
   const pos = new Float32Array(nv * 3), nor = new Float32Array(nv * 3), col = new Float32Array(nv * 3), uv = new Float32Array(nv * 2), idx = new Uint32Array(ni); let v = 0, i = 0;
-  for (const it of list) { const g = it.g, P = g.attributes.position, N = g.attributes.normal, U = g.attributes.uv; for (let k = 0; k < P.count; k++) { pos.set([P.getX(k), P.getY(k), P.getZ(k)], (v + k) * 3); nor.set([N.getX(k), N.getY(k), N.getZ(k)], (v + k) * 3); col.set([it.col.r, it.col.g, it.col.b], (v + k) * 3); if (U) uv.set([U.getX(k), U.getY(k)], (v + k) * 2); }
+  for (const it of list) { const g = it.g, P = g.attributes.position, N = g.attributes.normal, U = g.attributes.uv; const D = it.dust ? (g.computeBoundingBox(), g.boundingBox.getCenter(new THREE.Vector3())) : null, DC = new THREE.Color('#7a6a55');
+    for (let k = 0; k < P.count; k++) { pos.set([P.getX(k), P.getY(k), P.getZ(k)], (v + k) * 3); nor.set([N.getX(k), N.getY(k), N.getZ(k)], (v + k) * 3); if (D) { const rr = Math.hypot(P.getY(k) - D.y, P.getZ(k) - D.z), t = Math.min(1, Math.max(0, (rr - 0.22) / 0.08)) * 0.28; col.set([it.col.r + (DC.r - it.col.r) * t, it.col.g + (DC.g - it.col.g) * t, it.col.b + (DC.b - it.col.b) * t], (v + k) * 3); } else col.set([it.col.r, it.col.g, it.col.b], (v + k) * 3); if (U) uv.set([U.getX(k), U.getY(k)], (v + k) * 2); }
     if (g.index) for (let k = 0; k < g.index.count; k++) idx[i++] = g.index.getX(k) + v; else for (let k = 0; k < P.count; k++) idx[i++] = k + v;
     // double-sided source materials: add back faces so a single-sided merged material still shows them
     v += P.count; }
@@ -61,6 +62,12 @@ window.bake = async (model) => { await MeshoptSimplifier.ready; const spec = (ex
   const layers = { body: base.filter((it) => !it.wheel), w0: base.filter((it) => it.wheel) }; for (let w = 1; w < 6; w++) layers['w' + w] = collect(B[model](spec(0, w), { lod: 1 })).filter((it) => it.wheel);
   for (let bit = 0; bit < 9; bit++) { const all = collect(B[model](spec(1 << bit, 0), { lod: 1 })).filter((it) => !it.wheel); const left = new Map(sigs); const ex = [];
     for (const it of all) { const n = left.get(it.sig) || 0; if (n > 0) left.set(it.sig, n - 1); else ex.push(it); } if (ex.length) layers['x' + bit] = ex; }
+  { // r4 underbody: a dark pan between the arches grounds the car (no light-grey gap under the sills); merges into the matte role
+    const bb = new THREE.Box3(); for (const it of layers.body) if (it.role === 'paint' || it.role === 'paint2') { it.g.computeBoundingBox(); bb.union(it.g.boundingBox); }
+    const hw = (bb.max.x - bb.min.x) / 2, hl = (bb.max.z - bb.min.z) / 2, cz = (bb.max.z + bb.min.z) / 2, y = Math.max(0.12, bb.min.y + 0.01);
+    const pan = new THREE.BoxGeometry(hw * 1.2, 0.04, hl * 1.7).translate(0, y, cz); const mid = new THREE.BoxGeometry(hw * 0.35, 0.08, hl * 1.5).translate(0, y - 0.03, cz); // pan + centre tunnel
+    for (const g of [pan, mid]) layers.body.push({ g: g.toNonIndexed(), role: 'matte', col: new THREE.Color('#0b0b0c'), wheel: false, side: THREE.FrontSide }); }
+  for (const L in layers) if (L[0] === 'w') for (const it of layers[L]) if (it.role === 'matte' && it.col.r < 0.1) it.dust = true; // r5: dusty tyre shoulders
   const missing = [0, 1, 2, 3, 4, 5, 6, 7, 8].filter((b) => !layers['x' + b]); Object.assign(layers, genericExtras(layers.body.filter((it) => it.role === 'paint' || it.role === 'paint2'), missing));
   const parts = [], stats = {}; for (const L in layers) for (const role of ROLES) { const list = layers[L].filter((it) => it.role === role); if (!list.length) continue; const m = merge(list); const f = simplify(m, L === 'body' ? 0.14 : 0.2);
     parts.push({ layer: L, role, lod: 0, m }, { layer: L, role, lod: 1, m: f }); stats[L] = stats[L] || [0, 0]; stats[L][0] += m.idx.length / 3; stats[L][1] += f.idx.length / 3; }

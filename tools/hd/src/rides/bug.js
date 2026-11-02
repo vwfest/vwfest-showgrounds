@@ -2,6 +2,7 @@
 // (Catmull-Clark limit on a regular quad cage). Separate lofted fenders, running boards, upright lamps.
 // Proportions from published dims: L 4.08, W 1.54, H 1.50, wheelbase 2.40, track 1.31/1.35, tyre ~Ø0.64.
 import * as THREE from 'three';
+import { lensDetail } from './common.js';
 import { MAT as M0, paintMaterial, wheel } from './ghia.js';
 const MAT = { ...M0, glass: M0.glass.clone() }; MAT.glass.opacity = 0.42; MAT.glass.color.set('#1a2a33');
 const keys = (zs, ys) => { const n = zs.length, m = ys.map((_, i) => i === 0 ? (ys[1] - ys[0]) / (zs[1] - zs[0]) : i === n - 1 ? (ys[n - 1] - ys[n - 2]) / (zs[n - 1] - zs[n - 2]) : (ys[i + 1] - ys[i - 1]) / (zs[i + 1] - zs[i - 1]));
@@ -85,7 +86,7 @@ export function buildBug(spec, { studio = false, lod = 0, baja = false } = {}) {
   const Z = (a, b, n = 60) => Array.from({ length: n + 1 }, (_, i) => a + (b - a) * i / n);
   const belt = (z) => P.belt(z) - drop, roof = (z) => P.top(z) - drop, yb = (z) => P.yb(z) - drop;
   // interior
-  if (full) { const fy = yb(0) + 0.08; mesh(new THREE.BoxGeometry(1.2, 0.04, 2.0), MAT.black).position.set(0, fy, -0.2);
+  if (true) { /* r4: interior baked into HD */ const fy = yb(0) + 0.08; mesh(new THREE.BoxGeometry(1.2, 0.04, 2.0), MAT.black).position.set(0, fy, -0.2);
     for (const sx of [-1, 1]) { mesh(new THREE.BoxGeometry(0.44, 0.12, 0.46), MAT.leather).position.set(sx * 0.29, fy + 0.22, 0.05); const bk = mesh(new THREE.CapsuleGeometry(0.19, 0.26, 4, 10), MAT.leather); bk.scale.set(1.1, 1, 0.35); bk.position.set(sx * 0.29, belt(0) - 0.02, -0.22); bk.rotation.x = -0.2; }
     mesh(new THREE.BoxGeometry(1.0, 0.3, 0.32), MAT.leather).position.set(0, belt(-0.9) - 0.1, -0.85);
     mesh(new THREE.BoxGeometry(0.8, 0.12, 0.2), MAT.black).position.set(0, belt(0.5) - 0.06, 0.5);
@@ -116,7 +117,7 @@ export function buildBug(spec, { studio = false, lod = 0, baja = false } = {}) {
     const hz = baja ? 1.5 : 1.6, hy = (baja ? 0.9 : 0.86) - drop, hx = s * 0.645, g = new THREE.Group(); g.position.set(hx, hy, hz); g.rotation.x = -0.12; body.add(g);
     const pod = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.22, full ? 28 : 12).rotateX(Math.PI / 2), paint); pod.position.z = -0.08; pod.castShadow = true; g.add(pod);
     const ring = new THREE.Mesh(new THREE.TorusGeometry(0.094, 0.013, 8, full ? 32 : 14), MAT.chrome); ring.position.z = 0.03; g.add(ring);
-    const lens = new THREE.Mesh(new THREE.SphereGeometry(0.09, full ? 24 : 10, 8, 0, Math.PI * 2, 0, Math.PI / 2), MAT.lens); lens.rotation.x = Math.PI / 2; lens.scale.y = 0.28; lens.position.z = 0.025; g.add(lens);
+    const lens = new THREE.Mesh(new THREE.SphereGeometry(0.09, full ? 24 : 10, 8, 0, Math.PI * 2, 0, Math.PI / 2), MAT.lens); lens.rotation.x = Math.PI / 2; lens.scale.y = 0.28; lens.position.z = 0.025; g.add(lens); lensDetail(g, 0.09, 0.025, full, 0.28);
     const t = new THREE.Group(); t.position.set(s * (baja ? 0.66 : 0.64), (baja ? 0.84 : 0.79) - drop, baja ? -1.45 : -1.73); t.rotation.x = 0.55; body.add(t);
     const tl = new THREE.Mesh(new THREE.SphereGeometry(0.07, full ? 18 : 8, 10), MAT.tail); tl.scale.set(0.75, 1.25, 0.45); t.add(tl);
     const tr = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.008, 6, 20), MAT.chrome); tr.scale.set(0.75, 1.25, 1); t.add(tr);
@@ -135,7 +136,7 @@ export function buildBug(spec, { studio = false, lod = 0, baja = false } = {}) {
   for (const s of [-1, 1]) { const dh = side(-0.22, belt(-0.22) - 0.07, s); if (dh) { const h = mesh(new THREE.CapsuleGeometry(0.011, 0.1, 4, 8), MAT.chrome); h.rotation.x = Math.PI / 2; h.position.copy(dh.p).addScaledVector(dh.n, 0.012); } }
   if (full) { const mh = side(0.55, belt(0.55) + 0.01, 1); if (mh) { const g = new THREE.Group(); g.position.copy(mh.p); body.add(g); const st = new THREE.Mesh(new THREE.CylinderGeometry(0.007, 0.007, 0.12, 6), MAT.chrome); st.rotation.z = -0.9; st.position.set(0.05, 0.04, 0); g.add(st); const hd = new THREE.Mesh(new THREE.SphereGeometry(0.045, 14, 8), MAT.chrome); hd.scale.set(0.5, 1, 1.2); hd.position.set(0.1, 0.08, 0); g.add(hd); } }
   if (baja) { // tube bumpers, exposed engine, stinger exhaust
-    const T = (pts, r = 0.028) => mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts.map(([x, y, z]) => V3(x, y - drop, z)), false, 'catmullrom', 0.1), full ? 48 : 14, r, full ? 10 : 5), MAT.black);
+    const T = (pts, r = 0.028) => (r *= 1.3, 0) ||  mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts.map(([x, y, z]) => V3(x, y - drop, z)), false, 'catmullrom', 0.1), full ? 48 : 14, r, full ? 10 : 5), MAT.black);
     T([[-0.62, 0.42, 1.45], [-0.62, 0.42, 1.78], [-0.5, 0.42, 1.86], [0.5, 0.42, 1.86], [0.62, 0.42, 1.78], [0.62, 0.42, 1.45]]);
     T([[-0.45, 0.42, 1.86], [-0.42, 0.72, 1.7], [0.42, 0.72, 1.7], [0.45, 0.42, 1.86]], 0.022);
     T([[-0.62, 0.45, -1.5], [-0.62, 0.45, -2.05], [-0.5, 0.45, -2.12], [0.5, 0.45, -2.12], [0.62, 0.45, -2.05], [0.62, 0.45, -1.5]]);

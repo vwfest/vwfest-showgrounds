@@ -1,7 +1,7 @@
 // Local-only perf + screenshot harness for the grounds (headless Chrome/SwiftShader). Usage: node tools/perf.cjs <label> [shots]
 process.env.SERVER_SECRET = 'perf-secret-0123456789abcdef'; process.env.PORT = '3391'; process.env.PROFILE_CREATE_PER_HOUR = '1000'; process.env.MAX_CONNS_PER_IP = '200'; process.env.MINT_ENABLED = '0';
 const { launch, until } = require('../test/lib.cjs'); const { devices } = require('playwright'); const S = require('../server.js'); const fs = require('fs');
-const BASE = 'http://127.0.0.1:3391/', label = process.argv[2] || 'run', shots = process.argv[3] === 'shots', OUT = '/workspace/nftmock/grounds/';
+const BASE = 'http://127.0.0.1:3391/', label = process.argv[2] || 'run', shots = process.argv[3] === 'shots', OUT = process.env.SHOT_OUT || '/workspace/nftmock/grounds/';
 (async () => {
   await S.init(); await new Promise((r) => S.server.listen(3391, '127.0.0.1', r)); const b = await launch(); const res = {};
   try {
@@ -40,7 +40,8 @@ const BASE = 'http://127.0.0.1:3391/', label = process.argv[2] || 'run', shots =
     res.errors = errs.slice(0, 8); await ctx.close();
     if (shots) { const ph = await b.newContext({ ...devices['iPhone 13'] }); const mp = await ph.newPage(); await mp.goto(BASE + '?quality=med&phase=0.3'); await until(mp, () => window.__ready, null, 180000);
       await mp.fill('input[aria-label=Nickname]', 'Ph' + Math.floor(Math.random() * 9000 + 1000)); await mp.locator('text=Create profile').evaluate((e) => e.click()); await until(mp, () => window.__sg.state.me && window.__sg.state.me.pid, null, 120000); await mp.waitForTimeout(800); await mp.evaluate(() => document.querySelectorAll('#modals > *').forEach((m) => m.remove()));
-      await mp.evaluate(() => { window.__sg.goto(0, -10); window.__sg.setCam(Math.PI * 0.85, 0.3); }); await mp.waitForTimeout(5000); await mp.screenshot({ path: OUT + label + '_phone.png' }); await ph.close(); }
+      await mp.evaluate(() => { window.__sg.goto(0, 12.5); window.__sg.setCam(Math.PI * 0.82, 0.18); window.__sg.setDist(6); }); await mp.waitForTimeout(1500);
+      await mp.evaluate(() => { const c = window.__sg.carFor({ model: 1, paint: 'two', c1: '#e76f22', c2: '#f4f1ea', wheels: 0, stance: 1, extras: 131, plate: 1 }); const cam = window.__sg.cam(), L = window.__sg.L; const dx = L.x - cam.position.x, dz = L.z - cam.position.z, n = Math.hypot(dx, dz), fx = dx / n, fz = dz / n; c.position.set(L.x + fx * 2.2, 0, L.z + fz * 2.2); c.rotation.y = Math.atan2(fx, fz) + 2.3; window.__sg.scene().add(c); }); await mp.waitForTimeout(6000); await mp.screenshot({ path: OUT + label + '_phone.png' }); await ph.close(); }
   } catch (e) { res.fatal = e.message; } finally { await b.close(); }
   console.log(JSON.stringify(res)); fs.writeFileSync(OUT + 'perf_' + label + '.json', JSON.stringify(res, null, 1)); process.exit(0);
 })();

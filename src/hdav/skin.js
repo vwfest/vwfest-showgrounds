@@ -17,8 +17,8 @@ function poreTex() { if (PORE) return PORE; const N = 512, cv = document.createE
   for (let i = 0; i < 5200; i++) { const x = rnd() * N, y = rnd() * N, rr = 0.8 + rnd() * 1.4; const gr = g.createRadialGradient(x, y, 0, x, y, rr * 1.8); gr.addColorStop(0, 'rgba(0,0,0,0.55)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(x - rr * 2, y - rr * 2, rr * 4, rr * 4); }
   PORE = new THREE.CanvasTexture(cv); PORE.wrapS = PORE.wrapT = THREE.RepeatWrapping; PORE.anisotropy = 8; return PORE; }
 export function skinMaterial(color, o = {}) {
-  const m = new THREE.MeshPhysicalMaterial({ color, roughness: 0.5, sheen: 0.35, sheenColor: new THREE.Color('#ffb59a'), sheenRoughness: 0.6, clearcoat: 0.06, clearcoatRoughness: 0.5 });
-  const U = { hairC: { value: new THREE.Color(o.hairC || '#222') }, beardC: { value: new THREE.Color(o.beardC || o.hairC || '#222') }, lipC: { value: new THREE.Color(color).lerp(new THREE.Color('#a24a46'), 0.7) }, sss: { value: o.sss ?? 0.65 }, poreT: { value: poreTex() } };
+  const m = new THREE.MeshPhysicalMaterial({ color, roughness: 0.52, sheen: 0.3, sheenColor: new THREE.Color('#ff9f86'), sheenRoughness: 0.6, clearcoat: 0.08, clearcoatRoughness: 0.5 });
+  const U = { hairC: { value: new THREE.Color(o.hairC || '#222') }, beardC: { value: new THREE.Color(o.beardC || o.hairC || '#222') }, lipC: { value: new THREE.Color(color).lerp(new THREE.Color('#a24a46'), 0.7) }, sss: { value: o.sss ?? 0.85 }, poreT: { value: poreTex() } };
   const D = []; if (o.head) D.push('HEAD'); if (o.scalp) D.push('SCALP'); if (o.mohawk) D.push('MOHAWK'); if (o.stubble) D.push('STUBBLE'); if (o.beard) D.push('BEARD'); if (o.chops) D.push('CHOPS'); if (o.freckles) D.push('FRECKLES');
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, U);
@@ -26,16 +26,16 @@ export function skinMaterial(color, o = {}) {
     sh.vertexShader = defs + 'varying vec3 vObj;\n' + (o.head ? 'attribute vec3 udir; varying vec3 vU;\n' : '') + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vObj = position;' + (o.head ? ' vU = udir;' : ''));
     let fs = defs + 'varying vec3 vObj;\n' + (o.head ? 'varying vec3 vU;\n' : '') + 'uniform vec3 hairC, beardC, lipC; uniform float sss; uniform sampler2D poreT;\n' + NOISE + sh.fragmentShader;
     fs = fs.replace('#include <lights_physical_pars_fragment>', THREE.ShaderChunk.lights_physical_pars_fragment.replace('vec3 irradiance = dotNL * directLight.color;',
-      'float wr = saturate((dot(geometryNormal, directLight.direction) + 0.45) / 1.45); vec3 irradiance = mix(vec3(dotNL), vec3(wr, mix(dotNL, wr, 0.45), mix(dotNL, wr, 0.3)) * vec3(1.0, 0.92, 0.88), sss) * directLight.color;'));
+      'float wr = saturate((dot(geometryNormal, directLight.direction) + 0.45) / 1.45); vec3 irradiance = mix(vec3(dotNL), vec3(wr, mix(dotNL, wr, 0.4), mix(dotNL, wr, 0.25)) * vec3(1.0, 0.86, 0.8) + vec3(0.07, 0.015, 0.01) * smoothstep(0.35, 0.0, abs(dot(geometryNormal, directLight.direction))), sss) * directLight.color;'));
     fs = fs.replace('#include <color_fragment>', `#include <color_fragment>
       float lf = vn(vObj * 9.0) * 0.6 + vn(vObj * 31.0) * 0.4;
-      diffuseColor.rgb *= mix(vec3(1.04, 0.97, 0.95), vec3(0.95, 0.99, 1.0), lf);
+      diffuseColor.rgb *= mix(vec3(1.04, 0.97, 0.95), vec3(0.95, 0.99, 1.0), lf); { float lm = dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11)); diffuseColor.rgb = max(mix(vec3(lm), diffuseColor.rgb, 1.15), 0.0); } // r3: livelier, less grey-plastic tone
       #ifdef HEAD
         vec3 u = normalize(vU); float ax = abs(u.x);
         float lip = exp(-u.x*u.x/(2.0*0.19*0.19)) * exp(-pow(u.y+0.458,2.0)/(2.0*0.042*0.042)) * step(0.0,u.z);
         diffuseColor.rgb = mix(diffuseColor.rgb, lipC, lip*0.95);
         float ml = exp(-pow(u.y+0.452,2.0)/(2.0*0.007*0.007)) * exp(-u.x*u.x/(2.0*0.18*0.18)) * step(0.0,u.z); diffuseColor.rgb *= 1.0 - 0.7*ml;
-        float sock = exp(-pow(ax-0.33,2.0)/(2.0*0.12*0.12)) * exp(-pow(u.y-0.1,2.0)/(2.0*0.09*0.09)) * step(0.0,u.z); diffuseColor.rgb *= 1.0 - 0.14*sock;
+        float sock = exp(-pow(ax-0.33,2.0)/(2.0*0.12*0.12)) * exp(-pow(u.y-0.1,2.0)/(2.0*0.09*0.09)) * step(0.0,u.z); diffuseColor.rgb *= 1.0 - 0.14*sock; float chk = exp(-pow(ax-0.36,2.0)/(2.0*0.1*0.1)) * exp(-pow(u.y+0.2,2.0)/(2.0*0.09*0.09)) * step(0.0,u.z); diffuseColor.rgb *= mix(vec3(1.0), vec3(1.05, 0.9, 0.88), chk); // r3: cheek blush
         float nlf = exp(-pow(ax-(0.13+(-0.25-u.y)*0.45),2.0)/(2.0*0.02*0.02)) * exp(-pow(u.y+0.37,2.0)/(2.0*0.08*0.08)) * step(0.0,u.z); diffuseColor.rgb *= 1.0 - 0.1*nlf;
         float nos = exp(-pow(ax-0.06,2.0)/(2.0*0.025*0.025)) * exp(-pow(u.y+0.3,2.0)/(2.0*0.022*0.022)) * step(0.0,u.z); diffuseColor.rgb *= 1.0 - 0.6*nos;
         float cheek = exp(-pow(ax-0.42,2.0)/(2.0*0.13*0.13)) * exp(-pow(u.y+0.2,2.0)/(2.0*0.12*0.12)) * step(0.0,u.z); diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb*vec3(1.04,0.9,0.88), cheek*0.6);
