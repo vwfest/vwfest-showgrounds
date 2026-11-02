@@ -327,7 +327,7 @@ async function boot() {
   $('#bAvatar').onclick = () => joined && openEditor(); $('#bShop').onclick = () => joined && UI.shopModal(ctx); $('#bGarage').onclick = () => joined && UI.garageModal(ctx); $('#bBurn').onclick = () => UI.burnModal(ctx); $('#bVoice').onclick = () => joined && UI.voiceModal(ctx); $('#bPlayers').onclick = () => joined && UI.playersModal(ctx); $('#bHelp').onclick = () => V.infoModal(ctx); $('#bVendors').onclick = () => V.vendorDirectory(ctx); const lh = $('#howLink'); if (lh) lh.onclick = (e) => { e.preventDefault(); V.infoModal(ctx); }; $('#bSet').onclick = settingsModal; $('#bProfile').onclick = () => joined && net.json({ t: 'profile', sid: state.me.id });
   net.connect(); showJoin(false); requestAnimationFrame(loop);
   if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) window.__sg = { // debug/test handle (state holds the profile secret): never on a public origin
-    dj, state, players, get world() { return world; }, L, net, ctx, get me() { return me3; }, cam: () => camera, goto: (x, z) => { L.x = x; L.z = z; }, emote: doEmote, setCam: (y, p) => { camYaw = y; camPitch = p; }, voice: () => voice, scene: () => scene, renderer: () => renderer, gfx: () => gfx, setDist: (d, look) => { camDist = d; camLook = look || 0; } };
+    dj, state, players, get world() { return world; }, L, net, ctx, get me() { return me3; }, cam: () => camera, goto: (x, z) => { L.x = x; L.z = z; }, emote: doEmote, setCam: (y, p) => { camYaw = y; camPitch = p; }, voice: () => voice, scene: () => scene, renderer: () => renderer, gfx: () => gfx, setDist: (d, look) => { camDist = d; camLook = look || 0; }, carFor };
   window.__ready = true;
 }
 function settingsModal() {

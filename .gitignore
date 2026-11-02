@@ -1,3 +1,5 @@
 node_modules/
 .env
 *.log
+tools/hd/*.bundle.js
+tools/hd/bake-av.html
