@@ -37,7 +37,7 @@ export const MAT = {
   lambert: std({ roughness: 0.88, metalness: 0 }),               // world: matte, with image-based lighting
   phong: std({ roughness: 0.38, metalness: 0.45 }),              // metallic / flake paint base
   glossy: new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.18, metalness: 0.35, clearcoat: 1, clearcoatRoughness: 0.04 }),
-  paint: new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.42, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.035, ior: 1.5, specularIntensity: 0.6, envMapIntensity: 0.85 }), // r2: dielectric base under a glassy coat (no grey metal sheen)
+  paint: new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.32, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.035, ior: 1.5, specularIntensity: 0.6, envMapIntensity: 0.85 }), // r2: dielectric base under a glassy coat (no grey metal sheen)
   paintMetal: new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.36, metalness: 0.6, clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 1.1 }),
   paintFlake: new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.25, metalness: 0.85, clearcoat: 1, clearcoatRoughness: 0.03, sheen: 0.4, sheenColor: new THREE.Color('#ffffff') }),
   paintCandy: new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.14, metalness: 0.55, clearcoat: 1, clearcoatRoughness: 0.02, iridescence: 0.25, iridescenceIOR: 1.4 }),
