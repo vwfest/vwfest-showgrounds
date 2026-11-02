@@ -212,7 +212,7 @@ async function buildOnce(av, { lod = 0, eq = {} } = {}, bodyOverride = 0) {
   const fib = (N) => { const r = []; for (let i = 0; i < N; i++) { const y = 1 - (2 * (i + 0.5)) / N, rr = Math.sqrt(1 - y * y), a = i * 2.39996; r.push(new THREE.Vector3(Math.cos(a) * rr, y, Math.sin(a) * rr)); } return r; };
   const tangent = (u, v) => v.clone().sub(u.clone().multiplyScalar(v.dot(u))).normalize();
   const crown = new THREE.Vector3(0, 0.78, -0.62).normalize();
-  const sg = LOD.seg, NS = Math.round(380 * LOD.strips);
+  const sg = LOD.seg, NS = Math.round(500 * LOD.strips); // r7: denser cards for volume
   if (hs !== 6 && hs !== 4) {
     const NSx = (hs === 0 ? 1.6 : hs === 1 ? 2 : 1) * (lod ? 0.6 : 1); const layers = lod === 2 ? [0.006] : [0.0035, 0.007, 0.0105];
     for (const off of layers) for (const u of fib(Math.round(NS * NSx / layers.length * (hs === 3 ? 2.2 : 1)))) { u.x += (rnd() - 0.5) * 0.03; u.z += (rnd() - 0.5) * 0.03; u.normalize(); if (u.y < hairline(u) + 0.03) continue; if (hs === 3 && Math.abs(u.x) > 0.2) continue;
@@ -239,6 +239,12 @@ async function buildOnce(av, { lod = 0, eq = {} } = {}, bodyOverride = 0) {
   const hairMat = new THREE.MeshStandardMaterial({ color: hairC.clone().multiplyScalar(1.05), map: strandTex(3), alphaTest: 0.25, alphaToCoverage: true, side: THREE.DoubleSide, roughness: 0.48, envMapIntensity: 0.75, normalMap: strandNormal(), normalScale: new THREE.Vector2(0.9, 0.9) });
   hairMat.map.colorSpace = THREE.SRGBColorSpace; hairMat.onBeforeCompile = (sh) => { sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_begin>', THREE.ShaderChunk.normal_fragment_begin + '\n normal = normalize(mix(normalize(vNormal), vec3(0.0, 0.0, 1.0), 0.35));'); }; hairMat.customProgramCacheKey = () => 'hairNF'; hairMat.map.wrapS = hairMat.map.wrapT = THREE.ClampToEdgeWrapping;
   hairMat.alphaMap = hairMat.map; hairMat.map = lod ? null : strandTex(3, true, 70, true); if (hairMat.map) hairMat.map.colorSpace = THREE.SRGBColorSpace; hairMat.color.copy(hairC).multiplyScalar(lod ? 0.95 : 1.15); hairMat.roughness = 0.7; hairMat.envMapIntensity = 0.6; if (lod) { hairMat.alphaToCoverage = false; hairMat.alphaTest = 0.3; hairMat.normalMap = null; }
+  if (hs !== 6 && hairAcc.idx.length) { // r7 scalp base: hair-coloured underlayer above the hairline so card gaps read as dense hair, not skin patches
+    const NU = lod ? 24 : 48, NV = lod ? 12 : 24, pos = [], idx = [], keep = []; for (let i = 0; i <= NV; i++) for (let j = 0; j <= NU; j++) { const th = (i / NV) * Math.PI * 0.62, ph = (j / NU) * Math.PI * 2, u = new THREE.Vector3(Math.sin(th) * Math.sin(ph), Math.cos(th), Math.sin(th) * Math.cos(ph));
+      const p = hf(u.x, u.y, u.z).addScaledVector(u, 0.0022); pos.push(p.x, p.y, p.z); keep.push(u.y >= hairline(u) + 0.045); }
+    for (let i = 0; i < NV; i++) for (let j = 0; j < NU; j++) { const a = i * (NU + 1) + j, b = a + NU + 1; if (keep[a] && keep[b] && keep[a + 1] && keep[b + 1]) idx.push(a, b, a + 1, b, b + 1, a + 1); }
+    const sg2 = new THREE.BufferGeometry(); sg2.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); sg2.setIndex(idx); sg2.computeVertexNormals();
+    const sc = M(sg2, new THREE.MeshStandardMaterial({ color: hairC.clone().multiplyScalar(0.55), roughness: 0.75, normalMap: strandNormal(), normalScale: new THREE.Vector2(0.6, 0.6) })); sc.receiveShadow = true; }
   if (hairAcc.idx.length) { const hm = M(accGeo(hairAcc), hairMat); hm.receiveShadow = false; hm.castShadow = !lod; hm.renderOrder = 2; }
   if (fhAcc.idx.length) { const fm = hairMat.clone(); fm.alphaMap = strandTex(11, false, 110); fm.map = null; fm.alphaTest = 0.3; fm.alphaTest = 0.45; fm.color.copy(hairC).multiplyScalar(0.38); M(accGeo(fhAcc), fm).receiveShadow = false; }
   if (hs === 4) { const g = new THREE.IcosahedronGeometry(0.19, lod === 2 ? 2 : lod ? 3 : 4); const pp = g.attributes.position, v = new THREE.Vector3(); for (let i = 0; i < pp.count; i++) { v.fromBufferAttribute(pp, i); const n = 1 + 0.06 * Math.sin(v.x * 90) * Math.sin(v.y * 80) * Math.sin(v.z * 70); pp.setXYZ(i, v.x * n, v.y * n * 0.95, v.z * n); } g.computeVertexNormals();
