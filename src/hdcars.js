@@ -29,7 +29,8 @@ function concat(items, withUv) {
   let nv = 0, ni = 0; for (const it of items) { nv += it.p.pos.length / 3; ni += it.p.idx.length; } if (!ni) return null;
   const pos = new Float32Array(nv * 3), nor = new Float32Array(nv * 3), col = new Float32Array(nv * 3), uv = withUv ? new Float32Array(nv * 2) : null, idx = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni); let v = 0, i = 0;
   for (const it of items) { const p = it.p, n = p.pos.length / 3; pos.set(p.pos, v * 3); nor.set(p.nor, v * 3); if (it.yOff) for (let k = 0; k < n; k++) pos[(v + k) * 3 + 1] += it.yOff;
-    if (it.paint) for (let k = 0; k < n; k++) { col[(v + k) * 3] = it.paint.r; col[(v + k) * 3 + 1] = it.paint.g; col[(v + k) * 3 + 2] = it.paint.b; } else if (p.col) col.set(p.col, v * 3); else col.fill(1, v * 3, (v + n) * 3);
+    if (it.paint && it.depth) for (let k = 0; k < n; k++) { const y = pos[(v + k) * 3 + 1], sh = 0.84 + 0.16 * Math.min(1, Math.max(0, (y - 0.3) / 1.0)), du = 0.3 * (1 - Math.min(1, Math.max(0, (y - 0.18) / 0.3))); /* r5: paint depth (deeper low, lighter crown) + road dust on lower panels */ col[(v + k) * 3] = it.paint.r * sh * (1 - du) + DUST.r * du; col[(v + k) * 3 + 1] = it.paint.g * sh * (1 - du) + DUST.g * du; col[(v + k) * 3 + 2] = it.paint.b * sh * (1 - du) + DUST.b * du; }
+    else if (it.paint) for (let k = 0; k < n; k++) { col[(v + k) * 3] = it.paint.r; col[(v + k) * 3 + 1] = it.paint.g; col[(v + k) * 3 + 2] = it.paint.b; } else if (p.col) col.set(p.col, v * 3); else col.fill(1, v * 3, (v + n) * 3);
     if (uv && p.uv) uv.set(p.uv, v * 2); for (let k = 0; k < p.idx.length; k++) idx[i++] = p.idx[k] + v; v += n; }
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.BufferAttribute(nor, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3)); if (uv) g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
   g.setIndex(new THREE.BufferAttribute(idx, 1)); g.computeBoundingSphere(); g.computeBoundingBox(); return g;
@@ -37,7 +38,7 @@ function concat(items, withUv) {
 // Camper: its big flat panels pick up a lot of sky reflection under the clear coat, which greys strong colours out.
 // Deepen saturated colours on that model only (whites/creams and the other rides are untouched).
 const hsl = {}, DEEP_ORANGE = new THREE.Color('#b83d00'); function rich(spec, hex) { const c = new THREE.Color(hex); if (spec.model !== 1) return c; c.getHSL(hsl); if (hsl.s < 0.35 || hsl.l > 0.85) return c; if (hsl.h > 0.005 && hsl.h < 0.11) return c.copy(DEEP_ORANGE); /* r2: any orange/salmon -> one deep, rich orange (ACES + sky reflection wash lighter oranges to terracotta) */ return c.setHSL(hsl.h, Math.min(1, hsl.s * 1.12 + 0.05), hsl.l * 0.8); }
-const GLASS_TINT = new THREE.Color('#16222b');
+const DUST = new THREE.Color('#8a7a62'); const GLASS_TINT = new THREE.Color('#16222b');
 // spec as in cars.js. legacy: {bins} low-poly extras for trait bits the HD bake has no geometry for (keeps every NFT trait visible).
 // Returns { near:{role:geo}, far:{role:geo}, tris:[near,far] }.
 export function assembleHD(d, spec, legacyBins) {
@@ -50,7 +51,7 @@ export function assembleHD(d, spec, legacyBins) {
   for (let k = layers.length - 1; k >= 1 && sum(layers, lods) > CAP; k--) lods[k] = 1;
   const out = { near: {}, far: {}, tris: [0, 0] };
   for (const [slot, ls] of [['near', lods], ['far', layers.map(() => 1)]]) { const byRole = {};
-    layers.forEach((L, i) => { for (const p of pick(L, ls[i])) { const role = p.role === 'paint2' ? 'paint' : p.role; (byRole[role] = byRole[role] || []).push({ p, yOff: L[0] === 'w' ? 0 : yOff, paint: p.role === 'paint' ? c1 : p.role === 'paint2' ? c2 : p.role === 'glass' ? GLASS_TINT : null }); } });
+    layers.forEach((L, i) => { for (const p of pick(L, ls[i])) { const role = p.role === 'paint2' ? 'paint' : p.role; (byRole[role] = byRole[role] || []).push({ p, yOff: L[0] === 'w' ? 0 : yOff, paint: p.role === 'paint' ? c1 : p.role === 'paint2' ? c2 : p.role === 'glass' ? GLASS_TINT : null, depth: p.role === 'paint' || p.role === 'paint2' }); } });
     if (legacyBins) for (const k in legacyBins) { const g = legacyBins[k]; const role = k === 'chrome' ? 'metal' : k === 'matte' ? 'matte' : k; const n = g.attributes.position.count;
       const p = { pos: g.attributes.position.array, nor: g.attributes.normal.array, col: g.attributes.color.array, idx: g.index ? g.index.array : Uint32Array.from({ length: n }, (_, i) => i), tris: 0 }; (byRole[role] = byRole[role] || []).push({ p, yOff: 0 }); }
     for (const r in byRole) { const g = concat(byRole[r], r === 'plate'); if (g) { out[slot][r] = g; out.tris[slot === 'near' ? 0 : 1] += g.index.count / 3; } } }

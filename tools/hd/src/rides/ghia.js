@@ -194,9 +194,7 @@ export function wheel(type, r, full = true) {
     m(new THREE.TorusGeometry(rim + 0.06, 0.0035, 4, seg), MAT.wall).position.z = W / 2 - 0.006;
 
     for (let i = 0; i < 28; i++) { if (i % 14 > 9) continue; const a = i / 28 * Math.PI * 2; const l = m(new THREE.BoxGeometry(0.012, 0.018, 0.004), MAT.wall); l.position.set(Math.cos(a) * (rim + 0.085), Math.sin(a) * (rim + 0.085), W / 2 - 0.004); l.rotation.z = a + Math.PI / 2; } }
-  { // r4 sidewall (baked at every LOD): bead lip at the rim, raised rim-protector rib, tread sipes across the crown
-    const ts = 24; for (const k of [-1, 1]) { m(new THREE.TorusGeometry(rim + 0.008, 0.006, 3, ts), MAT.tire).position.z = k * (W / 2 - 0.016); m(new THREE.TorusGeometry(rim + 0.035, 0.0045, 3, ts), MAT.tire).position.z = k * (W / 2 - 0.009); }
-    for (let i = 0; i < 24; i++) { const a = i / 24 * Math.PI * 2, sp = m(new THREE.BoxGeometry(0.006, 0.01, W * 0.7), MAT.black); sp.position.set(Math.cos(a) * (r - 0.002), Math.sin(a) * (r - 0.002), 0); sp.rotation.z = a; } }
+  for (const k of [-1, 1]) m(new THREE.TorusGeometry(rim + 0.008, 0.006, 3, 16), MAT.tire).position.z = k * (W / 2 - 0.016); // r5: rim bead lip only (ribs + sipes cut for weight)
   m(new THREE.CylinderGeometry(rim, rim, W - 0.02, full ? 40 : 16, 1, true).rotateX(Math.PI / 2), MAT.polished);
   m(new THREE.TorusGeometry(rim, 0.011, 8, full ? 48 : 16), MAT.polished).position.z = W / 2 - 0.012;
   const drum = m(new THREE.CylinderGeometry(0.15, 0.15, 0.08, full ? 28 : 12).rotateX(Math.PI / 2), MAT.drum); drum.position.z = -0.04;
