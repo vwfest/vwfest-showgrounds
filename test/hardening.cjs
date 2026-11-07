@@ -44,7 +44,7 @@ const seenJup = []; const jupSrv = http.createServer((req, res) => { seenJup.pus
   await t('LOW: the client auto-retries after "Reconnecting too fast" using the server\'s remaining cooldown, a bounded number of times', () => {
     assert.strictEqual(rejoinDelay({ err: 'rate', wait: 2000 }, 0), 2250); assert(rejoinDelay({ err: 'rate', wait: 100 }, 0) >= 1500, 'floor'); assert(rejoinDelay({ err: 'rate', wait: 9e6 }, 0) <= 15000, 'cap');
     assert.strictEqual(rejoinDelay({ err: 'rate', wait: 2000 }, 4), null, 'gives up after 4'); assert.strictEqual(rejoinDelay({ err: 'stale', wait: 2000 }, 0), null); assert.strictEqual(rejoinDelay({ err: 'rate' }, 0), null, 'a non-cooldown rate error (profile creation limit) is not retried'); assert.strictEqual(rejoinDelay(null, 0), null);
-    const main = fs.readFileSync(path.join(root, 'src/main.js'), 'utf8'); assert(/rejoinDelay\(m, rejoinTries\)/.test(main) && /net\.lastJoin/.test(main)); assert(/lastJoin = o/.test(fs.readFileSync(path.join(root, 'src/net.js'), 'utf8'))); });
+    const main = fs.readFileSync(path.join(root, 'src/main.js'), 'utf8'); assert(/rejoinDelay\(m, rejoinTries\)/.test(main) && /joinFlow\.retryIn\(d\)/.test(main), 'the cooldown retry re-sends the held join (src/joinflow.mjs)'); assert(/lastJoin = o/.test(fs.readFileSync(path.join(root, 'src/net.js'), 'utf8'))); });
 
   await t('token-pay quoting: Jupiter has no ExactOut route for $VWFEST, so maxIn comes from an ExactIn probe (+3%), then one real ExactIn quote of exactly maxIn', async () => {
     const calls = []; const rate = 1000n; // 1000 raw $VWFEST per raw pay-token unit

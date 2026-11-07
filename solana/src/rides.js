@@ -12,6 +12,10 @@ const TIERS = ['Common', 'Rare', 'Epic', 'Legendary', 'Mythic'];
 const ODDS = [55, 25, 12, 6, 2]; // percent, published
 const MODELS = ['Beetle', 'Bus', 'Karmann Ghia', 'Thing', 'Squareback', 'Baja Bug'];
 const LOWRIDERS = ['Lowrider Beetle', 'Lowrider Bus', 'Lowrider Karmann Ghia', 'Lowrider Squareback'];
+// MODELS/LOWRIDERS above are LEGACY INTERNAL ids: they feed specCode() (sha256 of the spec) and verifyRide(), so they must never change.
+// Only the user-facing name is mapped (trademark-safe display names).
+const DISPLAY = { Beetle: 'Bug', Bus: 'Camper', 'Karmann Ghia': 'Ghia Coupe', Thing: 'Safari', Squareback: 'Wagon', 'Baja Bug': 'Baja Bug' };
+const displayModel = (m) => { const s = String(m); if (s.startsWith('Lowrider ')) return 'Lowrider ' + (DISPLAY[s.slice(9)] || s.slice(9)); return DISPLAY[s] || s; };
 const COLORS = ['Red', 'Orange', 'Yellow', 'Mint', 'Ocean', 'Purple', 'Pink', 'White', 'Tangerine', 'Teal', 'Lime', 'Indigo', 'Navy', 'Sky', 'Brick', 'Black'];
 const CANDY = ['Candy Apple Red', 'Candy Purple', 'Candy Pink', 'Candy Tangerine', 'Candy Ocean', 'Candy Lime'];
 const PAINTS_BY_TIER = [['Solid', 'Solid', 'Patina'], ['Solid', 'Metallic', 'Two-tone'], ['Metallic', 'Candy', 'Flake', 'Two-tone'], ['Candy', 'Flake', 'Flake'], ['Candy']];
@@ -46,7 +50,7 @@ function defaultRoll(b) {
 const specCode = (s) => sha256(JSON.stringify([s.tier, s.model, s.paint, s.color, s.wheels, s.stance, s.plate, [...s.extras].sort(), s.serial]));
 function specAttributes(s) {
   return [
-    { trait_type: 'Rarity', value: TIERS[s.tier] }, { trait_type: 'Model', value: s.model }, { trait_type: 'Paint', value: s.paint }, { trait_type: 'Color', value: s.color },
+    { trait_type: 'Rarity', value: TIERS[s.tier] }, { trait_type: 'Model', value: displayModel(s.model) }, { trait_type: 'Paint', value: s.paint }, { trait_type: 'Color', value: s.color },
     { trait_type: 'Wheels', value: s.wheels }, { trait_type: 'Stance', value: s.stance }, { trait_type: 'Plate', value: 'VWFEST' + (s.plate === 'DIAMOND' ? ' (Diamond lettering)' : s.plate === 'Chrome' ? ' (Chrome)' : '') },
     { trait_type: 'Lowrider', value: /Lowrider/.test(s.model) || s.stance === 'Lowrider' ? 'Yes' : 'No' },
     { trait_type: 'Extras', value: s.extras.length ? s.extras.join(', ') : 'None' }, { trait_type: 'Build', value: '#' + String(s.serial).padStart(4, '0') },
@@ -80,4 +84,4 @@ function verifyRide({ seed, commit, sig, reroll = 0, spec }, roller = defaultRol
   return JSON.stringify(again) === JSON.stringify(spec) ? { ok: true } : { ok: false, why: 'roll does not match' };
 }
 const tierName = (roller, spec) => roller.tiers[typeof spec.tier === 'number' ? spec.tier : roller.tiers.indexOf(spec.tier)];
-module.exports = { TIERS, ODDS, MODELS, LOWRIDERS, defaultRoller, defaultRoll, adaptShared, serverSeed, commitOf, finalSeed, rollBytes, rollRide, verifyRide, specCode, specAttributes, tierName };
+module.exports = { TIERS, ODDS, MODELS, LOWRIDERS, DISPLAY, displayModel, defaultRoller, defaultRoll, adaptShared, serverSeed, commitOf, finalSeed, rollBytes, rollRide, verifyRide, specCode, specAttributes, tierName };

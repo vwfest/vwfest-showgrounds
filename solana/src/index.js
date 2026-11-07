@@ -84,7 +84,7 @@ class Solana {
       if (!o.nft) throw new Error('nft traits required');
       const attributes = nft.attributesFromTraits(o.nft.traits); const fingerprint = o.nft.fingerprint ? nft.cleanText(o.nft.fingerprint, 128) : nft.fingerprintOf(o.nft.traits);
       let image = null, imageSvg = null; if (o.nft.imageSvg) imageSvg = nft.checkSvg(o.nft.imageSvg); else if (o.nft.image) { image = nft.safeUrl(o.nft.image); if (!image) throw new Error('image must be an https/ipfs URL'); } else throw new Error('image or imageSvg required');
-      const fp = crypto.createHash('sha256').update(this.cfg.collections.avatar.name + ':' + fingerprint).digest('hex'); // namespaced
+      const fp = crypto.createHash('sha256').update((this.cfg.collections.avatar.fpNamespace || this.cfg.collections.avatar.name) + ':' + fingerprint).digest('hex'); // namespaced
       if (this.store.has('minted', fp)) throw new Error('This avatar has already been minted. Change something to make it unique.');
       nftIn = { fp, fingerprint, attributes, name: nft.cleanText(o.nft.name || 'VW Fest Avatar', 48), image, imageSvg };
     }

@@ -1,7 +1,8 @@
-// Procedural low-poly VWs (Beetle, Bus, Karmann Ghia, Thing, Squareback, Baja) with paint types, wheels, stance, extras, VWFEST plates.
+// Procedural low-poly rides (Bug, Camper, Ghia Coupe, Safari, Wagon, Baja Bug) with paint types, wheels, stance, extras, VWFEST plates.
 import { THREE, Batch, MAT, shade, mix, cTex } from './batch.js';
 import { PAL } from '../shared/traits.js';
 import RIDES from '../shared/rides.js';
+import { loadHD, hdReady, assembleHD, HD_FAR } from './hdcars.js';
 
 export const PLATE_UNI = { uTime: { value: 0 } };
 let plateTex = null, plateTexDia = null, diaMat = null, plateMat = null, chromeMat = null;
@@ -11,7 +12,7 @@ function plateTexture(kind) {
   x.fillStyle = kind === 2 ? '#007fb0' : '#1d3557'; x.font = '900 30px Arial Black, Arial'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText('VWFEST', 64, 34);
   x.font = '700 9px Arial'; x.fillText('CALIFORNIA · SHOW GROUNDS', 64, 11); const t = cTex(cv); return t;
 }
-function plateMaterial(kind) {
+export function plateMaterial(kind) {
   if (kind === 2) {
     if (!diaMat) { diaMat = new THREE.ShaderMaterial({ uniforms: { uTime: PLATE_UNI.uTime, map: { value: plateTexture(2) } }, vertexShader: 'varying vec2 vUv; varying vec3 vP; void main(){ vUv=uv; vP=position; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);} ',
       fragmentShader: `uniform sampler2D map; uniform float uTime; varying vec2 vUv; varying vec3 vP;
@@ -26,6 +27,8 @@ function plateMaterial(kind) {
   return plateMat || (plateMat = new THREE.MeshLambertMaterial({ map: plateTexture(0) }));
 }
 // Routes every primitive to a material bin (paint / chrome / glass / matte / lamp) so the car gets real PBR materials, still merged to 5 meshes.
+// r6: daytime HD lamps: glassy lens with a soft glow instead of a blown-out bloom blob (refs show chrome-ringed lenses)
+const HD_LAMP = new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.06, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.02, emissive: new THREE.Color('#ffffff'), emissiveIntensity: 0.45, envMapIntensity: 1.2 });
 const BIN = { glass: new Set(['#25384f', '#7aa7c7']), chrome: new Set(['#d8dde6', '#9aa3af', '#e9edf3', '#e5b83a', '#aab2bd', '#7d8590', '#dddddd']), matte: new Set(['#16171a', '#202226', '#222', '#0e0e10', '#2b2b2f', '#111', '#7a4a2a', '#f4f1ea', '#3a2f2a', '#4a3a32', '#222222']), lamp: new Set(['#fff6c8', '#fff27a', '#c1121f']) };
 const binOf = (c) => { const k = String(c).toLowerCase(); for (const n in BIN) if (BIN[n].has(k)) return n; return 'paint'; };
 class CarBatch extends Batch {
@@ -74,20 +77,20 @@ export function buildCar(spec) {
     g(d.W - 0.2, 0.4, 0.04, GLASS, 0, y0 + h * 0.73, L / 2 - 0.02); g(0.04, 0.4, 0.4, GLASS, 0, y0 + h * 0.73, L / 2 - 0.02); // split windshield bar
     g(0.4, 0.18, 0.06, '#f4f1ea', 0, y0 + h * 0.45, L / 2 + 0.02, 0, 0, 0.0); g(0.05, 0.4, 0.07, '#f4f1ea', -0.17, y0 + h * 0.42, L / 2 + 0.02, 0, 0, 0.5); g(0.05, 0.4, 0.07, '#f4f1ea', 0.17, y0 + h * 0.42, L / 2 + 0.02, 0, 0, -0.5); // V
     gr(d.W + 0.1, 0.12, 0.2, CHROME, 0, y0 + 0.1, L / 2 + 0.06); gr(d.W + 0.1, 0.12, 0.2, CHROME, 0, y0 + 0.1, -L / 2 - 0.06);
-  } else if (M === 3) { // Thing
+  } else if (M === 3) { // Safari
     const h = d.H - y0; gr(d.W, h * 0.42, L, c1, 0, y0 + h * 0.21, 0, 0, 0, 0, 0.07); g(0.05, h * 0.3, L * 0.5, c1, -hw + 0.02, y0 + h * 0.57, -0.2); g(0.05, h * 0.3, L * 0.5, c1, hw - 0.02, y0 + h * 0.57, -0.2); g(d.W, h * 0.3, 0.06, c1, 0, y0 + h * 0.57, -L / 2 + 0.05);
     g(d.W - 0.1, 0.05, 0.08, '#222', 0, d.H - 0.2, L * 0.12); g(0.05, 0.36, 0.05, '#222', -hw + 0.1, d.H - 0.38, L * 0.12); g(0.05, 0.36, 0.05, '#222', hw - 0.1, d.H - 0.38, L * 0.12); g(d.W - 0.2, 0.3, 0.03, '#7aa7c7', 0, d.H - 0.4, L * 0.12, 0, -0.25); // windshield
     g(d.W - 0.3, 0.12, 1.2, shade(c1, 0.7), 0, y0 + h * 0.5, 0.3); g(0.45, 0.45, 0.4, shade(c1, 0.7), -0.4, y0 + 0.55, -0.9); g(0.45, 0.45, 0.4, shade(c1, 0.7), 0.4, y0 + 0.55, -0.9);
     gr(d.W + 0.1, 0.1, 0.16, CHROME, 0, y0 + 0.1, L / 2 + 0.05); gr(d.W + 0.1, 0.1, 0.16, CHROME, 0, y0 + 0.1, -L / 2 - 0.05);
-  } else if (M === 2) { // Karmann Ghia
+  } else if (M === 2) { // Ghia Coupe
     const h = d.H - y0; b.sph(hw, h * 0.34, L / 2, low, 0, y0 + h * 0.3, 0, 24); b.sph(hw * 0.88, h * 0.34, L * 0.3, top, 0, y0 + h * 0.62, -0.25, 20);
     g(d.W - 0.15, h * 0.26, 0.9, GLASS, 0, y0 + h * 0.62, 0.06, 0, -0.35); g(d.W - 0.2, 0.2, 0.05, GLASS, 0, y0 + h * 0.62, -0.78); g(0.04, h * 0.2, 1.0, GLASS, hw * 0.88, y0 + h * 0.62, -0.25); g(0.04, h * 0.2, 1.0, GLASS, -hw * 0.88, y0 + h * 0.62, -0.25);
     gr(d.W + 0.05, 0.1, 0.16, CHROME, 0, y0 + 0.14, L / 2 + 0.02); gr(d.W + 0.05, 0.1, 0.16, CHROME, 0, y0 + 0.14, -L / 2 - 0.02);
-  } else if (M === 4) { // Squareback
+  } else if (M === 4) { // Wagon
     const h = d.H - y0; b.sph(hw, h * 0.36, L / 2, low, 0, y0 + h * 0.3, 0, 24); g(d.W - 0.1, h * 0.32, L * 0.5, top, 0, y0 + h * 0.62, -0.5); b.sph(hw * 0.9, h * 0.3, 0.7, top, 0, y0 + h * 0.58, 0.45, 16);
     g(d.W - 0.2, h * 0.2, 0.04, GLASS, 0, y0 + h * 0.62, 0.5, 0, -0.5); for (const s of [-1, 1]) { g(0.04, h * 0.2, 0.85, GLASS, s * (hw - 0.08), y0 + h * 0.62, 0.05); g(0.04, h * 0.2, 0.85, GLASS, s * (hw - 0.08), y0 + h * 0.62, -1.0); }
     gr(d.W + 0.05, 0.1, 0.16, CHROME, 0, y0 + 0.14, L / 2 + 0.02); gr(d.W + 0.05, 0.1, 0.16, CHROME, 0, y0 + 0.14, -L / 2 - 0.02);
-  } else { // Beetle (0) and Baja (5)
+  } else { // Bug (0) and Baja Bug (5)
     const h = d.H - y0; b.sph(hw, h * 0.34, L / 2, low, 0, y0 + h * 0.3, 0, 24);
     if (M === 0) { b.sph(hw * 0.86, h * 0.4, L * 0.27, top, 0, y0 + h * 0.62, -0.1, 24); g(d.W - 0.3, h * 0.2, 0.04, GLASS, 0, y0 + h * 0.62, 0.52, 0, -0.45); g(d.W - 0.4, 0.2, 0.04, GLASS, 0, y0 + h * 0.62, -0.72, 0, 0.45); for (const s of [-1, 1]) g(0.04, h * 0.2, 0.95, GLASS, s * hw * 0.82, y0 + h * 0.62, -0.1); }
     else { g(d.W - 0.5, 0.06, 1.0, '#222', 0, y0 + h * 0.8, -0.2); for (const s of [-1, 1]) { g(0.06, 0.55, 0.06, '#222', s * 0.6, y0 + h * 0.6, 0.25); g(0.06, 0.55, 0.06, '#222', s * 0.6, y0 + h * 0.6, -0.65); } g(d.W - 0.3, h * 0.2, 0.05, GLASS, 0, y0 + h * 0.58, 0.35, 0, -0.6); g(0.9, 0.12, 0.12, '#dddddd', 0, y0 + h * 0.82, 0.1); }
@@ -152,12 +155,33 @@ export function rideSpec(r) {
   const c1 = r.paint === 5 ? '#' + RIDES.PATINA[r.c1 % RIDES.PATINA.length] : '#' + RIDES.COLORS[r.c1];
   return { model: r.model, paint, c1, c2: r.c2 === 16 ? null : '#' + RIDES.COLORS[r.c2], wheels: r.wheels, stance: r.stance, extras: r.extras, plate: r.plate, stripe: 0, lowrider: r.stance === 4, tier: r.tier };
 }
+// ---- HD rides (pre-baked code-built bodies, see src/hdcars.js). Low-poly stays as the instant placeholder / fallback. ----
+// Camper: own satin-gloss paint (less sky reflection on its big flat panels, so oranges stay rich); other rides keep the shared paints.
+let camperPaint = null; const camperMat = () => camperPaint || (camperPaint = new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.55, metalness: 0, clearcoat: 0.4, clearcoatRoughness: 0.12, specularIntensity: 0.2, envMapIntensity: 0.18 }));
+const paintMat = (spec) => spec.model === 1 && (spec.paint === 'solid' || spec.paint === 'two') ? camperMat() : spec.paint === 'patina' ? MAT.lambert : spec.paint === 'candy' ? MAT.paintCandy : spec.paint === 'flake' ? MAT.paintFlake : spec.paint === 'metallic' ? MAT.paintMetal : MAT.paint;
+export function buildCarHD(spec, d, farOnly = false) {
+  const a = assembleHD(d, spec); const mats = { paint: paintMat(spec), metal: MAT.chrome, matte: MAT.tire, glass: MAT.glass, lamp: HD_LAMP, plate: plateMaterial(spec.plate || 0) };
+  const level = (geos) => { const grp = new THREE.Group(); for (const r in geos) { const m = new THREE.Mesh(geos[r], mats[r]); m.castShadow = r !== 'glass' && r !== 'plate'; m.receiveShadow = r !== 'glass'; if (r === 'glass') m.renderOrder = 2; grp.add(m); } return grp; };
+  const group = new THREE.Group(), body = new THREE.Group(); group.add(body);
+  if (farOnly) body.add(level(a.far)); else { const lod = new THREE.LOD(); lod.addLevel(level(a.near), 0); lod.addLevel(level(a.far), HD_FAR); body.add(lod); }
+  const dm = MODEL_DIM[spec.model]; group.userData = { body, hydro: !!spec.lowrider, dims: dm, plateDiamond: spec.plate === 2, bound: Math.max(dm.L, 3) / 2, hd: true, tris: a.tris }; return group;
+}
 const cache = new Map();
-export function carFor(spec) { // geometry cache; returns a fresh Group sharing geometry
-  const k = JSON.stringify(spec); let proto = cache.get(k);
-  if (!proto) { proto = buildCar(spec); cache.set(k, proto); if (cache.size > 80) { const f = cache.keys().next().value; cache.delete(f); } }
-  const g = new THREE.Group(); const body = new THREE.Group(); g.add(body);
-  for (const ch of proto.userData.body.children) { const m = new THREE.Mesh(ch.geometry, ch.material); m.castShadow = ch.castShadow; m.receiveShadow = ch.receiveShadow; m.renderOrder = ch.renderOrder; body.add(m); }
-  for (const ch of proto.children) if (ch !== proto.userData.body) { const m = new THREE.Mesh(ch.geometry, ch.material); m.position.copy(ch.position); m.rotation.copy(ch.rotation); g.add(m); }
-  g.userData = { ...proto.userData, body }; return g;
+function cloneTree(o) {
+  let c; if (o.isMesh) { c = new THREE.Mesh(o.geometry, o.material); c.castShadow = o.castShadow; c.receiveShadow = o.receiveShadow; c.renderOrder = o.renderOrder; }
+  else if (o.isLOD) { c = new THREE.LOD(); for (const l of o.levels) c.addLevel(cloneTree(l.object), l.distance); c.position.copy(o.position); c.rotation.copy(o.rotation); return c; }
+  else c = new THREE.Group();
+  c.position.copy(o.position); c.rotation.copy(o.rotation); c.scale.copy(o.scale); for (const ch of o.children) c.add(cloneTree(ch)); return c;
+}
+function protoFor(spec, d) { const k = (d ? 'hd' : 'lo') + JSON.stringify(spec); let p = cache.get(k); if (!p) { p = d ? buildCarHD(spec, d) : buildCar(spec); cache.set(k, p); if (cache.size > 80) { const f = cache.keys().next().value; cache.delete(f); } } return p; }
+function fill(g, proto) { // swap contents in place: the Group and its .userData.body stay the same objects (callers keep references)
+  const body = g.userData.body; for (const ch of [...body.children]) body.remove(ch); for (const ch of [...g.children]) if (ch !== body) g.remove(ch);
+  for (const ch of proto.userData.body.children) body.add(cloneTree(ch)); for (const ch of proto.children) if (ch !== proto.userData.body) g.add(cloneTree(ch));
+  g.userData = { ...proto.userData, body };
+}
+export function carFor(spec) { // geometry cache; returns a fresh Group sharing geometry. HD replaces the low-poly placeholder as soon as its bake is loaded.
+  const g = new THREE.Group(); const body = new THREE.Group(); g.add(body); g.userData.body = body;
+  const d = hdReady(spec.model); fill(g, protoFor(spec, d));
+  if (!d) loadHD(spec.model, (dd) => fill(g, protoFor(spec, dd)));
+  return g;
 }

@@ -35,7 +35,7 @@ function inspect(tx, { mint, nonce, wallet, devWallet, burnMin, devMin, uri, exp
     if ((prog === 'spl-token' || prog === 'spl-token-2022') && p && p.type === 'burnChecked' && p.info.mint === mint && p.info.authority === signer) burn += BigInt(p.info.tokenAmount.amount); // burnChecked only (unchecked burn is not accepted)
     else if (prog === 'spl-memo' && typeof p === 'string') memo = p;
     else if (prog === 'system' && p && p.type === 'transfer' && devWallet && p.info.source === signer && p.info.destination === devWallet) dev += BigInt(p.info.lamports);
-    else if (String(ix.programId) === C.MPL_CORE_PROGRAM && ix.data) { const c = parseCoreCreate(ix.data); if (c) { asset = String(ix.accounts[0]); createdUri = c.uri; const owner = ix.accounts[4] && String(ix.accounts[4]); ownerOk = !owner || owner === signer || owner === C.MPL_CORE_PROGRAM; } }
+    else if (String(ix.programId) === C.MPL_CORE_PROGRAM && ix.data) { const c = parseCoreCreate(ix.data); if (c) { asset = String(ix.accounts[0]); createdUri = c.uri; const owner = ix.accounts[4] && String(ix.accounts[4]); const payer = ix.accounts[3] && String(ix.accounts[3]); const eff = owner && owner !== C.MPL_CORE_PROGRAM ? owner : payer; ownerOk = !!eff && eff === signer; } } // mpl-core CreateV1: an omitted owner (program-id placeholder) defaults to the PAYER (accounts[3]), so the effective owner must be the burning signer }
   }
   if (burn <= 0n) return { ok: false, why: 'No $VWFEST burn found in that transaction' };
   if (expires !== undefined && expires !== null) { // fail closed: no usable block time, no credit (not final: the cluster may not have stamped it yet)

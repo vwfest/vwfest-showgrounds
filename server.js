@@ -9,6 +9,7 @@ const crypto = require('crypto');
 require('./lib/secret'); // fails fast in production without SERVER_SECRET
 const chain = require('./lib/chain'); const { NftAvatars } = require('./lib/nftavatar'); const { DJ } = require('./lib/dj'); // Solana payments module (solana/): quotes + on-chain verification (INTERFACES.md §1)
 const walletauth = require('./lib/walletauth');
+const recovery = require('./lib/recovery');
 const { WebSocketServer } = require('ws');
 const { Hub } = require('./lib/hub');
 const { Burns, isSig } = require('./lib/burns');
@@ -263,7 +264,7 @@ app.get('/ride/:file', (req, res) => {
   nftHead(res); const r = rides.byId.get(m[1]);
   res.set('Cache-Control', r ? 'public, max-age=3600' : 'no-store');
   if (m[2] === 'svg') return res.type('image/svg+xml').send(r ? ridesvg(r.spec) : placeholder());
-  const base = { symbol: 'VWRIDE', external_url: 'https://vwfest.github.io/vwfest-arcade/', image: `${publicUrl}/ride/${m[1]}.svg`, properties: { files: [{ uri: `${publicUrl}/ride/${m[1]}.svg`, type: 'image/svg+xml' }], category: 'image' }, collection: { name: 'VW Fest Show Grounds Rides' } };
+  const base = { symbol: 'VWRIDE', external_url: 'https://vwfest.github.io/vwfest-arcade/', image: `${publicUrl}/ride/${m[1]}.svg`, properties: { files: [{ uri: `${publicUrl}/ride/${m[1]}.svg`, type: 'image/svg+xml' }], category: 'image' }, collection: { name: 'Show Grounds Rides' } };
   if (!r) return res.type('json').send(JSON.stringify({ ...base, name: 'VW Fest Ride (mystery)', description: 'Mystery ride. It is revealed when the mint transaction confirms.', attributes: [{ trait_type: 'Status', value: 'Unrevealed' }] }));
   const d = R.describe(r.spec);
   res.type('json').send(JSON.stringify({ ...base, name: `VW Fest Ride ${d.build}`, description: `A ${d.tier} ${d.model} from the VW Fest Show Grounds. Every ride carries a VWFEST plate. Randomness is commit-reveal: commit ${r.commit}, server seed ${r.seed}, final seed = SHA256(seed + ":" + mint tx signature)${r.reroll ? ' + "#' + r.reroll + '" re-roll counter' : ''}.`,
@@ -313,8 +314,9 @@ function cleanSignal(k, d) {
   return o;
 }
 const RTC_MAX_FRAME = 4500; // an audio-only offer/answer is ~1-3 KB
+let connSeq = 0;
 function onConnect(ws, ip, origin) {
-  const c = { ws, ip, origin, player: null, tokens: 30, last: Date.now(), mv: 30, mvLast: Date.now(), strikes: 0, alive: true, burning: false, lastBurn: 0, joinTimer: null, rtc: 20, rtcLast: Date.now(), mic: 40, micLast: Date.now(), micDrops: 0, joining: false };
+  const c = { id0: ++connSeq, ws, ip, origin, player: null, tokens: 30, last: Date.now(), mv: 30, mvLast: Date.now(), strikes: 0, alive: true, burning: false, lastBurn: 0, joinTimer: null, rtc: 20, rtcLast: Date.now(), mic: 40, micLast: Date.now(), micDrops: 0, joining: false };
   conns.add(c); ipCount.set(ip, (ipCount.get(ip) || 0) + 1);
   c.joinTimer = setTimeout(() => { if (!c.player) ws.close(1000, 'join timeout'); }, num(process.env.PREJOIN_MS, 20000));
   hub.json(c, { t: 'hi', online: hub.size, cap: cfg.maxPlayers, full: hub.size >= cfg.maxPlayers, burns: burns.summary(), mint: { enabled: mint.enabled } });
@@ -407,6 +409,28 @@ async function handle(c, m) {
       clearTimeout(c.joinTimer); setRide(r.p, prof.ride); hub.json(c, vendorMsg()); nftav.restore && setTimeout(() => nftav.restore(r.p), 50); setTimeout(() => dj.hello(r.p), 80); hub.welcome(r.p, { rpcToken: rpcGuard.issue(c, r.p, c.origin), iceServers: STUN, cred: created, created: prof.created, inv: inv(r.p), vibe: prof.av.vibe });
       } finally { c.joining = false; }
       break;
+    }
+    case 'rauth': { // profile recovery step 1 (before join): a recover-purpose challenge for this wallet
+      if (p) return; if (!budget('rauth:' + c.ip, num(process.env.RECOVER_PER_10MIN, 10), 600e3) || !budget('rauthc:' + c.id0, 4, 60e3)) return hub.json(c, { t: 'rres', ok: false, why: 'Too many recovery attempts. Try again in a few minutes.' });
+      const ch = walletauth.challenge(typeof m.pubkey === 'string' ? m.pubkey : '', null, c.origin, NETWORK, 'recover'); if (!ch) return hub.json(c, { t: 'rres', ok: false, why: 'Bad wallet address' });
+      if (!c.recoverExtended) { c.recoverExtended = true; clearTimeout(c.joinTimer); c.joinTimer = setTimeout(() => { if (!c.player) c.ws.close(1000, 'join timeout'); }, walletauth.TTL_RECOVER + 30e3); } // signing in a wallet pop-up takes longer than the normal pre-join window
+      return hub.json(c, { t: 'rchal', pubkey: m.pubkey, nonce: ch.nonce, message: ch.message, exp: ch.exp });
+    }
+    case 'rproof': { // step 2: verify the signature, list the profiles this wallet owns NFTs for (nothing is handed out yet)
+      if (p) return; if (!budget('rproof:' + c.ip, num(process.env.RECOVER_PER_10MIN, 10), 600e3)) return hub.json(c, { t: 'rres', ok: false, why: 'Too many recovery attempts. Try again in a few minutes.' });
+      const ok = typeof m.pubkey === 'string' && walletauth.verify({ nonce: m.nonce, pubkey: m.pubkey, signature: m.sig, pid: null, origin: c.origin, purpose: 'recover' });
+      if (!ok) return hub.json(c, { t: 'rres', ok: false, why: 'Could not verify the wallet signature.' });
+      const list = recovery.profilesForWallet(m.pubkey, { rides, burns, profiles }).filter((x) => !mod.banned(x.id, c.ip));
+      c.recover = list.length ? { pubkey: m.pubkey, ids: new Set(list.map((x) => x.id)), exp: Date.now() + 120e3 } : null;
+      return hub.json(c, { t: 'rres', ok: true, profiles: list, why: list.length ? undefined : 'No profile owns an avatar or ride NFT minted to this wallet.' });
+    }
+    case 'rclaim': { // step 3: one claim per proof; rotate the secret and hand the credential to THIS socket only
+      if (p) return; const r = c.recover; c.recover = null;
+      if (!r || r.exp < Date.now() || typeof m.id !== 'string' || !r.ids.has(m.id)) return hub.json(c, { t: 'rcred', ok: false, why: 'Recovery expired. Sign again to continue.' });
+      const prof = profiles.byId.get(m.id); const secret = prof && profiles.rotateSecret(prof.id); if (!secret) return hub.json(c, { t: 'rcred', ok: false, why: 'Profile not found.' });
+      const live = hub.find(prof.id); if (live) { hub.json(live.conn, { t: 'kick', why: 'This profile was recovered with its wallet on another device.' }); live.conn.ws.close(1000, 'recovered'); hub.leave(live); }
+      console.log('[recover] profile', prof.id, 'recovered by wallet', r.pubkey.slice(0, 6) + '…');
+      return hub.json(c, { t: 'rcred', ok: true, id: prof.id, secret, nick: prof.nick });
     }
     case 'rpctok': { if (!p) return; const now = Date.now(); if (now - (p.lastRpcTok || 0) < 5000) return; p.lastRpcTok = now; hub.json(c, { t: 'rpctok', rpcToken: rpcGuard.issue(c, p, c.origin) }); break; } // rotate before expiry (client refreshes at ~60% of ttl)
     case 'chat': if (p) hub.onChat(p, m); break;

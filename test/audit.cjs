@@ -3,7 +3,7 @@
 // vendor plot-hold DoS, entry-quote discount abuse, WebSocket floods/garbage, forged logins, admin endpoint, purchase-transaction inspection.
 const path = require('path'); const ROOT = path.join(__dirname, '..');
 const assert = require('assert'); const WebSocket = require('ws');
-const PORT = 3361, BASE = `http://127.0.0.1:${PORT}`;
+const PORT = +process.env.AUDIT_PORT || 3361, BASE = `http://127.0.0.1:${PORT}`;
 Object.assign(process.env, { SERVER_SECRET: 'probe-secret-0123456789-0123456789abcdef', PORT: String(PORT), MINT_NETWORK: 'devnet', MINT_ENABLED: '1', VWFEST_MINT: '9ktd1qdiu9wRFhxHPczWKrKRGmJb9nkanv2Zz27Rpump', DEV_WALLET: 'DV4gtG2VpnDtFUVFnnrE5YM3A6LrV5qAcdfaaUwLFRok', FIXED_SOL_USD: '150', ADMIN_SECRET: 'probe-admin-secret-0123456789', MAX_CONNS_PER_IP: '60', PROFILE_CREATE_PER_HOUR: '500', DJ_SLOT_MS: '60000', SOLANA_RPC_URL: 'http://127.0.0.1:1',  VENDOR_FEE_USD: '30' });
 const S = require('../server.js'); const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const res = []; const rec = (id, sev, name, ok, note = '') => { res.push({ id, sev, name, ok, note }); if (!ok) process.exitCode = 1; console.log(ok ? 'ok  ' : 'FAIL', `[${sev}]`, id, name, ok ? '' : note); };
@@ -71,6 +71,12 @@ const join = async (nick) => { const c = await client(); await c.wait('hi'); c.s
     ['memo of another quote', tx([burn(), memo('vwfest:qzzz'), xfer(DEV, 100)]), false], ['no memo', tx([burn(), xfer(DEV, 100)]), false], ['failed tx', tx([burn(), memo('vwfest:qabc'), xfer(DEV, 100)], { err: { x: 1 } }), false],
     ['padded memo vwfest:x:qabc', tx([burn(), memo('vwfest:evil:qabc'), xfer(DEV, 100)]), false], ['missing tx', null, false], ['first key not a signer', tx([burn(), memo('vwfest:qabc'), xfer(DEV, 100)], { keys: [key(W, false), key(ATT, true)] }), false],
     ['burn only inside CPI', cpi, false], ['two memos: last wins', tx([memo('vwfest:qabc'), burn(), memo('vwfest:qother')]), false]];
+  { const bs58 = require(path.join(ROOT, 'solana/node_modules/bs58')); const B = bs58.default || bs58; const CORE = 'CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d'; const URI = 'https://x/ride/q.json';
+    const sb = (x) => { const b = Buffer.from(x); const l = Buffer.alloc(4); l.writeUInt32LE(b.length); return Buffer.concat([l, b]); }; const data = B.encode(Buffer.concat([Buffer.from([0, 0]), sb('VW'), sb(URI), Buffer.from([0])]));
+    const core = (payer, owner) => ({ programId: CORE, accounts: ['ASSET1111111111111111111111111111111111111', CORE, CORE, payer, owner, CORE, '11111111111111111111111111111111', CORE], data });
+    const mk = (payer, owner) => tx([burn(), memo('vwfest:qabc'), xfer(DEV, 100), core(payer, owner)], { keys: [key(W, true), key(ATT, true)] });
+    cases.push(['core mint to signer (owner omitted)', mk(W, CORE), true], ['core mint to signer (owner explicit)', mk(ATT, W), true], ['core owner omitted, PAYER is a co-signer (NFT goes to them)', mk(ATT, CORE), false], ['core owner explicit other wallet', mk(W, ATT), false]);
+    for (const [name, t, want] of cases.slice(-4)) rec('PAY', 'high', 'tx inspection: ' + name, inspect(t, { ...base, uri: URI }).ok === want); cases.splice(-4); }
   for (const [name, t, want] of cases) rec('PAY', 'high', 'tx inspection: ' + name, inspect(t, base).ok === want);
   const F = new Facade(); await F.init({ env: { NODE_ENV: 'production', CHAIN_FAKE: '1', MINT_NETWORK: 'devnet', MINT_ENABLED: '1', VWFEST_MINT: MINT, SERVER_SECRET: 'x'.repeat(40) } }); rec('PAY', 'high', 'CHAIN_FAKE is ignored when NODE_ENV=production', F.fake === false);
   const F2 = new Facade(); await F2.init({ env: { CHAIN_FAKE: '1', MINT_NETWORK: 'mainnet-beta', MINT_ENABLED: '1', MINT_MAINNET: '1', VWFEST_MINT: MINT, SERVER_SECRET: 'x'.repeat(40) } }); rec('PAY', 'high', 'CHAIN_FAKE is ignored on mainnet', F2.fake === false);

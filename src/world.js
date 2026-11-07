@@ -1,7 +1,8 @@
 // The VW FEST SHOW GROUNDS: static scene merged into a handful of draw calls, plus interactive spots and a day/sunset cycle.
 import { THREE, Batch, MAT, shade, mix, cTex } from './batch.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { buildCar, carFor, rideSpec, hydraulics, PLATE_UNI } from './cars.js';
+import { buildCar, buildCarHD, carFor, rideSpec, hydraulics, PLATE_UNI } from './cars.js';
+import { loadHD } from './hdcars.js';
 import RIDES from '../shared/rides.js';
 import { buildExtras } from './extras.js';
 import { Grass, buildMask } from './grass.js';
@@ -57,10 +58,15 @@ export function buildWorld(scene, opts = {}) {
     const model = pick([0, 0, 0, 1, 2, 3, 4, 5, 0, 1]), paint = pick(PAINT), c1 = RIDES.COLORS[Math.floor(R() * 16)], c2 = R() < 0.4 ? RIDES.COLORS[Math.floor(R() * 16)] : null;
     const lowrider = R() < 0.07; const spec = { model, paint: lowrider ? 'candy' : (paint === 'two' && !c2 ? 'solid' : paint), c1: '#' + (paint === 'patina' ? RIDES.PATINA[Math.floor(R() * 5)] : c1), c2: paint === 'two' || lowrider ? '#' + (c2 || RIDES.COLORS[3]) : null, wheels: lowrider ? 4 : pick([0, 1, 1, 2, 3]), stance: lowrider ? 4 : pick([0, 0, 1, 1, 2]), extras: lowrider ? 4 | 8 | 128 : Math.floor(R() * 8) & (R() < 0.5 ? 0 : 0b11001), plate: R() < 0.12 ? 1 : 0, stripe: R() < 0.2 ? Math.floor(R() * 4) + 1 : 0, lowrider };
     const car = buildCar(spec); car.position.set(x + (R() - 0.5) * 0.6, 0, z); car.rotation.y = (z % 20 === 4 || z === -4 ? 1 : -1) * 0 + (R() < 0.5 ? 0.1 : -0.1) + (x < 0 ? Math.PI / 2 : -Math.PI / 2) * 0; car.rotation.y = Math.PI / 2 * (x < 0 ? 1 : -1) + (R() - 0.5) * 0.25 + (R() < 0.15 ? Math.PI : 0);
-    carGroup.add(car); colliders.push({ x: car.position.x, z, r: 2.3 });
+    carGroup.add(car); specs.push({ spec, x: car.position.x, z: car.position.z, ry: car.rotation.y }); colliders.push({ x: car.position.x, z, r: 2.3 });
     // display board
     solid.box(0.5, 0.9, 0.05, '#f4f1ea', x + (x < 0 ? -2.3 : 2.3), 0.5, z, 0); }
-  { const cm = mergeMeshes(carGroup); cm.traverse((o) => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } }); scene.add(cm); }
+  { let cm = mergeMeshes(carGroup); cm.traverse((o) => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } }); scene.add(cm);
+    // HD upgrade: once every ride bake is loaded, swap the merged low-poly lot for the HD far LOD (still one merged mesh per material).
+    const need = [...new Set(specs.map((s) => s.spec.model))]; let left = need.length; const ds = {};
+    const swap = () => { const g2 = new THREE.Group(); for (const s of specs) { const c = buildCarHD(s.spec, ds[s.spec.model], true); c.position.set(s.x, 0, s.z); c.rotation.y = s.ry; g2.add(c); }
+      const hm = mergeMeshes(g2); hm.traverse((o) => { if (o.isMesh) { o.castShadow = o.material !== MAT.glass; o.receiveShadow = true; if (o.material === MAT.glass) o.renderOrder = 2; } }); scene.remove(cm); cm.traverse((o) => o.geometry && o.geometry.dispose()); cm = hm; scene.add(hm); };
+    for (const m of need) loadHD(m, (d) => { ds[m] = d; if (--left === 0) swap(); }); }
   // ---------- stage ----------
   const SZ = STAGE.SZ, SIGN = STAGE.SIGN, SCREEN = STAGE.SCREEN;
   solid.box(46, 1.6, 20, '#2b2230', 0, 0.8, SZ); solid.box(48, 0.2, 22, '#40344a', 0, 1.65, SZ); rect(0, SZ, 48, 22);
@@ -150,7 +156,7 @@ export function buildWorld(scene, opts = {}) {
   // ---------- showroom tent ----------
   const showroom = new THREE.Group(); scene.add(showroom);
   { const x = 42, z = 22; tent(x, z, 14, 10, '#2b2d42', '#ffd166'); solid.box(14.6, 0.2, 10.6, '#d8dde6', x, 0.1, z); rect(x, z - 4.6, 14.4, 0.8);
-    const t = textTex([{ t: '🚗 SHOWROOM', c: '#ffd166', s: 84, y: 80 }, { t: 'VW FEST SHOW GROUNDS RIDES', c: '#fff', s: 34, y: 150 }], { w: 640, h: 190, bg: '#14141f', border: '#ffd166' }); const m = signMesh(7.6, 2.25, t.t); m.position.set(x, 5.8, z + 5.4); scene.add(m);
+    const t = textTex([{ t: '🚗 SHOWROOM', c: '#ffd166', s: 84, y: 80 }, { t: 'SHOW GROUNDS RIDES', c: '#fff', s: 34, y: 150 }], { w: 640, h: 190, bg: '#14141f', border: '#ffd166' }); const m = signMesh(7.6, 2.25, t.t); m.position.set(x, 5.8, z + 5.4); scene.add(m);
     spots.push({ x, z: z + 7, r: 5, id: 'showroom', label: 'Showroom: open your garage / mint a ride' });
     api.showroomPos = [[x - 4.5, z - 1.2], [x, z - 1.2], [x + 4.5, z - 1.2], [x - 4.5, z + 2.2], [x, z + 2.2], [x + 4.5, z + 2.2]]; api.showroomPos.forEach(([px, pz]) => { solid.cyl(1.5, 0.3, '#2b2230', px, 0.35, pz, 0, 0, 0, 16); solid.cyl(1.4, 0.05, '#ffd166', px, 0.53, pz, 0, 0, 0, 16); }); }
   // ---------- bandstand speakers, hay bales, misc ----------
