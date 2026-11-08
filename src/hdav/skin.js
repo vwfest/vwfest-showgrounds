@@ -36,6 +36,8 @@ export function skinMaterial(color, o = {}) {
         diffuseColor.rgb = mix(diffuseColor.rgb, lipC, lip*0.95);
         float ml = exp(-pow(u.y+0.452,2.0)/(2.0*0.007*0.007)) * exp(-u.x*u.x/(2.0*0.18*0.18)) * step(0.0,u.z); diffuseColor.rgb *= 1.0 - 0.7*ml;
         float sock = exp(-pow(ax-0.33,2.0)/(2.0*0.12*0.12)) * exp(-pow(u.y-0.1,2.0)/(2.0*0.09*0.09)) * step(0.0,u.z); diffuseColor.rgb *= 1.0 - 0.14*sock; float chk = exp(-pow(ax-0.36,2.0)/(2.0*0.1*0.1)) * exp(-pow(u.y+0.2,2.0)/(2.0*0.09*0.09)) * step(0.0,u.z); diffuseColor.rgb *= mix(vec3(1.0), vec3(1.05, 0.9, 0.88), chk); // r3: cheek blush
+        float under = exp(-pow(ax-0.30,2.0)/(2.0*0.085*0.085)) * exp(-pow(u.y+0.015,2.0)/(2.0*0.032*0.032)) * step(0.0,u.z); diffuseColor.rgb *= 1.0 - 0.11*under; // soft under-eye so the socket reads
+        float temple = exp(-pow(ax-0.62,2.0)/(2.0*0.12*0.12)) * exp(-pow(u.y-0.12,2.0)/(2.0*0.14*0.14)); diffuseColor.rgb *= 1.0 - 0.05*temple;
         float nlf = exp(-pow(ax-(0.13+(-0.25-u.y)*0.45),2.0)/(2.0*0.02*0.02)) * exp(-pow(u.y+0.37,2.0)/(2.0*0.08*0.08)) * step(0.0,u.z); diffuseColor.rgb *= 1.0 - 0.1*nlf;
         float nos = exp(-pow(ax-0.06,2.0)/(2.0*0.025*0.025)) * exp(-pow(u.y+0.3,2.0)/(2.0*0.022*0.022)) * step(0.0,u.z); diffuseColor.rgb *= 1.0 - 0.6*nos;
         float cheek = exp(-pow(ax-0.42,2.0)/(2.0*0.13*0.13)) * exp(-pow(u.y+0.2,2.0)/(2.0*0.12*0.12)) * step(0.0,u.z); diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb*vec3(1.04,0.9,0.88), cheek*0.6);
@@ -68,7 +70,8 @@ export function skinMaterial(color, o = {}) {
     fs = fs.replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
       roughnessFactor = clamp(roughnessFactor * (0.85 + 0.35 * vn(vObj * 160.0)), 0.25, 0.8);
       #ifdef HEAD
-        { vec3 uu = normalize(vU); roughnessFactor *= 1.0 - 0.3 * exp(-uu.x*uu.x/(2.0*0.1*0.1)) * smoothstep(-0.3, 0.0, uu.y) * step(0.0, uu.z); }
+        { vec3 uu = normalize(vU); roughnessFactor *= 1.0 - 0.3 * exp(-uu.x*uu.x/(2.0*0.1*0.1)) * smoothstep(-0.3, 0.0, uu.y) * step(0.0, uu.z);
+          float lipR = exp(-uu.x*uu.x/(2.0*0.18*0.18)) * exp(-pow(uu.y+0.47,2.0)/(2.0*0.055*0.055)) * step(0.0, uu.z); roughnessFactor *= 1.0 - 0.38 * lipR; }
       #endif`);
     fs = fs.replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
       { vec3 on = abs(normalize(cross(dFdx(vObj), dFdy(vObj)))); on = on*on*on; on /= (on.x+on.y+on.z);
