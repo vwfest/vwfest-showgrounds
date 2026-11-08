@@ -20,6 +20,7 @@ import { recoverModal } from './recover.js';
 import { DjClient } from './dj.js';
 import { mountChip, djModal } from './djui.js';
 import { FIELDS, VIBES, DEFAULT } from '../shared/traits.js';
+import { fallbackConfig, loadConfig, loadConfigAttempts } from './configload.mjs';
 
 const CFG0 = window.SG_CONFIG || {}; const onGh = /github\.io$/.test(location.hostname) || location.protocol === 'file:';
 const SERVER = (CFG0.server && (onGh || CFG0.forceServer) ? CFG0.server : location.origin).replace(/\/$/, '');
@@ -320,12 +321,19 @@ function loop(now) {
 const drag3 = () => false;
 
 // ---------- boot ----------
+function bootStatus(text) { const body = $('#joinbody'); if (!body || body.childElementCount) return; body.append(h('p', { id: 'msgjoin', class: 'msg', text })); }
+function applyCfg(j) { state.cfg = j; if (voice && j) { if (j.voiceRange) voice.range = j.voiceRange; if (j.iceServers) voice.ice = j.iceServers; } }
 async function boot() {
-  try { const r = await fetch(SERVER + '/api/config'); state.cfg = await r.json(); } catch { state.cfg = { enabled: false, shop: [], odds: [], iceServers: [{ urls: 'stun:stun.l.google.com:19302' }], voiceRange: 15, rideUsd: 5, feeUsd: 5, discountPct: 50, decimals: 6, network: 'mainnet-beta' }; }
+  // Do not wait out a sleeping host: /api/config can sit open with zero bytes while a free instance wakes.
+  bootStatus('Reaching the server…');
+  const qms = Math.round(+q.get('cfgms')); const cfgTimeout = qms >= 200 && qms <= 8000 ? qms : 8000; // tests shorten the cap; a sleeping host must not hold the form open
+  const first = await loadConfig(fetch, SERVER + '/api/config', { timeoutMs: cfgTimeout });
+  applyCfg(first.ok ? first.cfg : fallbackConfig());
   initGL(); bindCanvasDrag(); bindChat(); bindNet(); if (isTouch) { document.body.classList.add('touch'); bindTouch(); }
   voice = new Voice(net, state.cfg); voice.onChange = () => updateVoiceHud(); state.blocked = (k) => voice.isBlocked(k);
   $('#bAvatar').onclick = () => joined && openEditor(); $('#bShop').onclick = () => joined && UI.shopModal(ctx); $('#bGarage').onclick = () => joined && UI.garageModal(ctx); $('#bBurn').onclick = () => UI.burnModal(ctx); $('#bVoice').onclick = () => joined && UI.voiceModal(ctx); $('#bPlayers').onclick = () => joined && UI.playersModal(ctx); $('#bHelp').onclick = () => V.infoModal(ctx); $('#bVendors').onclick = () => V.vendorDirectory(ctx); const lh = $('#howLink'); if (lh) lh.onclick = (e) => { e.preventDefault(); V.infoModal(ctx); }; $('#bSet').onclick = settingsModal; $('#bProfile').onclick = () => joined && net.json({ t: 'profile', sid: state.me.id });
   net.connect(); showJoin(false); requestAnimationFrame(loop);
+  if (!first.ok) loadConfigAttempts(fetch, SERVER + '/api/config', { from: 1, onAttempt: (r) => { if (r.ok) applyCfg(r.cfg); } }).catch(() => {});
   if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) window.__sg = { // debug/test handle (state holds the profile secret): never on a public origin
     dj, state, players, get world() { return world; }, L, net, ctx, get me() { return me3; }, cam: () => camera, goto: (x, z) => { L.x = x; L.z = z; }, emote: doEmote, setCam: (y, p) => { camYaw = y; camPitch = p; }, voice: () => voice, scene: () => scene, renderer: () => renderer, gfx: () => gfx, setDist: (d, look) => { camDist = d; camLook = look || 0; }, carFor };
   window.__ready = true;
