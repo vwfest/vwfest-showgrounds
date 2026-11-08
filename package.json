@@ -8,7 +8,7 @@
   "scripts": {
     "build": "node build.cjs",
     "start": "node server.js",
-    "test": "node test/unit.cjs && node test/move.cjs && node test/api.cjs && node test/guide.cjs && node test/security.cjs && node test/rpcguard.cjs && node test/rpcclient.cjs && node test/e2e.cjs && node test/purchase.cjs && node test/spots.cjs && node test/nft.cjs && node test/audit.cjs && node test/txaudit.cjs && node test/swapiso.cjs && node test/payiso.cjs && node test/djmath.cjs && node test/dj.cjs && node test/djclient.cjs && node test/credentials.cjs && node test/realtime.cjs && node test/wallet.cjs && node test/moderation.cjs && node test/framebuster.cjs && node test/rebroadcast.cjs && node test/quotes.cjs && node test/jup.cjs && node test/tracker.cjs && node test/abuse.cjs && node test/ui.cjs && node test/hardening.cjs && node test/recovery.cjs",
+    "test": "node test/unit.cjs && node test/move.cjs && node test/avatarpose.cjs && node test/api.cjs && node test/guide.cjs && node test/security.cjs && node test/rpcguard.cjs && node test/rpcclient.cjs && node test/e2e.cjs && node test/purchase.cjs && node test/spots.cjs && node test/nft.cjs && node test/audit.cjs && node test/txaudit.cjs && node test/swapiso.cjs && node test/payiso.cjs && node test/djmath.cjs && node test/dj.cjs && node test/djclient.cjs && node test/credentials.cjs && node test/realtime.cjs && node test/wallet.cjs && node test/moderation.cjs && node test/framebuster.cjs && node test/rebroadcast.cjs && node test/quotes.cjs && node test/jup.cjs && node test/tracker.cjs && node test/abuse.cjs && node test/ui.cjs && node test/hardening.cjs && node test/recovery.cjs",
     "test:security": "node test/security.cjs",
     "test:rpc": "node test/rpcguard.cjs",
     "test:unit": "node test/unit.cjs",

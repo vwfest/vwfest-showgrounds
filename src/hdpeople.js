@@ -3,6 +3,7 @@
 // Builds are queued one at a time so a crowd joining never stalls the frame; near (<=15k) and far (<3k) are built per person.
 import { buildAvatar } from './hdav/avatar2.js';
 import { loadAvatarBake } from './hdav/baked.js';
+import { hdPoseTargets } from './hdav/pose.mjs';
 import { clone as skClone } from 'three/addons/utils/SkeletonUtils.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as THREE from 'three';
@@ -17,12 +18,15 @@ function mergeRigid(root) { const groups = new Map();
     for (const m of list) { m.updateMatrix(); let g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone(); g.applyMatrix4(m.matrix); for (const a of Object.keys(g.attributes)) if (!['position', 'normal', 'uv', 'color'].includes(a)) g.deleteAttribute(a); geos.push(g); }
     const keys = Object.keys(geos[0].attributes); if (!geos.every((g) => Object.keys(g.attributes).length === keys.length && keys.every((k) => g.attributes[k]))) continue;
     const mg = mergeGeometries(geos, false); if (!mg) continue; const mm = new THREE.Mesh(mg, list[0].material); mm.castShadow = list[0].castShadow; mm.receiveShadow = list[0].receiveShadow; mm.renderOrder = list[0].renderOrder; for (const m of list) par.remove(m); par.add(mm); } }
+function setR(b, r) { if (b && r) b.rotation.set(r.x, r.y, r.z); }
 function drive(p, bones) { // low-poly pose groups -> HD bones (both rigs: +z forward, world-aligned bone frames)
-  const cp = (b, g, bx = 0, bz = 0) => { b.rotation.set(g.rotation.x + bx, g.rotation.y, g.rotation.z + bz); };
-  cp(bones.upperArmR, p.aL, 0, -0.04); cp(bones.upperArmL, p.aR, 0, 0.04); cp(bones.thighR, p.lL); cp(bones.thighL, p.lR);
-  for (const [sh, g] of [[bones.shinR, p.lL], [bones.shinL, p.lR]]) sh.rotation.x = Math.max(0, g.rotation.x) * 0.9 + 0.03;
-  for (const [fa, g] of [[bones.foreArmR, p.aL], [bones.foreArmL, p.aR]]) fa.rotation.x = -0.12 - Math.max(0, -g.rotation.x) * 0.35;
-  bones.spine.rotation.copy(p.upper.rotation);
+  const t = hdPoseTargets(p.upper.rotation, p.aL.rotation, p.aR.rotation, p.lL.rotation, p.lR.rotation);
+  setR(bones.upperArmR, t.armR.upper); setR(bones.foreArmR, t.armR.fore); setR(bones.handR, t.armR.hand);
+  setR(bones.upperArmL, t.armL.upper); setR(bones.foreArmL, t.armL.fore); setR(bones.handL, t.armL.hand);
+  bones.thighR.rotation.copy(p.lL.rotation); bones.thighL.rotation.copy(p.lR.rotation);
+  bones.shinR.rotation.x = t.legR.shin; bones.shinL.rotation.x = t.legL.shin;
+  bones.footR.rotation.x = t.legR.foot; bones.footL.rotation.x = t.legL.foot;
+  setR(bones.spine, t.spine); setR(bones.chest, t.chest); setR(bones.neck, t.neck); setR(bones.head, t.head);
 }
 export function hdPerson(p, av, eq = {}) {
   if (!enabled || typeof window === 'undefined') return; const e2 = { ...eq }; delete e2.aura; delete e2.glow; if (e2.hat === 'halo') delete e2.hat; // aura/glow/halo stay on the shared low-poly extras (animated by main.js)
