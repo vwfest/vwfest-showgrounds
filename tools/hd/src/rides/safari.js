@@ -1,7 +1,7 @@
 // Code-built "Safari" (early-70s rear-engine open utility). Cage set by eye from published dims:
 // L 3.78, W 1.64, H 1.50 (top up), wheelbase 2.40, track ~1.38, tyres 165-15 (dia ~0.62). Front=+z, metres.
 import * as THREE from 'three';
-import { setCrease, V3, keys, DROP, MAT, cageSurface, ring, kit, plateMat, paintMaterial, wheel , lensDetail, tailDetail } from './common.js';
+import { setCrease, V3, keys, DROP, MAT, cageSurface, ring, kit, plateMat, paintMaterial, wheel , lensDetail, tailDetail, fuelDoor, lampBezel } from './common.js';
 const ZF = 1.89, AXF = 1.19, AXR = -1.21, TRACK = 0.69;
 const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 const yb = keys([-1.89, -1.6, -1.0, 0, 1.0, 1.6, 1.89], [0.5, 0.42, 0.36, 0.35, 0.36, 0.42, 0.5]);
@@ -77,7 +77,7 @@ export function buildSafari(spec, { studio = false, lod = 0 } = {}) {
   for (const s of [-1, 1]) {
     const h = front(s * 0.6, B(0.8)); if (h) { const g = new THREE.Group(); g.add(mesh(new THREE.TorusGeometry(0.09, 0.016, 10, 36), MAT.chrome)); const pod = mesh(new THREE.CylinderGeometry(0.1, 0.11, 0.08, 36, 1, true).rotateX(Math.PI / 2), paint); pod.position.z = -0.03; g.add(pod);
       const lens = mesh(new THREE.SphereGeometry(0.086, 24, 10, 0, Math.PI * 2, 0, Math.PI / 2), MAT.lens); lens.rotation.x = Math.PI / 2; lens.scale.y = 0.3; g.add(lens); lensDetail(g, 0.086, 0, full); placeOn(h, g, 0.015, V3(0, 0, 3)); }
-    const ti = front(s * 0.66, B(0.58)); if (ti) placeOn(ti, mesh(new THREE.BoxGeometry(0.1, 0.05, 0.03), MAT.amber), 0.01);
+    const ti = front(s * 0.66, B(0.58)); if (ti) placeOn(ti, lampBezel(0.1, 0.048, MAT.amber), 0.01);
     const tl = front(s * 0.62, B(0.78), -1); if (tl) { const g = new THREE.Group(); const l = mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.03, 20).rotateX(Math.PI / 2), MAT.tail); g.add(l); tailDetail(g, 0.07, 0, 0.016, true); placeOn(tl, g, 0.01); } }
   { const h = topd(0, 1.18); if (h) { const sp = new THREE.Group(); { const t = mesh(new THREE.TorusGeometry(0.21, 0.075, 8, 28), MAT.rubber); sp.add(t); const r = mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.1, 20).rotateX(Math.PI / 2), MAT.chrome); sp.add(r); const hb = mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.12, 12).rotateX(Math.PI / 2), MAT.black); sp.add(hb); } sp.rotation.x = -Math.PI / 2 + 0.12; sp.position.copy(h.p).add(V3(0, 0.085, 0)); body.add(sp); } } // r9: spare tyre on the bonnet
   { const lb = new THREE.Group(); lb.position.set(0, B(1.52), 0.36); body.add(lb); lb.add(mesh(new THREE.BoxGeometry(1.05, 0.05, 0.06), MAT.black)); // r9: roof light bar
@@ -87,7 +87,9 @@ export function buildSafari(spec, { studio = false, lod = 0 } = {}) {
   for (const s of [1, -1]) { const y = B(0.44), z = s * (ZF + 0.04);
     const bl = mesh(new THREE.BoxGeometry(1.66, 0.085, 0.035), MAT.chrome); bl.position.set(0, y, z); body.add(bl);
     for (const x of [-0.5, 0.5]) { const br = mesh(new THREE.BoxGeometry(0.04, 0.04, 0.09), MAT.black); br.position.set(x, y, z - s * 0.08); body.add(br); }
+    if (full) for (const x of [-0.7, -0.28, 0.28, 0.7]) { const bolt = mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.016, 6).rotateX(Math.PI / 2), MAT.chrome); bolt.position.set(x, y, z + s * 0.02); body.add(bolt); }
     const pl = mesh(new THREE.PlaneGeometry(0.36, 0.12), plateMat(spec.plate)); pl.position.set(0, y + 0.13, s * (ZF + 0.0)); pl.rotation.y = s > 0 ? 0 : Math.PI; const ph = front(0, y + 0.15, s); if (ph) placeOn(ph, pl, 0.008); }
+  { const fh = side(-0.4, B(0.62), 1); if (fh) placeOn(fh, fuelDoor(), 0.01); }
   for (const s of [-1, 1]) { const mh = side(0.5, B(1.0), s); if (mh && full) { const g = new THREE.Group(); const arm = mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.14, 6), MAT.chrome); arm.rotation.x = Math.PI / 2; arm.position.z = 0.07; g.add(arm); const hd = mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.02, 20), MAT.chrome); hd.position.z = 0.15; g.add(hd); placeOn(mh, g, 0, V3(0, 0.5, 0.4)); } }
   // ---- extras ----
   const E = spec.extras || 0, has = (i) => !!(E & (1 << i));

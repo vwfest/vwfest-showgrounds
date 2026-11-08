@@ -130,6 +130,7 @@ export function buildBug(spec, { studio = false, lod = 0, baja = false } = {}) {
   if (!baja) for (const s of [1, -1]) { const y = 0.37 - drop, zb = s * 2.06, pts = Z(-0.8, 0.8, 16).map((x) => V3(x, y, zb - s * 0.12 * (x / 0.8) ** 2));
     const bl = mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), full ? 60 : 16, 0.04, full ? 10 : 5), MAT.chrome); bl.scale.y = 1.4; bl.position.y = -y * 0.4;
     for (const bx of [-0.42, 0.42]) { const br = mesh(new THREE.BoxGeometry(0.05, 0.05, 0.14), MAT.black); br.position.set(bx, y - 0.02, zb - s * 0.09); if (full) { const o = mesh(new THREE.CapsuleGeometry(0.025, 0.12, 4, 10), MAT.chrome); o.position.set(bx * 0.75, y + 0.06, zb + s * 0.0); } }
+    if (full) for (const bx of [-0.62, -0.2, 0.2, 0.62]) { const bolt = mesh(new THREE.CylinderGeometry(0.011, 0.011, 0.016, 6).rotateX(Math.PI / 2), MAT.chrome); bolt.position.set(bx, y, zb + s * 0.02); }
     if (s > 0) { const pl = mesh(new THREE.PlaneGeometry(0.36, 0.12), plateMat(spec.plate)); pl.position.set(0, y - 0.1, zb + 0.03); }
     else { const pl = mesh(new THREE.PlaneGeometry(0.36, 0.12), plateMat(spec.plate)); pl.rotation.y = Math.PI; pl.position.set(0, 0.6 - drop, -1.97); const lt = mesh(new THREE.BoxGeometry(0.16, 0.05, 0.06), MAT.chrome); lt.position.set(0, 0.69 - drop, -1.96); } }
   // door handles, mirror, exhaust (twin pea-shooters)
@@ -149,7 +150,8 @@ export function buildBug(spec, { studio = false, lod = 0, baja = false } = {}) {
     const st = mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([V3(0, 0.34 - drop, -1.95), V3(0, 0.44 - drop, -2.1), V3(0, 0.68 - drop, -2.18)]), full ? 24 : 8, 0.04, full ? 12 : 6, false), MAT.chrome);
     const pl = mesh(new THREE.PlaneGeometry(0.36, 0.12), plateMat(spec.plate)); pl.position.set(0, 0.62 - drop, 1.75); pl.rotation.x = -0.2;
     const pr = mesh(new THREE.PlaneGeometry(0.36, 0.12), plateMat(spec.plate)); pr.rotation.y = Math.PI; pr.position.set(0, 0.62 - drop, -2.13); }
-  if (!baja) for (const ex of [-0.26, 0.26]) { const p = mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.26, full ? 14 : 6, 1, true).rotateX(Math.PI / 2), MAT.chrome); p.position.set(ex, 0.3 - drop, -2.0); }
+  if (!baja) for (const ex of [-0.26, 0.26]) { const p = mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.26, full ? 14 : 6, 1, true).rotateX(Math.PI / 2), MAT.chrome); p.position.set(ex, 0.3 - drop, -2.0);
+    const tip = mesh(new THREE.TorusGeometry(0.026, 0.004, 5, 12), MAT.heat); tip.rotation.y = Math.PI / 2; tip.position.set(ex, 0.3 - drop, -2.12); }
   { // cut window openings out of the body shell so the glass is see-through
     const pa = bodyMesh.geometry.attributes.position, ix = bodyMesh.geometry.index.array, keep = [], c = new THREE.Vector3();
     const inWin = (x, y, z) => { const ax = Math.abs(x);

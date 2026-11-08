@@ -1,8 +1,9 @@
 // Procedural low-poly rides (Bug, Camper, Ghia Coupe, Safari, Wagon, Baja Bug) with paint types, wheels, stance, extras, VWFEST plates.
-import { THREE, Batch, MAT, shade, mix, cTex } from './batch.js';
+import { THREE, Batch, shade, mix, cTex } from './batch.js';
 import { PAL } from '../shared/traits.js';
 import RIDES from '../shared/rides.js';
 import { loadHD, hdReady, assembleHD, HD_FAR } from './hdcars.js';
+import { hdMaterials } from './ridemat.js';
 
 export const PLATE_UNI = { uTime: { value: 0 } };
 let plateTex = null, plateTexDia = null, diaMat = null, plateMat = null, chromeMat = null;
@@ -27,8 +28,6 @@ export function plateMaterial(kind) {
   return plateMat || (plateMat = new THREE.MeshLambertMaterial({ map: plateTexture(0) }));
 }
 // Routes every primitive to a material bin (paint / chrome / glass / matte / lamp) so the car gets real PBR materials, still merged to 5 meshes.
-// r6: daytime HD lamps: glassy lens with a soft glow instead of a blown-out bloom blob (refs show chrome-ringed lenses)
-const HD_LAMP = new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.06, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.02, emissive: new THREE.Color('#ffffff'), emissiveIntensity: 0.45, envMapIntensity: 1.2 });
 const BIN = { glass: new Set(['#25384f', '#7aa7c7']), chrome: new Set(['#d8dde6', '#9aa3af', '#e9edf3', '#e5b83a', '#aab2bd', '#7d8590', '#dddddd']), matte: new Set(['#16171a', '#202226', '#222', '#0e0e10', '#2b2b2f', '#111', '#7a4a2a', '#f4f1ea', '#3a2f2a', '#4a3a32', '#222222']), lamp: new Set(['#fff6c8', '#fff27a', '#c1121f']) };
 const binOf = (c) => { const k = String(c).toLowerCase(); for (const n in BIN) if (BIN[n].has(k)) return n; return 'paint'; };
 class CarBatch extends Batch {
@@ -62,7 +61,7 @@ function wheelAt(b, wheels, x, y, z, r, side) {
 // spec: {model, paint:'solid'|'metallic'|'candy'|'flake'|'two'|'patina', c1:'#rrggbb', c2:'#rrggbb'|null, wheels, stance, extras, plate, stripe, lowrider}
 export function buildCar(spec) {
   const d = MODEL_DIM[spec.model], b = new CarBatch(), wr = d.wr, st = spec.stance, clear = CLEAR[st] + (spec.model === 5 ? 0.12 : 0);
-  const candy = spec.paint === 'candy', metal = spec.paint === 'metallic', flake = spec.paint === 'flake', patina = spec.paint === 'patina';
+  const metal = spec.paint === 'metallic', flake = spec.paint === 'flake', patina = spec.paint === 'patina';
   let c1 = spec.c1;
   const c2 = spec.c2 || c1; const top = flake || metal ? mix(c1, '#ffffff', 0.12) : c1, low = spec.c2 ? c2 : shade(c1, 0.9);
   const y0 = clear + wr * 0.35; // chassis bottom
@@ -127,8 +126,8 @@ export function buildCar(spec) {
   else if (stripe === 4) for (const s of [-1, 1]) for (let i = 0; i < 14; i++) g(0.02, 0.08, 0.28, i % 2 ? '#111' : '#f4f1ea', s * (hw + 0.01), y0 + 0.14, -L / 2 + 0.3 + i * 0.28);
   // lowrider trim: chrome bumpers extras, fender skirts hint, antenna
   if (spec.lowrider) { for (const s of [-1, 1]) { g(0.03, 0.2, 0.9, shade(c1, 0.8), s * (hw + 0.0), y0 + 0.18, -wz); g(0.03, 0.2, 0.9, shade(c1, 0.8), s * (hw + 0.0), y0 + 0.18, wz); } g(0.04, 0.5, 0.04, CHROME, hw - 0.3, topY + 0.2, -L / 2 + 0.6); }
-  const bins = b.buildAll(); const pmat = patina ? MAT.lambert : candy ? MAT.paintCandy : flake ? MAT.paintFlake : metal ? MAT.paintMetal : MAT.paint;
-  const mats = { paint: pmat, chrome: MAT.chrome, glass: MAT.glass, matte: MAT.tire, lamp: MAT.lamp };
+  const bins = b.buildAll(); const hm = hdMaterials(spec);
+  const mats = { paint: hm.paint, chrome: hm.metal, glass: hm.glass, matte: hm.matte, lamp: hm.lamp };
   const group = new THREE.Group(); const body = new THREE.Group(); group.add(body);
   for (const k in bins) { const m = new THREE.Mesh(bins[k], mats[k]); m.castShadow = k !== 'glass'; m.receiveShadow = k !== 'glass'; if (k === 'glass') m.renderOrder = 2; body.add(m); }
   // plates (front + rear) 
@@ -156,11 +155,9 @@ export function rideSpec(r) {
   return { model: r.model, paint, c1, c2: r.c2 === 16 ? null : '#' + RIDES.COLORS[r.c2], wheels: r.wheels, stance: r.stance, extras: r.extras, plate: r.plate, stripe: 0, lowrider: r.stance === 4, tier: r.tier };
 }
 // ---- HD rides (pre-baked code-built bodies, see src/hdcars.js). Low-poly stays as the instant placeholder / fallback. ----
-// Camper: own satin-gloss paint (less sky reflection on its big flat panels, so oranges stay rich); other rides keep the shared paints.
-let camperPaint = null; const camperMat = () => camperPaint || (camperPaint = new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.55, metalness: 0, clearcoat: 0.4, clearcoatRoughness: 0.12, specularIntensity: 0.2, envMapIntensity: 0.18 }));
-const paintMat = (spec) => spec.model === 1 && (spec.paint === 'solid' || spec.paint === 'two') ? camperMat() : spec.paint === 'patina' ? MAT.lambert : spec.paint === 'candy' ? MAT.paintCandy : spec.paint === 'flake' ? MAT.paintFlake : spec.paint === 'metallic' ? MAT.paintMetal : MAT.paint;
+// Finishes live in ridemat.js (clearcoat, fresnel glass, coloured lamp cores, per-vertex metal and rubber). Camper keeps a satin coat so the orange is not greyed out by the sky.
 export function buildCarHD(spec, d, farOnly = false) {
-  const a = assembleHD(d, spec); const mats = { paint: paintMat(spec), metal: MAT.chrome, matte: MAT.tire, glass: MAT.glass, lamp: HD_LAMP, plate: plateMaterial(spec.plate || 0) };
+  const a = assembleHD(d, spec); const hm = hdMaterials(spec); const mats = { paint: hm.paint, metal: hm.metal, matte: hm.matte, glass: hm.glass, lamp: hm.lamp, plate: plateMaterial(spec.plate || 0) };
   const level = (geos) => { const grp = new THREE.Group(); for (const r in geos) { const m = new THREE.Mesh(geos[r], mats[r]); m.castShadow = r !== 'glass' && r !== 'plate'; m.receiveShadow = r !== 'glass'; if (r === 'glass') m.renderOrder = 2; grp.add(m); } return grp; };
   const group = new THREE.Group(), body = new THREE.Group(); group.add(body);
   if (farOnly) body.add(level(a.far)); else { const lod = new THREE.LOD(); lod.addLevel(level(a.near), 0); lod.addLevel(level(a.far), HD_FAR); body.add(lod); }

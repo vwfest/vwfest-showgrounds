@@ -15,10 +15,12 @@ export const MAT = {
   liner: new THREE.MeshStandardMaterial({ color: '#060607', roughness: 1, side: THREE.DoubleSide }),
   glass: new THREE.MeshPhysicalMaterial({ color: '#16222b', roughness: 0, metalness: 0.3, clearcoat: 1, envMapIntensity: 1.6, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }),
   lens: new THREE.MeshPhysicalMaterial({ color: '#fffaf0', roughness: 0.04, emissive: '#fff4d0', emissiveIntensity: 0.25, clearcoat: 1 }),
+  bulb: new THREE.MeshPhysicalMaterial({ color: '#ffe7a8', roughness: 0.08, emissive: '#ffb347', emissiveIntensity: 0.95, clearcoat: 1 }), // r10: hotter core than the lens glass
   amber: new THREE.MeshPhysicalMaterial({ color: '#ff9a1f', roughness: 0.1, emissive: '#6a3000', emissiveIntensity: 0.5, clearcoat: 1 }),
   tail: new THREE.MeshPhysicalMaterial({ color: '#a50f19', roughness: 0.12, emissive: '#5a0006', emissiveIntensity: 0.6, clearcoat: 1 }),
   leather: new THREE.MeshStandardMaterial({ color: '#4a3326', roughness: 0.6 }),
   canvas: new THREE.MeshStandardMaterial({ color: '#2b2a26', roughness: 0.95, side: THREE.DoubleSide }),
+  canvasTan: new THREE.MeshStandardMaterial({ color: '#d7c4a3', roughness: 0.95 }), // r10: raised camper roof canvas
   wood: new THREE.MeshStandardMaterial({ color: '#c99a5b', roughness: 0.5 }),
   gold: new THREE.MeshStandardMaterial({ color: '#ffd76a', roughness: 0.3, metalness: 0.5, side: THREE.DoubleSide }),
   white: new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.4, side: THREE.DoubleSide }),
@@ -81,10 +83,22 @@ export function plateMat(kind) { const cv = document.createElement('canvas'); cv
 // Lens = hemisphere radius R, dome along +z scaled to height h, base at z0. Merges into the metal/lamp roles (no new draw calls).
 export function lensDetail(g, R, z0 = 0, full = true, h = 0.3) { // baked at every LOD
   for (const k of [0.38, 0.62, 0.84]) { const rho = R * k, z = z0 + R * h * Math.sqrt(1 - k * k) + 0.0015; const t = new THREE.Mesh(new THREE.TorusGeometry(rho, 0.0022, 3, 28), MAT.chrome); t.position.z = z; g.add(t); }
-  const bulb = new THREE.Mesh(new THREE.SphereGeometry(R * 0.16, 10, 6), MAT.lens); bulb.position.z = z0 + R * h + 0.004; g.add(bulb);
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(R * 0.16, 10, 6), MAT.bulb); bulb.position.z = z0 + R * h + 0.004; g.add(bulb);
   const cap = new THREE.Mesh(new THREE.CircleGeometry(R * 0.1, 12), MAT.chrome); cap.position.z = z0 + R * h + 0.004 + R * 0.165; g.add(cap); }
 // r5: tail lamp lens detail: chrome bezel + horizontal prism ribs over the red lens (box w x h, face at z)
 export function tailDetail(g, w, h, z = 0.016, round = false) {
   if (round) { const r = new THREE.Mesh(new THREE.TorusGeometry(w, 0.006, 4, 20), MAT.chrome); r.position.z = z; g.add(r); for (const k of [0.4, 0.7]) { const t = new THREE.Mesh(new THREE.TorusGeometry(w * k, 0.0025, 3, 16), MAT.gap); t.position.z = z + 0.001; g.add(t); } return; }
   for (const [bw, bh, x, y] of [[w + 0.012, 0.006, 0, h / 2], [w + 0.012, 0.006, 0, -h / 2], [0.006, h, w / 2, 0], [0.006, h, -w / 2, 0]]) { const b = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, 0.01), MAT.chrome); b.position.set(x, y, z - 0.002); g.add(b); }
   for (let i = 1; i < 5; i++) { const rb = new THREE.Mesh(new THREE.BoxGeometry(w * 0.9, 0.003, 0.004), MAT.gap); rb.position.set(0, -h / 2 + i * h / 5, z + 0.001); g.add(rb); } }
+// r10: round filler flap. Code-built, no manufacturer mark.
+export function fuelDoor() {
+  const g = new THREE.Group();
+  const door = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.012, 12).rotateZ(Math.PI / 2), MAT.chrome); door.castShadow = true; door.receiveShadow = true;
+  const lip = new THREE.Mesh(new THREE.TorusGeometry(0.044, 0.006, 4, 14), MAT.rubber); lip.rotation.y = Math.PI / 2;
+  g.add(door, lip); return g;
+}
+export function lampBezel(w, h, lensMat) {
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.016), lensMat));
+  const b = new THREE.Mesh(new THREE.BoxGeometry(w + 0.028, h + 0.024, 0.01), MAT.chrome); b.position.z = -0.006; g.add(b); return g;
+}

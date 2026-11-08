@@ -1,7 +1,7 @@
 // Code-built "Wagon" (late-60s rear-engine squareback estate). Cage set by eye from published dims:
 // L 4.22, W 1.605, H 1.47, wheelbase 2.40, track ~1.31, tyres 165-15 (dia ~0.62). Front=+z, metres.
 import * as THREE from 'three';
-import { V3, keys, DROP, MAT, cageSurface, ring, kit, plateMat, paintMaterial, wheel , lensDetail, tailDetail } from './common.js';
+import { V3, keys, DROP, MAT, cageSurface, ring, kit, plateMat, paintMaterial, wheel , lensDetail, tailDetail, fuelDoor, lampBezel } from './common.js';
 const ZF = 2.11, AXF = 1.21, AXR = -1.19, TRACK = 0.655;
 const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 const yb = keys([-2.11, -1.85, -1.2, 0, 1.2, 1.85, 2.11], [0.42, 0.33, 0.26, 0.25, 0.26, 0.33, 0.4]);
@@ -61,7 +61,7 @@ export function buildWagon(spec, { studio = false, lod = 0 } = {}) {
   for (const s of [-1, 1]) {
     const h = front(s * 0.58, B(0.66)); if (h) { const g = new THREE.Group(); g.add(mesh(new THREE.TorusGeometry(0.088, 0.015, 10, 36), MAT.chrome)); const pod = mesh(new THREE.CylinderGeometry(0.095, 0.13, 0.12, 36, 1, true).rotateX(Math.PI / 2), paint); pod.position.z = -0.05; g.add(pod);
       const lens = mesh(new THREE.SphereGeometry(0.085, 24, 10, 0, Math.PI * 2, 0, Math.PI / 2), MAT.lens); lens.rotation.x = Math.PI / 2; lens.scale.y = 0.3; g.add(lens); lensDetail(g, 0.085, 0, full); placeOn(h, g, 0.02, V3(0, 0, 1.5)); }
-    const ti = front(s * 0.66, B(0.47)); if (ti) placeOn(ti, mesh(new THREE.BoxGeometry(0.13, 0.05, 0.03), MAT.amber), 0.01);
+    const ti = front(s * 0.66, B(0.47)); if (ti) placeOn(ti, lampBezel(0.12, 0.046, MAT.amber), 0.01);
     const gr = front(s * 0.27, B(0.5)); if (gr) { const g = new THREE.Group(); for (let i = 0; i < 4; i++) { const bar = mesh(new THREE.BoxGeometry(0.2, 0.008, 0.01), MAT.chrome); bar.position.y = (i - 1.5) * 0.02; g.add(bar); } placeOn(gr, g, 0.006); }
     const tl = front(s * 0.66, B(0.74), -1); if (tl) { const g = new THREE.Group(); const l = mesh(new THREE.BoxGeometry(0.13, 0.24, 0.03), MAT.tail); g.add(l); tailDetail(g, 0.13, 0.24); const a = mesh(new THREE.BoxGeometry(0.13, 0.06, 0.032), MAT.amber); a.position.y = 0.1; g.add(a); placeOn(tl, g, 0.01); }
   }
@@ -73,6 +73,7 @@ export function buildWagon(spec, { studio = false, lod = 0 } = {}) {
       const bl = add(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), full ? 60 : 20, 0.04, full ? 10 : 5), MAT.chrome); bl.geometry.translate(0, -y, 0); bl.scale.y = 1.25; bl.position.y = y;
       for (const ox of [-0.4, 0.4]) { const p = pts.reduce((a, b) => Math.abs(b.x - ox) < Math.abs(a.x - ox) ? b : a); const o = mesh(new THREE.CapsuleGeometry(0.03, 0.12, 6, 10), MAT.chrome); o.position.set(p.x, y + 0.04, p.z + s * 0.02); body.add(o); } }
     const ph = front(0, y + (s > 0 ? 0.16 : 0.2), s); if (ph) placeOn(ph, mesh(new THREE.PlaneGeometry(0.36, 0.12), plateMat(spec.plate)), 0.008); }
+  { const fh = side(-1.35, B(0.62), 1); if (fh) placeOn(fh, fuelDoor(), 0.008); }
   for (const s of [-1, 1]) { const dh = side(0.0, B(0.8), s); if (dh) { const hd = mesh(new THREE.CapsuleGeometry(0.012, 0.1, 4, 8), MAT.chrome); hd.rotation.set(0, Math.PI / 2, 0); const g = new THREE.Group(); g.add(hd); placeOn(dh, g, 0.012); }
     const mh = side(0.8, B(0.9), s); if (mh && full) { const g = new THREE.Group(); const st = mesh(new THREE.CylinderGeometry(0.008, 0.012, 0.09, 8), MAT.chrome); st.rotation.x = Math.PI / 2; st.position.z = 0.045; g.add(st); const hd = mesh(new THREE.SphereGeometry(0.05, 16, 10), MAT.chrome); hd.scale.set(1.1, 0.8, 0.5); hd.position.z = 0.1; g.add(hd); placeOn(mh, g, 0, V3(0, 1.2, 0)); } }
   // ---- extras ----
