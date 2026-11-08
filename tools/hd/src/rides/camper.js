@@ -1,7 +1,7 @@
 // Code-built "Camper" (late-60s style rear-engine van). Original cage set by eye from published dims:
 // L 4.42, W 1.72, H 1.95, wheelbase 2.40, track ~1.39, tyres 185R14 (dia ~0.65). Front=+z, metres.
 import * as THREE from 'three';
-import { setCrease, V3, keys, DROP, MAT, cageSurface, ring, kit, plateMat, paintMaterial, wheel , lensDetail, tailDetail } from './common.js';
+import { setCrease, V3, keys, DROP, MAT, cageSurface, ring, kit, plateMat, paintMaterial, wheel , lensDetail, tailDetail, fuelDoor, lampBezel } from './common.js';
 const ZF = 2.21, AXF = 1.27, AXR = -1.13, TRACK = 0.7;
 const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 export const BELT = 1.04;
@@ -53,6 +53,9 @@ export function buildCamper(spec, { studio = false, lod = 0 } = {}) {
   const yAt = (u, v) => { const e = Math.abs(u * 2 - 1); return wsy0 + 0.02 * e + v * (wsy1 - wsy0 - 0.06 * e * e); };
   patch((u, v) => wrapHit(u, yAt(u, v)), full ? 40 : 12, full ? 8 : 3, MAT.glass, 0.004);
   if (full) { for (const v of [0, 1]) tubeOn(Z(0, 1, 40).map((u) => wrapHit(u, yAt(u, v))), 0.012, MAT.rubber, 0.002, 60); for (const u of [0, 1]) tubeOn(Z(0, 1, 8).map((v) => wrapHit(u, yAt(u, v))), 0.012, MAT.rubber, 0.002, 12); }
+  { // r10: bay-window centre pillar, axis-aligned so it stays a visible bar on the curved pane.
+    const a = wrapHit(0.5, yAt(0.5, 0.08)), b = wrapHit(0.5, yAt(0.5, 0.92));
+    if (a && b) { const bar = mesh(new THREE.BoxGeometry(0.055, Math.max(0.2, Math.abs(b.p.y - a.p.y)), 0.04), MAT.black); bar.position.set(0, (a.p.y + b.p.y) / 2, Math.max(a.p.z, b.p.z) + 0.015); body.add(bar); } }
   patch((u, v) => front(-0.6 + u * 1.2, B(1.3) + v * 0.34, -1), full ? 12 : 4, full ? 4 : 2, MAT.glass, 0.004);
   // wipers
   if (full) for (const wx of [-0.5, 0.1]) { const a = front(wx, wsy0 + 0.03), b = front(wx + 0.42, wsy0 + 0.1); if (a && b) { const arm = mesh(new THREE.BoxGeometry(1, 0.012, 0.008), MAT.black); arm.scale.x = a.p.distanceTo(b.p); arm.position.copy(a.p).add(b.p).multiplyScalar(0.5).addScaledVector(a.n, 0.015); arm.lookAt(arm.position.clone().add(a.n)); arm.rotateZ(-Math.atan2(b.p.y - a.p.y, b.p.x - a.p.x)); body.add(arm); } }
@@ -76,7 +79,7 @@ export function buildCamper(spec, { studio = false, lod = 0 } = {}) {
   for (const s of [-1, 1]) {
     const h = front(s * 0.6, B(0.86)); if (h) { const g = new THREE.Group(); g.add(mesh(new THREE.TorusGeometry(0.095, 0.016, 10, 36), MAT.chrome)); const pod = mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.05, 36).rotateX(Math.PI / 2), MAT.chrome); pod.position.z = -0.02; g.add(pod);
       const lens = mesh(new THREE.SphereGeometry(0.09, 24, 10, 0, Math.PI * 2, 0, Math.PI / 2), MAT.lens); lens.rotation.x = Math.PI / 2; lens.scale.y = 0.3; g.add(lens); lensDetail(g, 0.09, 0, full); placeOn(h, g, 0.01); }
-    const ti = front(s * 0.62, B(1.05)); if (ti) { const t = mesh(new THREE.BoxGeometry(0.16, 0.06, 0.03), MAT.amber); placeOn(ti, t, 0.01); }
+    const ti = front(s * 0.62, B(1.05)); if (ti) placeOn(ti, lampBezel(0.15, 0.052, MAT.amber), 0.012);
     const tl = front(s * 0.74, B(0.86), -1); if (tl) { const g = new THREE.Group(); const l = mesh(new THREE.BoxGeometry(0.11, 0.26, 0.03), MAT.tail); g.add(l); tailDetail(g, 0.11, 0.26); const a = mesh(new THREE.BoxGeometry(0.11, 0.07, 0.032), MAT.amber); a.position.y = 0.1; g.add(a); placeOn(tl, g, 0.01); }
   }
   // ---- bumpers (blade + step), plates ----
@@ -84,14 +87,21 @@ export function buildCamper(spec, { studio = false, lod = 0 } = {}) {
     const pts = Z(-0.86, 0.86, 16).map((x) => V3(x, y, zf - s * 0.12 * (x / 0.86) ** 2 * (s > 0 ? 1 : 0.5)));
     pts.unshift(V3(-0.84, y, pts[0].z - s * 0.14)); pts.push(V3(0.84, y, pts[pts.length - 1].z - s * 0.14));
     const bl = add(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), full ? 60 : 20, 0.05, full ? 10 : 5), spec.plate ? MAT.chrome : MAT.white); bl.geometry.translate(0, -y, 0); bl.scale.y = 1.6; bl.position.y = y;
+    if (full) for (const x of [-0.58, -0.22, 0.22, 0.58]) { const bolt = mesh(new THREE.CylinderGeometry(0.011, 0.011, 0.016, 6).rotateX(Math.PI / 2), MAT.chrome); bolt.position.set(x, y, zf + s * 0.06); body.add(bolt); }
     if (s > 0) { const step = mesh(new THREE.BoxGeometry(1.5, 0.02, 0.12), MAT.black); step.position.set(0, y - 0.06, zf + 0.02); body.add(step); }
     const pl = mesh(new THREE.PlaneGeometry(0.36, 0.12), plateMat(spec.plate)); pl.position.set(0, y + (s > 0 ? 0.15 : 0.2), s * (ZF + 0.0) + (s > 0 ? -0.06 : 0.0)); const ph = front(0, y + (s > 0 ? 0.15 : 0.24), s); if (ph) placeOn(ph, pl, 0.008); }
   // ---- handles, mirrors, hubcap-era details ----
   for (const s of [-1, 1]) { const dh = side(1.1, B(1.0), s); if (dh) { const hd = mesh(new THREE.CapsuleGeometry(0.012, 0.1, 4, 8), MAT.chrome); hd.rotation.set(0, Math.PI / 2, 0); const g = new THREE.Group(); g.add(hd); placeOn(dh, g, 0.012); }
+    if (full) for (const y of [B(0.72), B(1.32)]) { const h = side(1.64, y, s); if (h) { const pin = mesh(new THREE.CapsuleGeometry(0.01, 0.04, 2, 5), MAT.black); pin.position.copy(h.p).addScaledVector(h.n, 0.012); body.add(pin); } }
     const mh = side(1.62, B(1.38), s); if (mh) { const g = new THREE.Group(); const arm = mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.18, 6), MAT.chrome); arm.rotation.x = Math.PI / 2; arm.position.z = 0.09; g.add(arm); const hd = mesh(new THREE.CylinderGeometry(0.065, 0.065, 0.02, full ? 20 : 8), MAT.chrome); hd.rotation.x = Math.PI / 2; hd.rotation.z = 0; hd.position.set(0, 0, 0.19); hd.rotateX(Math.PI / 2); g.add(hd); placeOn(mh, g, 0, V3(0, 0, 0.6)); } }
   // ---- extras ----
   const E = spec.extras || 0, has = (i) => !!(E & (1 << i));
-  if (has(0) || has(1)) { const y = ytop + 0.1, rack = new THREE.Group(); body.add(rack);
+  { // r10: canvas pop-top. Tall tan lid so it reads above the roof; the bellows is only a thin gasket.
+    const bellow = mesh(new THREE.BoxGeometry(1.26, 0.018, 2.02), MAT.rubber); bellow.position.set(0, ytop + 0.006, -0.25); body.add(bellow);
+    const lid = mesh(new THREE.BoxGeometry(1.16, 0.1, 1.88), MAT.canvasTan); lid.position.set(0, ytop + 0.062, -0.25); body.add(lid);
+    if (full) for (const dz of [-0.7, 0.15]) { const seam = mesh(new THREE.BoxGeometry(1.1, 0.008, 0.016), MAT.rubber); seam.position.set(0, ytop + 0.116, dz); body.add(seam); } }
+  { const fh = side(-0.15, B(0.78), 1); if (fh) placeOn(fh, fuelDoor(), 0.01); }
+  if (has(0) || has(1)) { const y = ytop + 0.16, rack = new THREE.Group(); body.add(rack);
     for (const x of [-0.72, 0.72]) { const r = mesh(new THREE.CylinderGeometry(0.018, 0.018, 3.0, 8), MAT.chrome); r.rotation.x = Math.PI / 2; r.position.set(x, y, -0.25); rack.add(r); }
     for (const z of Z(-1.7, 1.2, full ? 8 : 4)) { const c = mesh(new THREE.CylinderGeometry(0.012, 0.012, 1.44, 6), MAT.chrome); c.rotation.z = Math.PI / 2; c.position.set(0, y, z); rack.add(c); }
     for (const x of [-0.72, 0.72]) for (const z of [-1.7, -0.25, 1.2]) { const l = mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.12, 6), MAT.chrome); l.position.set(x, y - 0.06, z); rack.add(l); }

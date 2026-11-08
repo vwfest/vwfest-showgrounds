@@ -1,7 +1,7 @@
 // Code-built Ghia Coupe ride (classic 1950s-60s sports coupe proportions). Front=+z, up=+y, metres.
 // Real refs: L 4.14, W 1.634, H 1.32, wheelbase 2.40, track ~1.29, tyres 5.60-15 / 155R15 (Ø~0.63).
 import * as THREE from 'three';
-import { lensDetail } from './common.js';
+import { lensDetail, fuelDoor } from './common.js';
 import { ghiaCage } from './cage.js';
 const keys = (zs, ys) => { const n = zs.length, m = ys.map((_, i) => i === 0 ? (ys[1] - ys[0]) / (zs[1] - zs[0]) : i === n - 1 ? (ys[n - 1] - ys[n - 2]) / (zs[n - 1] - zs[n - 2]) : (ys[i + 1] - ys[i - 1]) / (zs[i + 1] - zs[i - 1]));
   return (z) => { if (z <= zs[0]) return ys[0]; for (let i = 1; i < n; i++) if (z <= zs[i]) { const h = zs[i] - zs[i - 1], t = (z - zs[i - 1]) / h, t2 = t * t, t3 = t2 * t; return (2 * t3 - 3 * t2 + 1) * ys[i - 1] + (t3 - 2 * t2 + t) * h * m[i - 1] + (-2 * t3 + 3 * t2) * ys[i] + (t3 - t2) * h * m[i]; } return ys[n - 1]; }; };
@@ -34,8 +34,9 @@ export const MAT = {
   black: new THREE.MeshStandardMaterial({ color: '#111214', roughness: 0.6 }),
   gap: new THREE.MeshBasicMaterial({ color: '#030405', side: THREE.DoubleSide }),
   rubber: new THREE.MeshStandardMaterial({ color: '#0b0b0c', roughness: 0.7, side: THREE.DoubleSide }),
-  tire: new THREE.MeshStandardMaterial({ color: '#1b1c1f', roughness: 0.88 }),
-  wall: new THREE.MeshStandardMaterial({ color: '#2a2b2f', roughness: 0.8 }),
+  tire: new THREE.MeshStandardMaterial({ color: '#555960', roughness: 0.92 }), // r10: rubber light enough for the shoulder to read (crushed black hid every groove)
+  wall: new THREE.MeshStandardMaterial({ color: '#6e675c', roughness: 0.78 }), // dusty sidewall band
+  heat: new THREE.MeshStandardMaterial({ color: '#b7c6d1', roughness: 0.3, metalness: 0.9 }), // blued exhaust tip
   drum: new THREE.MeshStandardMaterial({ color: '#3a3b3e', roughness: 0.7, metalness: 0.6 }),
   liner: new THREE.MeshStandardMaterial({ color: '#060607', roughness: 1, side: THREE.DoubleSide }),
   glass: new THREE.MeshPhysicalMaterial({ color: '#16222b', roughness: 0.0, metalness: 0.3, clearcoat: 1, envMapIntensity: 1.6, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false }),
@@ -158,12 +159,14 @@ export function buildGhia(spec, { studio = false, lod = 0 } = {}) {
   // ---- door handles, mirrors ----
   for (const s of [-1, 1]) {
     const dh = side(-0.4, ytop(-0.4) - 0.07, s); if (dh) { const hd = mesh(new THREE.CapsuleGeometry(0.012, 0.11, 4, 8), MAT.chrome); hd.rotation.z = Math.PI / 2; const g = new THREE.Group(); hd.rotation.set(0, Math.PI / 2, 0); g.add(hd); placeOn(dh, g, 0.012); }
+    const fh = side(1.05, ytop(1.0) - 0.22, s); if (fh && s > 0) placeOn(fh, fuelDoor(), 0.01); // r10: filler flap on the right front flank
     const mh = side(0.68, ytop(0.68) - 0.03, s); if (mh && full) { const g = new THREE.Group(); const stalk = mesh(new THREE.CylinderGeometry(0.008, 0.012, 0.09, 8), MAT.chrome); stalk.rotation.x = Math.PI / 2; stalk.position.z = 0.045; g.add(stalk);
       const head = mesh(new THREE.SphereGeometry(0.05, 16, 10), MAT.chrome); head.scale.set(1.1, 0.8, 0.5); head.position.z = 0.1; g.add(head); placeOn(mh, g, 0, V3(0, 1.2, 0)); }
   }
   // ---- exhaust (twin tips under rear valance) ----
   for (const ex of [-0.33, 0.33]) { const p = mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.3, full ? 16 : 8, 1, true).rotateX(Math.PI / 2), MAT.chrome); p.material = MAT.chrome; p.position.set(ex, ybot(-1.9) - 0.05, -1.98); body.add(p);
-    if (full) { const inner = mesh(new THREE.CircleGeometry(0.024, 12), MAT.black); inner.position.set(ex, ybot(-1.9) - 0.05, -2.12); inner.rotation.y = Math.PI; body.add(inner); } }
+    if (full) { const inner = mesh(new THREE.CircleGeometry(0.024, 12), MAT.black); inner.position.set(ex, ybot(-1.9) - 0.05, -2.12); inner.rotation.y = Math.PI; body.add(inner);
+      const tip = mesh(new THREE.TorusGeometry(0.03, 0.004, 5, 12), MAT.heat); tip.rotation.y = Math.PI / 2; tip.position.set(ex, ybot(-1.9) - 0.05, -2.13); body.add(tip); } }
   // ---- extras (trait bits) ----
   const E = spec.extras || 0, has = (i) => !!(E & (1 << i));
   for (const s of [-1, 1]) {
@@ -190,8 +193,8 @@ export function wheel(type, r, full = true) {
   const rim = 0.19, seg = full ? 56 : 24, prof = [];
   const steps = full ? 22 : 10; for (let i = 0; i <= steps; i++) { const t = i / steps, a = -Math.PI / 2 + t * Math.PI; const bulge = Math.cos(a); prof.push(new THREE.Vector2(rim + 0.01 + (r - rim - 0.01) * (0.55 + 0.45 * Math.pow(bulge, 0.35)), Math.sin(a) * W / 2 * (0.92 + 0.08 * bulge))); }
   m(new THREE.LatheGeometry([new THREE.Vector2(rim, -W / 2 + 0.012), ...prof, new THREE.Vector2(rim, W / 2 - 0.012)], seg).rotateX(Math.PI / 2), MAT.tire);
-  if (full) { for (const k of [-1, 1]) for (let i = 0; i < 3; i++) { const gro = m(new THREE.TorusGeometry(r - 0.001, 0.004, 4, seg), MAT.black); gro.position.z = k * (0.022 + i * 0.022) - 0.0; gro.scale.set(1, 1, 1); }
-    m(new THREE.TorusGeometry(rim + 0.06, 0.0035, 4, seg), MAT.wall).position.z = W / 2 - 0.006;
+  if (full) { for (const k of [-1, 1]) for (let i = 0; i < 3; i++) { const gro = m(new THREE.TorusGeometry(r + 0.002, 0.0065, 4, seg), MAT.black); gro.position.z = k * (0.02 + i * 0.02); }
+    m(new THREE.TorusGeometry(rim + 0.072, 0.009, 5, seg), MAT.wall).position.z = W / 2 - 0.012; // r10: raised dusty shoulder, not a hairline
 
     for (let i = 0; i < 28; i++) { if (i % 14 > 9) continue; const a = i / 28 * Math.PI * 2; const l = m(new THREE.BoxGeometry(0.012, 0.018, 0.004), MAT.wall); l.position.set(Math.cos(a) * (rim + 0.085), Math.sin(a) * (rim + 0.085), W / 2 - 0.004); l.rotation.z = a + Math.PI / 2; } }
   for (const k of [-1, 1]) m(new THREE.TorusGeometry(rim + 0.008, 0.006, 3, 16), MAT.tire).position.z = k * (W / 2 - 0.016); // r5: rim bead lip only (ribs + sipes cut for weight)
