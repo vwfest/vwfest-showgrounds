@@ -21,6 +21,7 @@ import { DjClient } from './dj.js';
 import { mountChip, djModal } from './djui.js';
 import { FIELDS, VIBES, DEFAULT } from '../shared/traits.js';
 import { fallbackConfig, loadConfig, loadConfigAttempts } from './configload.mjs';
+import { RideSound } from './ridesnd.mjs';
 
 const CFG0 = window.SG_CONFIG || {}; const onGh = /github\.io$/.test(location.hostname) || location.protocol === 'file:';
 const SERVER = (CFG0.server && (onGh || CFG0.forceServer) ? CFG0.server : location.origin).replace(/\/$/, '');
@@ -40,7 +41,10 @@ const dj = new DjClient(net, SERVER); dj.me = () => state.me && state.me.id; ctx
 const chipUpd = mountChip(dj, ctx);
 dj.onChange = () => { chipUpd(); if (world && world.stage && dj.st) world.stage.setScreen(dj.st); if (dj.panel) dj.panel(); };
 fetch(new URL('assets/music/playlist.json', document.baseURI)).then((r) => r.json()).then((j) => { ctx.playlist = j.tracks; }).catch(() => {});
-addEventListener('pointerdown', () => dj.unlock(), { once: true }); addEventListener('keydown', () => dj.unlock(), { once: true });
+const snd = new RideSound(); // horn + engine only; voice keeps its own AudioContext
+addEventListener('pointerdown', () => { dj.unlock(); snd.unlock(); }, { once: true }); addEventListener('keydown', () => { dj.unlock(); snd.unlock(); }, { once: true });
+addEventListener('visibilitychange', () => snd.setHeard(!document.hidden));
+addEventListener('pagehide', () => snd.setHeard(false)); addEventListener('pageshow', () => snd.setHeard(true));
 function hype() { if (!joined) return; doEmote(4); dj.hype(); }
 const on = (t, f) => { const prev = net.on[t]; net.on[t] = (m) => { if (prev) prev(m); f(m); }; };
 // resolve waiters
@@ -126,7 +130,9 @@ function step(dt) {
     L.heading -= ix * dt * 1.7 * Math.min(1, Math.abs(L.speed) / 5) * Math.sign(L.speed || 1); L.yaw = L.heading;
     let nx = L.x + Math.sin(L.heading) * L.speed * dt, nz = L.z + Math.cos(L.heading) * L.speed * dt; const [cx, cz] = collide(nx, nz, 1.4); if (Math.hypot(cx - nx, cz - nz) > 0.05) L.speed *= 0.4; L.x = cx; L.z = cz;
     L.hydro = !!(me3.rd && me3.rd.stance === 4) && space; L.y = 0;
+    snd.setDrive(true, thr, L.speed);
   } else {
+    snd.setDrive(false, 0, 0);
     const run = keys.has('shift') ? 1.5 : 1; const sp = (mag > 0.05 ? 5.2 * run : 0);
     if (mag > 0.05) { const a = walkAngle(ix, iy, camYaw); const [dirx, dirz] = walkDir(ix, iy, camYaw); const nx = L.x + dirx * sp * mag * dt, nz = L.z + dirz * sp * mag * dt; [L.x, L.z] = collide(nx, nz, 0.45); let d = a - L.yaw; d = Math.atan2(Math.sin(d), Math.cos(d)); L.yaw += d * Math.min(1, dt * 12); L.speed = sp * mag; } else L.speed = 0;
     if (space && !L.air) { L.vy = 6.2; L.air = true; } L.vy -= 17 * dt; L.y += L.vy * dt; if (L.y <= 0) { L.y = 0; L.vy = 0; L.air = false; }
@@ -140,7 +146,7 @@ function toggleDrive() {
   else { L.driving = true; L.heading = L.yaw; L.speed = 0; if (me3.rd) net.json({ t: 'park', on: false }); toast((matchMedia('(pointer: coarse)').matches ? 'Driving: use the stick to steer, 🅿 to park' : 'Driving: W/S gas & brake, A/D steer') + (me3.rd && me3.rd.stance === 4 ? ', hold Space = hydraulics!' : '')); }
 }
 function togglePark() { if (!L.driving) return; toggleDrive(); }
-function doEmote(i) { if (!joined) return; me3.emote = i; me3.emoteT = 0; net.json({ t: 'emote', id: i }); }
+function doEmote(i) { if (!joined) return; me3.emote = i; me3.emoteT = 0; net.json({ t: 'emote', id: i }); const v = VIBES[state.me.av.vibe] || VIBES[0]; if (EMOTE_ANIM[v.emotes[i - 1]] === 'honk') { snd.unlock(); snd.honk(); } }
 
 // ---------- animation ----------
 const EMOTE_ANIM = { 'Wave': 'wave', 'Shaka': 'wave', 'Lean back': 'lean', 'Cheer': 'cheer', 'Honk': 'honk', 'Wrench spin': 'spin', 'Thumbs up': 'thumbs', 'Dance': 'dance', 'Party jump': 'jump', 'Peace sign': 'peace', 'Meditate': 'meditate', 'Rev it': 'rev', 'Fist pump': 'fist', 'Bow': 'bow', 'Judge nod': 'nod', 'Cast': 'cast', 'Surf pose': 'surf', 'Point': 'point', 'Deal': 'thumbs' };
@@ -335,7 +341,7 @@ async function boot() {
   net.connect(); showJoin(false); requestAnimationFrame(loop);
   if (!first.ok) loadConfigAttempts(fetch, SERVER + '/api/config', { from: 1, onAttempt: (r) => { if (r.ok) applyCfg(r.cfg); } }).catch(() => {});
   if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) window.__sg = { // debug/test handle (state holds the profile secret): never on a public origin
-    dj, state, players, get world() { return world; }, L, net, ctx, get me() { return me3; }, cam: () => camera, goto: (x, z) => { L.x = x; L.z = z; }, emote: doEmote, setCam: (y, p) => { camYaw = y; camPitch = p; }, voice: () => voice, scene: () => scene, renderer: () => renderer, gfx: () => gfx, setDist: (d, look) => { camDist = d; camLook = look || 0; }, carFor };
+    dj, state, players, get world() { return world; }, L, net, ctx, get me() { return me3; }, cam: () => camera, goto: (x, z) => { L.x = x; L.z = z; }, emote: doEmote, setCam: (y, p) => { camYaw = y; camPitch = p; }, voice: () => voice, snd, scene: () => scene, renderer: () => renderer, gfx: () => gfx, setDist: (d, look) => { camDist = d; camLook = look || 0; }, carFor };
   window.__ready = true;
 }
 function settingsModal() {
