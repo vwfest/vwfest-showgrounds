@@ -30,6 +30,18 @@ const hit = (a, b) => a && b && a.l < b.r && a.r > b.l && a.t < b.b && a.b > b.t
     await t('desktop: "New profile" after a saved profile starts with an EMPTY nickname box (old name used to be prefilled and cut the new one)', async () => { await pg.reload(); await until(pg, () => window.__ready, null, 120000); await pg.click('text=New profile'); const i = pg.locator('input[aria-label=Nickname]'); assert.strictEqual(await i.inputValue(), ''); await i.focus(); await pg.keyboard.type('ShotBot' + (n % 10), { delay: 10 }); assert.strictEqual(await i.inputValue(), 'ShotBot' + (n % 10)); await pg.locator('text=Use saved profile').click(); assert.match(await pg.locator('#joinbody').innerText(), /Welcome back/); });
     await t('desktop: a nickname error moves focus back to the nickname box and says why', async () => { await pg.click('text=New profile'); await pg.fill('input[aria-label=Nickname]', 'Shithead'); await pg.click('text=Create profile'); await until(pg, () => /family friendly/.test(document.querySelector('#msgjoin').innerText), null, 10000); assert.strictEqual(await pg.evaluate(() => document.activeElement.getAttribute('aria-label')), 'Nickname'); });
     await t('desktop: shop cards have no giant empty box (the price block used the .pv preview-canvas class)', async () => { await pg.reload(); await until(pg, () => window.__ready, null, 120000); await pg.click('text=Enter the grounds'); await until(pg, () => window.__sg.state.me, null, 60000); await pg.evaluate(() => { window.__sg.ctx.closeTop && window.__sg.ctx.closeTop(); }); await pg.click('#bShop'); await until(pg, () => document.querySelectorAll('#modals .item').length > 5, null, 15000); const tall = await pg.evaluate(() => [...document.querySelectorAll('#modals .item *')].filter((e) => e.getBoundingClientRect().height > 160).map((e) => e.tagName + '.' + e.className)); assert.deepStrictEqual(tall, [], 'tall boxes inside shop cards'); const cardH = await pg.evaluate(() => Math.max(...[...document.querySelectorAll('#modals .item')].map((e) => e.getBoundingClientRect().height))); assert(cardH < 420, 'shop card is ' + cardH + 'px tall'); await pg.keyboard.press('Escape'); });
+    await t('desktop: Speed Demon has no Rev button; key 2 and an old rev packet are ignored', async () => {
+      await pg.evaluate(() => { const s = window.__sg; s.state.me.av.vibe = 4; s.me.vibe = 4; s.me.emote = 0; s.emotes(); });
+      const labels = await pg.locator('#emotes .emo').allTextContents();
+      assert.deepStrictEqual(labels, ['Wave', 'Fist pump', 'Cheer', 'Honk']);
+      assert(!labels.some((t) => /rev/i.test(t)));
+      await pg.keyboard.press('2'); await pg.waitForTimeout(200);
+      assert.strictEqual(await pg.evaluate(() => window.__sg.me.emote), 0, 'key 2 still played Rev');
+      await pg.evaluate(() => { window.__sg.me.emote = 2; window.__sg.me.emoteT = 0; });
+      await pg.waitForTimeout(250);
+      assert.strictEqual(await pg.evaluate(() => window.__sg.me.emote), 0, 'incoming rev emote was not dropped');
+      await pg.evaluate(() => { const s = window.__sg; s.state.me.av.vibe = 0; s.me.vibe = 0; s.emotes(); });
+    });
     await t('desktop: the page and chat produce no console errors or warnings', async () => { assert.deepStrictEqual(warn, [], 'console: ' + JSON.stringify(warn)); });
     await desk.close();
 
