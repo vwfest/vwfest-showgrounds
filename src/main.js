@@ -146,7 +146,7 @@ function toggleDrive() {
   else { L.driving = true; L.heading = L.yaw; L.speed = 0; if (me3.rd) net.json({ t: 'park', on: false }); toast((matchMedia('(pointer: coarse)').matches ? 'Driving: use the stick to steer, 🅿 to park' : 'Driving: W/S gas & brake, A/D steer') + (me3.rd && me3.rd.stance === 4 ? ', hold Space = hydraulics!' : '')); }
 }
 function togglePark() { if (!L.driving) return; toggleDrive(); }
-function doEmote(i) { if (!joined) return; me3.emote = i; me3.emoteT = 0; net.json({ t: 'emote', id: i }); const v = VIBES[state.me.av.vibe] || VIBES[0]; if (EMOTE_ANIM[v.emotes[i - 1]] === 'honk') { snd.unlock(); snd.honk(); } }
+function doEmote(i) { if (!joined) return; const v = VIBES[state.me.av.vibe] || VIBES[0]; const name = (v.emotes || [])[i - 1]; if (!name || EMOTE_ANIM[name] === 'rev') return; me3.emote = i; me3.emoteT = 0; net.json({ t: 'emote', id: i }); if (EMOTE_ANIM[name] === 'honk') { snd.unlock(); snd.honk(); } }
 
 // ---------- animation ----------
 const EMOTE_ANIM = { 'Wave': 'wave', 'Shaka': 'wave', 'Lean back': 'lean', 'Cheer': 'cheer', 'Honk': 'honk', 'Wrench spin': 'spin', 'Thumbs up': 'thumbs', 'Dance': 'dance', 'Party jump': 'jump', 'Peace sign': 'peace', 'Meditate': 'meditate', 'Rev it': 'rev', 'Fist pump': 'fist', 'Bow': 'bow', 'Judge nod': 'nod', 'Cast': 'cast', 'Surf pose': 'surf', 'Point': 'point', 'Deal': 'thumbs' };
@@ -158,7 +158,7 @@ function pose(e, dt, t, moving) {
     else if (idle === 'rev') { bob = Math.abs(s2) * 0.012; aLx = -0.2; aRx = -0.2; } else if (idle === 'pose') { aLz = 0.25; aRz = -0.25; lean = -0.06; } else if (idle === 'float') { bob = 0.12 + Math.sin(t * 1.8 + e.id) * 0.07; aLz = 0.2; aRz = -0.2; } else if (idle === 'look') { yaw = Math.sin(t * 0.7 + e.id) * 0.5; }
     else { aLx = s * 0.04; } }
   if (e.flags & FL.AIR || (e.self && L.air)) { lLx = -0.6; lRx = 0.4; aLz = 0.5; aRz = -0.5; }
-  if (e.emote) { e.emoteT += dt; const list = v.emotes; const anim = EMOTE_ANIM[list[e.emote - 1]] || 'wave'; const T = e.emoteT; if (T > 3.2) e.emote = 0; else {
+  if (e.emote) { e.emoteT += dt; const list = v.emotes || []; const anim = EMOTE_ANIM[list[e.emote - 1]]; if (!anim || anim === 'rev' || e.emoteT > 3.2) e.emote = 0; else { const T = e.emoteT;
     const k = Math.min(1, T * 5) * (T > 2.8 ? Math.max(0, (3.2 - T) / 0.4) : 1);
     if (anim === 'wave') { aRz = -(2.6 * k); aRx = 0; roll += Math.sin(T * 10) * 0.0; P.aR.rotation.z = -2.6 * k + Math.sin(T * 12) * 0.35 * k; aRz = 0; e.__az = true; }
     else if (anim === 'cheer') { aLz = 2.7 * k; aRz = -2.7 * k; bob += Math.abs(Math.sin(T * 8)) * 0.18 * k; } else if (anim === 'jump') { bob += Math.abs(Math.sin(T * 7)) * 0.4 * k; aLz = 2 * k; aRz = -2 * k; }
@@ -166,7 +166,7 @@ function pose(e, dt, t, moving) {
     else if (anim === 'bow') { lean += 0.9 * Math.sin(Math.min(1, T / 1.2) * Math.PI) * k; } else if (anim === 'nod') { lean += Math.sin(T * 6) * 0.12 * k; aRx = -1.2 * k; }
     else if (anim === 'meditate') { sink = 0.45 * k; lLx = -1.4 * k; lRx = -1.4 * k; aLx = -0.7 * k; aRx = -0.7 * k; bob += Math.sin(T * 2) * 0.04; } else if (anim === 'peace') { aRz = -2.3 * k; aRx = -0.2 * k; }
     else if (anim === 'spin') { aRx = -T * 9 * k; } else if (anim === 'fist') { aRz = -2.6 * k; bob += Math.abs(Math.sin(T * 8)) * 0.05 * k; } else if (anim === 'thumbs') { aRx = -1.4 * k; } else if (anim === 'point') { aRx = -1.57 * k; }
-    else if (anim === 'cast') { aLz = 1.6 * k; aRz = -1.6 * k; aLx = -0.8 * k; aRx = -0.8 * k; bob += (0.1 + Math.sin(T * 5) * 0.05) * k; } else if (anim === 'surf') { lLx = 0.5 * k; lRx = -0.5 * k; roll += Math.sin(T * 4) * 0.1 * k; aLz = 1 * k; aRz = -1 * k; } else if (anim === 'rev') { bob += Math.sin(T * 40) * 0.01 * k; aLx = -1.2 * k; aRx = -1.2 * k; } else if (anim === 'lean') { lean -= 0.35 * k; roll += 0.05 * k; } else if (anim === 'honk') { aRx = -1.4 * k; }
+    else if (anim === 'cast') { aLz = 1.6 * k; aRz = -1.6 * k; aLx = -0.8 * k; aRx = -0.8 * k; bob += (0.1 + Math.sin(T * 5) * 0.05) * k; } else if (anim === 'surf') { lLx = 0.5 * k; lRx = -0.5 * k; roll += Math.sin(T * 4) * 0.1 * k; aLz = 1 * k; aRz = -1 * k; } else if (anim === 'lean') { lean -= 0.35 * k; roll += 0.05 * k; } else if (anim === 'honk') { aRx = -1.4 * k; }
   } }
   P.aL.rotation.x = aLx; P.aR.rotation.x = aRx; P.aL.rotation.z = -aLz; if (!e.__az) P.aR.rotation.z = -aRz; e.__az = false; P.lL.rotation.x = lLx; P.lR.rotation.x = lRx; P.pose.position.y = bob - sink; P.upper.rotation.x = lean; P.upper.rotation.z = roll; P.upper.rotation.y = yaw; if (e.av.age === 3) P.upper.rotation.x += 0.12;
   if (P.aura) P.aura.rotation.y = t * 1.2; if (P.glow) P.glow.material.opacity = 0.45 + Math.sin(t * 3) * 0.15; if (P.halo) P.halo.position.y = 1.9 + Math.sin(t * 2) * 0.03;
@@ -260,7 +260,7 @@ function onWelcome(m) {
   setupEmoteBar(); updateVoiceHud(); toast(m.created ? `Welcome, ${m.nick}! Your profile ID is ${m.pid}.` : `Welcome back, ${m.nick}!`);
   if (!localStorage.getItem('sg-help')) { localStorage.setItem('sg-help', '1'); helpModal(); }
 }
-function setupEmoteBar() { const v = VIBES[state.me.av.vibe] || VIBES[0]; const bar = clear($('#emotes')); v.emotes.forEach((n, i) => bar.append(h('button', { class: 'emo', title: `${n} (${i + 1})`, onclick: () => doEmote(i + 1), text: n }))); }
+function setupEmoteBar() { const v = VIBES[state.me.av.vibe] || VIBES[0]; const bar = clear($('#emotes')); (v.emotes || []).forEach((n, i) => { if (EMOTE_ANIM[n] === 'rev') return; bar.append(h('button', { class: 'emo', title: `${n} (${i + 1})`, onclick: () => doEmote(i + 1), text: n })); }); }
 
 // ---------- screens ----------
 function hud() { $('#online').textContent = `${state.online}/${state.cap} online`; }
@@ -341,7 +341,7 @@ async function boot() {
   net.connect(); showJoin(false); requestAnimationFrame(loop);
   if (!first.ok) loadConfigAttempts(fetch, SERVER + '/api/config', { from: 1, onAttempt: (r) => { if (r.ok) applyCfg(r.cfg); } }).catch(() => {});
   if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) window.__sg = { // debug/test handle (state holds the profile secret): never on a public origin
-    dj, state, players, get world() { return world; }, L, net, ctx, get me() { return me3; }, cam: () => camera, goto: (x, z) => { L.x = x; L.z = z; }, emote: doEmote, setCam: (y, p) => { camYaw = y; camPitch = p; }, voice: () => voice, snd, scene: () => scene, renderer: () => renderer, gfx: () => gfx, setDist: (d, look) => { camDist = d; camLook = look || 0; }, carFor };
+    dj, state, players, get world() { return world; }, L, net, ctx, get me() { return me3; }, cam: () => camera, goto: (x, z) => { L.x = x; L.z = z; }, emote: doEmote, emotes: setupEmoteBar, setCam: (y, p) => { camYaw = y; camPitch = p; }, voice: () => voice, snd, scene: () => scene, renderer: () => renderer, gfx: () => gfx, setDist: (d, look) => { camDist = d; camLook = look || 0; }, carFor };
   window.__ready = true;
 }
 function settingsModal() {
