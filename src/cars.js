@@ -38,16 +38,22 @@ export function plateMaterial(kind) {
 }
 export function addRideUnderglow(target, dims, color = '#c44dff') {
   const col = new THREE.Color(color);
-  const glow = new THREE.MeshPhysicalMaterial({ color: col, emissive: col, emissiveIntensity: 3.2, roughness: 0.35, metalness: 0, transparent: true, opacity: 0.95, depthWrite: false });
-  const wash = new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false });
   const g = new THREE.Group(); g.name = 'underglow';
-  const len = (dims && dims.L) || 4.0, halfW = ((dims && dims.W) || 1.55) / 2;
-  for (const s of [-1, 1]) {
-    const rail = new THREE.Mesh(new THREE.CapsuleGeometry(0.035, len * 0.62, 4, 8), glow);
-    rail.rotation.x = Math.PI / 2; rail.position.set(s * (halfW - 0.08), 0.07, 0); g.add(rail);
-  }
-  const disc = new THREE.Mesh(new THREE.CircleGeometry(len * 0.32, 24), wash);
-  disc.rotation.x = -Math.PI / 2; disc.position.y = 0.02; disc.renderOrder = 1; g.add(disc);
+  const len = (dims && dims.L) || 4.0, wid = (dims && dims.W) || 1.55;
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 256;
+  const ctx = cv.getContext('2d');
+  const rg = ctx.createRadialGradient(128, 128, 8, 128, 128, 128);
+  rg.addColorStop(0, 'rgba(' + ((col.r * 255) | 0) + ',' + ((col.g * 255) | 0) + ',' + ((col.b * 255) | 0) + ',0.95)');
+  rg.addColorStop(0.35, 'rgba(' + ((col.r * 255) | 0) + ',' + ((col.g * 255) | 0) + ',' + ((col.b * 255) | 0) + ',0.45)');
+  rg.addColorStop(0.7, 'rgba(' + ((col.r * 255) | 0) + ',' + ((col.g * 255) | 0) + ',' + ((col.b * 255) | 0) + ',0.12)');
+  rg.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = rg; ctx.fillRect(0, 0, 256, 256);
+  const tex = new THREE.CanvasTexture(cv); tex.needsUpdate = true;
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+  const glow = new THREE.Mesh(new THREE.PlaneGeometry(len * 1.05, wid * 1.55), mat);
+  glow.rotation.x = -Math.PI / 2; glow.position.y = 0.018; glow.renderOrder = 2; g.add(glow);
+  const soft = new THREE.Mesh(new THREE.PlaneGeometry(len * 1.45, wid * 2.1), mat.clone());
+  soft.material.opacity = 0.55; soft.rotation.x = -Math.PI / 2; soft.position.y = 0.012; soft.renderOrder = 1; g.add(soft);
   target.add(g); return g;
 }
 // Routes every primitive to a material bin (paint / chrome / glass / matte / lamp) so the car gets real PBR materials, still merged to 5 meshes.

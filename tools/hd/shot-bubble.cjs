@@ -23,11 +23,11 @@ const server = http.createServer((req, res) => {
 const shots = [
   { rarity: 'common', quality: 'high', angle: 'front', w: 1440, h: 900, file: 'common-high.png' },
   { rarity: 'rare', quality: 'high', angle: 'front', w: 1440, h: 900, file: 'rare-high.png' },
-  { rarity: 'epic', quality: 'high', angle: 'rear', w: 1440, h: 900, file: 'epic-high.png' },
+  { rarity: 'epic', quality: 'high', angle: 'front', w: 1440, h: 900, file: 'epic-high.png' },
   { rarity: 'epic', quality: 'high', angle: 'plate', w: 1440, h: 900, file: 'epic-high-plate.png' },
   { rarity: 'common', quality: 'low', angle: 'front', w: 844, h: 390, file: 'common-phone.png' },
   { rarity: 'rare', quality: 'low', angle: 'front', w: 844, h: 390, file: 'rare-phone.png' },
-  { rarity: 'epic', quality: 'low', angle: 'rear', w: 844, h: 390, file: 'epic-phone.png' },
+  { rarity: 'epic', quality: 'low', angle: 'front', w: 844, h: 390, file: 'epic-phone.png' },
 ];
 
 (async () => {

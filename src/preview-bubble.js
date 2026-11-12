@@ -10,7 +10,7 @@ import SPECS from '../shared/bubble-specs.js';
 const params = new URLSearchParams(location.search);
 const rarity = ['common', 'rare', 'epic'].includes(params.get('rarity')) ? params.get('rarity') : 'epic';
 const qualityWanted = params.get('quality') || 'high';
-const angle = params.get('angle') || (rarity === 'epic' ? 'rear' : 'front');
+const angle = params.get('angle') || 'front';
 const phase = +(params.get('p') || 0.22);
 
 const canvas = document.getElementById('c');
@@ -23,6 +23,7 @@ const sky = buildSky(scene, renderer);
 sky.update(phase);
 
 const gfx = new Gfx({ renderer, scene, camera: cam, world, sky, base: './', isTouch: /phone|low/.test(qualityWanted) || matchMedia('(pointer: coarse)').matches });
+renderer.toneMappingExposure = 0.72;
 const det = detectTier(renderer, gfx.isTouch);
 
 const raw = SPECS.SPECS[rarity];
@@ -39,9 +40,9 @@ let car = null, t = 0, frames = 0, acc = 0, last = performance.now();
 const times = [];
 
 function placeCam() {
-  if (angle === 'rear') { cam.position.set(3.15, 0.82, -4.35); cam.lookAt(0, 0.42, -1.35); }
+  if (angle === 'rear') { cam.position.set(3.05, 0.88, -4.15); cam.lookAt(0, 0.46, -1.15); }
   else if (angle === 'plate') { cam.position.set(0.55, 0.72, -3.55); cam.lookAt(0, 0.58, -2.05); }
-  else { cam.position.set(4.15, 1.22, 3.55); cam.lookAt(0, 0.55, 0); }
+  else { cam.position.set(3.55, 0.98, 3.85); cam.lookAt(0, 0.46, 0.15); }
 }
 
 function frame() {
@@ -52,6 +53,7 @@ function frame() {
   if (car && car.userData.hydro) hydraulics(car, t, 'three', true);
   const w = innerWidth, h = innerHeight; if (gfx.w !== w || gfx.h !== h) { gfx.resize(w, h); cam.aspect = w / h; cam.updateProjectionMatrix(); }
   gfx.update(phase, { x: 0, z: 0, dist: 5 }, dt);
+  renderer.toneMappingExposure = Math.min(renderer.toneMappingExposure, 0.68);
   gfx.render(dt);
   frames++; acc += dt; times.push(dt);
   if (times.length > 60) times.shift();

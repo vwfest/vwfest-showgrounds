@@ -79,10 +79,10 @@ function compile(mat, { peelAmt = 0, flakeAmt = 0, metal = false, matte = false,
 }
 
 export const FINISH = {
-  solid: { roughness: 0.28, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.04, envMapIntensity: 0.72, specularIntensity: 0.65, ior: 1.5, peel: 0.1, flake: 0 },
-  metallic: { roughness: 0.3, metalness: 0.55, clearcoat: 1, clearcoatRoughness: 0.035, envMapIntensity: 0.88, specularIntensity: 0.7, ior: 1.5, peel: 0.1, flake: 0.35 },
-  flake: { roughness: 0.24, metalness: 0.5, clearcoat: 1, clearcoatRoughness: 0.028, envMapIntensity: 0.8, specularIntensity: 0.7, ior: 1.5, peel: 0.08, flake: 0.7 },
-  candy: { roughness: 0.16, metalness: 0.32, clearcoat: 1, clearcoatRoughness: 0.02, envMapIntensity: 0.75, specularIntensity: 0.8, ior: 1.5, iridescence: 0.32, iridescenceIOR: 1.4, peel: 0.06, flake: 0.22 },
+  solid: { roughness: 0.32, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.08, envMapIntensity: 0.55, specularIntensity: 0.65, ior: 1.5, peel: 0.1, flake: 0 },
+  metallic: { roughness: 0.38, metalness: 0.55, clearcoat: 1, clearcoatRoughness: 0.08, envMapIntensity: 0.42, specularIntensity: 0.7, ior: 1.5, peel: 0.1, flake: 0.35 },
+  flake: { roughness: 0.32, metalness: 0.5, clearcoat: 1, clearcoatRoughness: 0.08, envMapIntensity: 0.45, specularIntensity: 0.7, ior: 1.5, peel: 0.08, flake: 0.7 },
+  candy: { roughness: 0.28, metalness: 0.32, clearcoat: 1, clearcoatRoughness: 0.08, envMapIntensity: 0.40, specularIntensity: 0.8, ior: 1.5, iridescence: 0.22, iridescenceIOR: 1.4, peel: 0.06, flake: 0.22 },
   // Camper panels are large and flat. A full sky reflection greys the orange out, so the coat stays
   // satin: enough of a horizon streak to read as paint, not enough env to wash the colour.
   // Sharp coat, matte base: the horizon streak stays, the flat orange panels do not fill with sky.
