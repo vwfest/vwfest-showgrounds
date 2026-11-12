@@ -59,5 +59,33 @@ const out = path.join(os.tmpdir(), 'rideshd-' + process.pid + '.cjs');
       }
     }
   });
+  t('tyre tread is applied on the shared matte role without pre-darkening rubber', () => {
+    const m = hdMaterials({ model: 0, paint: 'solid' });
+    const sh = fake(); m.matte.onBeforeCompile(sh);
+    assert(sh.fragmentShader.includes('tread'));
+    assert(sh.fragmentShader.includes('roughnessFactor = 0.92'));
+  });
+  t('two-tone on the Bubble uses the metallic clearcoat; camper two-tone stays satin', () => {
+    const bubble = hdMaterials({ model: 0, paint: 'two' });
+    const camper = hdMaterials({ model: 1, paint: 'two' });
+    assert.strictEqual(bubble.paint, hdMaterials({ model: 2, paint: 'metallic' }).paint);
+    assert.notStrictEqual(bubble.paint, camper.paint);
+    assert.strictEqual(camper.paint.envMapIntensity, FINISH.camper.envMapIntensity);
+  });
+  t('gold diamond plate is metalness 1, gold, IOR 2.42, and sparks on the letters', () => {
+    const { applyGoldDiamondPlate, GOLD_PLATE } = require(out);
+    assert.strictEqual(GOLD_PLATE.metalness, 1);
+    assert(GOLD_PLATE.roughness <= 0.15);
+    assert.strictEqual(GOLD_PLATE.ior, 2.42);
+    const mat = { onBeforeCompile: null, customProgramCacheKey: null };
+    const uni = { value: 0 };
+    applyGoldDiamondPlate(mat, uni);
+    const sh = { vertexShader: 'void main(){}', fragmentShader: 'void main(){\n#include <map_fragment>\n#include <metalnessmap_fragment>\n#include <opaque_fragment>\n}', uniforms: {} };
+    mat.onBeforeCompile(sh);
+    assert.strictEqual(sh.uniforms.uTime, uni);
+    assert(sh.fragmentShader.includes('vec3 gold'));
+    assert(sh.fragmentShader.includes('metalnessFactor = mix(1.0, 0.04, diaM)'));
+    assert(mat.customProgramCacheKey() === 'ride-plate-diamond-gold');
+  });
   console.log(n + ' ride checks passed'); if (process.exitCode) process.exit(process.exitCode);
 })().catch((e) => { console.error('FAIL', e); process.exit(1); });

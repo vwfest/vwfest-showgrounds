@@ -44,6 +44,19 @@ const MATTE_SPLIT = `{ float l = dot(vColor, vec3(0.2126, 0.7152, 0.0722));
   else if (l > 0.4 && l < 0.68 && warm > 0.15 && sat > 0.15 && sat < 0.4) { roughnessFactor = 0.93; }
   else if (warm > 0.25 && sat > 0.3 && l > 0.15) { roughnessFactor = 0.66; }
   else if (warm > 0.04 && l > 0.03 && l < 0.2 && sat < 0.25) { roughnessFactor = 0.55; } }`;
+// Tyre tread: circumferential grooves + block sipes on dark rubber only (whitewalls and trim stay smooth).
+const TIRE_TREAD = `{ float l = dot(vColor, vec3(0.2126, 0.7152, 0.0722));
+  float sat = max(vColor.r, max(vColor.g, vColor.b)) - min(vColor.r, min(vColor.g, vColor.b));
+  if (l < 0.22 && sat < 0.14) {
+    float r = length(vRideP.yz);
+    float a = atan(vRideP.y, vRideP.z);
+    float circ = abs(fract(r * 52.0) - 0.5);
+    float groove = 1.0 - smoothstep(0.10, 0.22, circ);
+    float block = smoothstep(0.12, 0.38, abs(sin(a * 18.0 + r * 4.0)));
+    float tread = groove * block;
+    roughnessFactor = mix(roughnessFactor, 0.98, tread);
+    normal = normalize(normal + vec3((fract(sin(a * 40.0 + r * 9.0) * 43758.5453) - 0.5) * 0.4 * tread, 0.0, 0.0));
+  } }`;
 // Glass: dark contact-shadow ellipses stay flat; real panes get a fresnel edge so the cabin reads.
 const GLASS_FRESNEL = `{ float mx = max(vColor.r, max(vColor.g, vColor.b));
   if (mx < 0.004) gl_FragColor.a = 0.5;
@@ -56,7 +69,7 @@ function compile(mat, { peelAmt = 0, flakeAmt = 0, metal = false, matte = false,
   mat.onBeforeCompile = (sh) => {
     vary(sh);
     if (peelAmt) sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n' + peel(peelAmt));
-    if (metal || matte) sh.fragmentShader = sh.fragmentShader.replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\n' + (metal ? METAL_SPLIT : MATTE_SPLIT));
+    if (metal || matte) sh.fragmentShader = sh.fragmentShader.replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\n' + (metal ? METAL_SPLIT : MATTE_SPLIT + TIRE_TREAD));
     if (lamp) sh.fragmentShader = sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance *= vColor;');
     const tail = (glass ? GLASS_FRESNEL : '') + flake(flakeAmt);
     if (tail) sh.fragmentShader = sh.fragmentShader.replace('#include <opaque_fragment>', '#include <opaque_fragment>\n' + tail);
@@ -66,10 +79,10 @@ function compile(mat, { peelAmt = 0, flakeAmt = 0, metal = false, matte = false,
 }
 
 export const FINISH = {
-  solid: { roughness: 0.28, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.04, envMapIntensity: 0.72, specularIntensity: 0.65, ior: 1.5, peel: 0.1, flake: 0 },
-  metallic: { roughness: 0.3, metalness: 0.55, clearcoat: 1, clearcoatRoughness: 0.035, envMapIntensity: 0.88, specularIntensity: 0.7, ior: 1.5, peel: 0.1, flake: 0.35 },
-  flake: { roughness: 0.24, metalness: 0.5, clearcoat: 1, clearcoatRoughness: 0.028, envMapIntensity: 0.8, specularIntensity: 0.7, ior: 1.5, peel: 0.08, flake: 0.7 },
-  candy: { roughness: 0.16, metalness: 0.32, clearcoat: 1, clearcoatRoughness: 0.02, envMapIntensity: 0.75, specularIntensity: 0.8, ior: 1.5, iridescence: 0.32, iridescenceIOR: 1.4, peel: 0.06, flake: 0.22 },
+  solid: { roughness: 0.32, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.08, envMapIntensity: 0.55, specularIntensity: 0.65, ior: 1.5, peel: 0.1, flake: 0 },
+  metallic: { roughness: 0.38, metalness: 0.55, clearcoat: 1, clearcoatRoughness: 0.08, envMapIntensity: 0.42, specularIntensity: 0.7, ior: 1.5, peel: 0.1, flake: 0.35 },
+  flake: { roughness: 0.32, metalness: 0.5, clearcoat: 1, clearcoatRoughness: 0.08, envMapIntensity: 0.45, specularIntensity: 0.7, ior: 1.5, peel: 0.08, flake: 0.7 },
+  candy: { roughness: 0.28, metalness: 0.32, clearcoat: 1, clearcoatRoughness: 0.08, envMapIntensity: 0.40, specularIntensity: 0.8, ior: 1.5, iridescence: 0.22, iridescenceIOR: 1.4, peel: 0.06, flake: 0.22 },
   // Camper panels are large and flat. A full sky reflection greys the orange out, so the coat stays
   // satin: enough of a horizon streak to read as paint, not enough env to wash the colour.
   // Sharp coat, matte base: the horizon streak stays, the flat orange panels do not fill with sky.
@@ -88,7 +101,7 @@ function singleton(name, make) { let m = cache.get(name); if (!m) cache.set(name
 
 export function hdMaterials(spec) {
   const camper = spec.model === 1 && (spec.paint === 'solid' || spec.paint === 'two');
-  const kind = spec.paint === 'patina' ? 'patina' : camper ? 'camper' : FINISH[spec.paint] ? spec.paint : 'solid';
+  const kind = spec.paint === 'patina' ? 'patina' : camper ? 'camper' : spec.paint === 'two' ? 'metallic' : FINISH[spec.paint] ? spec.paint : 'solid';
   return {
     paint: paintFor(kind),
     metal: singleton('metal', () => compile(new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.12, metalness: 1, envMapIntensity: 1.35 }), { metal: true, key: 'ride-metal' })),
@@ -96,4 +109,40 @@ export function hdMaterials(spec) {
     glass: singleton('glass', () => compile(new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.02, metalness: 0, transparent: true, opacity: 0.34, ior: 1.52, specularIntensity: 0.7, clearcoat: 0.45, clearcoatRoughness: 0.02, envMapIntensity: 0.85, depthWrite: false }), { glass: true, key: 'ride-glass' })),
     lamp: singleton('lamp', () => compile(new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.05, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.02, emissive: new THREE.Color('#ffffff'), emissiveIntensity: 0.7, envMapIntensity: 1.05 }), { lamp: true, key: 'ride-lamp' })),
   };
+}
+
+// Gold-plated VWFEST plate with diamond lettering (plate = 2 / plateDiamond).
+// Gold is a real metal (metalness 1, low roughness). Letters use a cheap sparkle +
+// iridescence path (IOR 2.42) instead of transmission, so phones stay in budget.
+export const GOLD_PLATE = { color: '#c9a227', metalness: 1, roughness: 0.12, envMapIntensity: 1.6, ior: 2.42 };
+export function applyGoldDiamondPlate(mat, uTime) {
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uTime = uTime;
+    sh.fragmentShader = 'uniform float uTime;\n' + sh.fragmentShader;
+    sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+      float dia = sampledDiffuseColor.r; float cut = sampledDiffuseColor.g;
+      vec3 gold = vec3(0.831, 0.686, 0.216); vec3 deep = vec3(0.40, 0.26, 0.07);
+      diffuseColor.rgb = mix(gold, deep, cut);`);
+    sh.fragmentShader = sh.fragmentShader.replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
+      float diaM = 0.0;
+      #ifdef USE_MAP
+      diaM = texture2D(map, vMapUv).r;
+      #endif
+      metalnessFactor = mix(1.0, 0.04, diaM);
+      roughnessFactor = mix(0.12, 0.025, diaM);`);
+    sh.fragmentShader = sh.fragmentShader.replace('#include <opaque_fragment>', `#include <opaque_fragment>
+      float diaA = 0.0;
+      #ifdef USE_MAP
+      diaA = texture2D(map, vMapUv).r;
+      #endif
+      if (diaA > 0.15) {
+        float h = fract(sin(dot(vMapUv * 90.0, vec2(12.9898, 78.233))) * 43758.5453);
+        float tw = pow(max(0.0, sin(uTime * (3.0 + h * 8.0) + h * 40.0)), 18.0);
+        vec3 rainbow = 0.5 + 0.5 * cos(6.2831 * (vMapUv.x * 1.4 + uTime * 0.35 + vec3(0.0, 0.33, 0.66)));
+        float fres = pow(1.0 - abs(dot(normalize(normal), normalize(vViewPosition))), 2.4);
+        gl_FragColor.rgb += (tw * 1.7 + fres * 0.55) * mix(vec3(1.0), rainbow, 0.75) * diaA;
+      }`);
+  };
+  mat.customProgramCacheKey = () => 'ride-plate-diamond-gold';
+  return mat;
 }

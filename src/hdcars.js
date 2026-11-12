@@ -29,7 +29,12 @@ function concat(items, withUv) {
   let nv = 0, ni = 0; for (const it of items) { nv += it.p.pos.length / 3; ni += it.p.idx.length; } if (!ni) return null;
   const pos = new Float32Array(nv * 3), nor = new Float32Array(nv * 3), col = new Float32Array(nv * 3), uv = withUv ? new Float32Array(nv * 2) : null, idx = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni); let v = 0, i = 0;
   for (const it of items) { const p = it.p, n = p.pos.length / 3; pos.set(p.pos, v * 3); nor.set(p.nor, v * 3); if (it.yOff) for (let k = 0; k < n; k++) pos[(v + k) * 3 + 1] += it.yOff;
-    if (it.paint && it.depth) for (let k = 0; k < n; k++) { const y = pos[(v + k) * 3 + 1], sh = 0.84 + 0.16 * Math.min(1, Math.max(0, (y - 0.3) / 1.0)), du = 0.3 * (1 - Math.min(1, Math.max(0, (y - 0.18) / 0.3))); /* r5: paint depth (deeper low, lighter crown) + road dust on lower panels */ col[(v + k) * 3] = it.paint.r * sh * (1 - du) + DUST.r * du; col[(v + k) * 3 + 1] = it.paint.g * sh * (1 - du) + DUST.g * du; col[(v + k) * 3 + 2] = it.paint.b * sh * (1 - du) + DUST.b * du; }
+    if (it.paint && it.depth) for (let k = 0; k < n; k++) { const y = pos[(v + k) * 3 + 1], x = pos[(v + k) * 3], z = pos[(v + k) * 3 + 2];
+      let pr = it.paint.r, pg = it.paint.g, pb = it.paint.b;
+      if (it.paint2) { const tw = Math.min(1, Math.max(0, (y - (it.belt || 0.7) + 0.05) / 0.10)); pr = it.paint2.r + (it.paint.r - it.paint2.r) * tw; pg = it.paint2.g + (it.paint.g - it.paint2.g) * tw; pb = it.paint2.b + (it.paint.b - it.paint2.b) * tw; }
+      if (it.stripe) { const hz = z > 0.35 && y > (it.belt || 0.7) - 0.15; const sx = Math.abs(Math.abs(x) - 0.12); const band = hz ? 1 - Math.min(1, Math.max(0, (sx - 0.03) / 0.03)) : 0; pr = pr + (1 - pr) * band; pg = pg + (1 - pg) * band; pb = pb + (1 - pb) * band; }
+      const sh = 0.88 + 0.12 * Math.min(1, Math.max(0, (y - 0.3) / 1.0)), du = 0.18 * (1 - Math.min(1, Math.max(0, (y - 0.18) / 0.3)));
+      col[(v + k) * 3] = pr * sh * (1 - du) + DUST.r * du; col[(v + k) * 3 + 1] = pg * sh * (1 - du) + DUST.g * du; col[(v + k) * 3 + 2] = pb * sh * (1 - du) + DUST.b * du; }
     else if (it.paint) for (let k = 0; k < n; k++) { col[(v + k) * 3] = it.paint.r; col[(v + k) * 3 + 1] = it.paint.g; col[(v + k) * 3 + 2] = it.paint.b; } else if (p.col) col.set(p.col, v * 3); else col.fill(1, v * 3, (v + n) * 3);
     if (uv && p.uv) uv.set(p.uv, v * 2); for (let k = 0; k < p.idx.length; k++) idx[i++] = p.idx[k] + v; v += n; }
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.BufferAttribute(nor, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3)); if (uv) g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
@@ -51,13 +56,13 @@ export function assembleHD(d, spec, legacyBins) {
   for (let k = layers.length - 1; k >= 1 && sum(layers, lods) > CAP; k--) lods[k] = 1;
   const out = { near: {}, far: {}, tris: [0, 0] };
   for (const [slot, ls] of [['near', lods], ['far', layers.map(() => 1)]]) { const byRole = {};
-    layers.forEach((L, i) => { for (const p of pick(L, ls[i])) { const role = p.role === 'paint2' ? 'paint' : p.role; (byRole[role] = byRole[role] || []).push({ p, yOff: L[0] === 'w' ? 0 : yOff, paint: p.role === 'paint' ? c1 : p.role === 'paint2' ? c2 : p.role === 'glass' ? GLASS_TINT : null, depth: p.role === 'paint' || p.role === 'paint2' }); } });
+    const bakedTwo = layers.some((L, i) => pick(L, ls[i]).some((p) => p.role === 'paint2'));
+    const split = !bakedTwo && spec.c2 && c2 && c1.getHex() !== c2.getHex();
+    const belt = ([0.70, 1.35, 0.85, 0.9, 0.95, 0.9][spec.model] || 0.96) + yOff;
+    layers.forEach((L, i) => { for (const p of pick(L, ls[i])) { const role = p.role === 'paint2' ? 'paint' : p.role; (byRole[role] = byRole[role] || []).push({ p, yOff: L[0] === 'w' ? 0 : yOff, paint: p.role === 'paint' ? c1 : p.role === 'paint2' ? c2 : p.role === 'glass' ? GLASS_TINT : null, paint2: (p.role === 'paint' && split) ? c2 : null, belt, stripe: (p.role === 'paint' && (E & (1 << 4))), depth: p.role === 'paint' || p.role === 'paint2' }); } });
     if (legacyBins) for (const k in legacyBins) { const g = legacyBins[k]; const role = k === 'chrome' ? 'metal' : k === 'matte' ? 'matte' : k; const n = g.attributes.position.count;
       const p = { pos: g.attributes.position.array, nor: g.attributes.normal.array, col: g.attributes.color.array, idx: g.index ? g.index.array : Uint32Array.from({ length: n }, (_, i) => i), tris: 0 }; (byRole[role] = byRole[role] || []).push({ p, yOff: 0 }); }
-    { // r6 soft contact shadow: 3 stacked dark ellipses merged into the (already transparent) glass mesh -> no new draw call
-      const bp = pick('body', 1); let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9; for (const p of bp) for (let k = 0; k < p.pos.length; k += 3) { x0 = Math.min(x0, p.pos[k]); x1 = Math.max(x1, p.pos[k]); z0 = Math.min(z0, p.pos[k + 2]); z1 = Math.max(z1, p.pos[k + 2]); }
-      if (x1 > x0) for (const [s, y] of [[1.08, 0.012], [0.92, 0.014], [0.74, 0.016]]) { const c = new THREE.CircleGeometry(1, 28).rotateX(-Math.PI / 2); c.scale((x1 - x0) / 2 * s, 1, (z1 - z0) / 2 * s); c.translate((x0 + x1) / 2, y, (z0 + z1) / 2);
-        (byRole.glass = byRole.glass || []).push({ p: { pos: c.attributes.position.array, nor: c.attributes.normal.array, idx: c.index.array, tris: 0 }, yOff: 0, paint: SHADOW }); } }
+    // Contact shadows come from the real shadow map (High) or are omitted (Low). Never merge a transparent slab into the glass role.
     for (const r in byRole) { const g = concat(byRole[r], r === 'plate'); if (g) { out[slot][r] = g; out.tris[slot === 'near' ? 0 : 1] += g.index.count / 3; } } }
   return out;
 }
