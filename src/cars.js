@@ -3,29 +3,52 @@ import { THREE, Batch, shade, mix, cTex } from './batch.js';
 import { PAL } from '../shared/traits.js';
 import RIDES from '../shared/rides.js';
 import { loadHD, hdReady, assembleHD, HD_FAR } from './hdcars.js';
-import { hdMaterials } from './ridemat.js';
+import { hdMaterials, applyGoldDiamondPlate, GOLD_PLATE } from './ridemat.js';
 
 export const PLATE_UNI = { uTime: { value: 0 } };
 let plateTex = null, plateTexDia = null, diaMat = null, plateMat = null, chromeMat = null;
 function plateTexture(kind) {
-  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 64; const x = cv.getContext('2d');
-  x.fillStyle = kind === 1 ? '#d9dee6' : kind === 2 ? '#e8f7ff' : '#f2efe4'; x.fillRect(0, 0, 128, 64); x.strokeStyle = '#1d3557'; x.lineWidth = 4; x.strokeRect(3, 3, 122, 58);
-  x.fillStyle = kind === 2 ? '#007fb0' : '#1d3557'; x.font = '900 30px Arial Black, Arial'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText('VWFEST', 64, 34);
-  x.font = '700 9px Arial'; x.fillText('CALIFORNIA · SHOW GROUNDS', 64, 11); const t = cTex(cv); return t;
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 128; const x = cv.getContext('2d');
+  if (kind === 2) {
+    // Data mask: R = diamond VWFEST letters, G = engraved gold caption/border. Not shown as albedo.
+    x.fillStyle = '#000000'; x.fillRect(0, 0, 256, 128);
+    x.strokeStyle = '#00ff00'; x.lineWidth = 8; x.strokeRect(6, 6, 244, 116);
+    x.fillStyle = '#00cc00'; x.font = '700 14px Arial'; x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.fillText('CALIFORNIA · SHOW GROUNDS', 128, 22);
+    x.fillStyle = '#ff0000'; x.font = '900 52px Arial Black, Arial'; x.fillText('VWFEST', 128, 78);
+    const t = cTex(cv); t.colorSpace = THREE.NoColorSpace; return t;
+  }
+  x.fillStyle = kind === 1 ? '#d9dee6' : '#f2efe4'; x.fillRect(0, 0, 256, 128); x.strokeStyle = '#1d3557'; x.lineWidth = 8; x.strokeRect(6, 6, 244, 116);
+  x.fillStyle = '#1d3557'; x.font = '900 48px Arial Black, Arial'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText('VWFEST', 128, 72);
+  x.font = '700 14px Arial'; x.fillText('CALIFORNIA · SHOW GROUNDS', 128, 22); const t = cTex(cv); return t;
 }
 export function plateMaterial(kind) {
   if (kind === 2) {
-    if (!diaMat) { diaMat = new THREE.ShaderMaterial({ uniforms: { uTime: PLATE_UNI.uTime, map: { value: plateTexture(2) } }, vertexShader: 'varying vec2 vUv; varying vec3 vP; void main(){ vUv=uv; vP=position; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);} ',
-      fragmentShader: `uniform sampler2D map; uniform float uTime; varying vec2 vUv; varying vec3 vP;
-        float h(vec2 p){ return fract(sin(dot(p, vec2(12.9898,78.233)))*43758.5453); }
-        void main(){ vec4 t=texture2D(map,vUv); vec2 g=floor(vUv*vec2(22.,11.)); float r=h(g); float tw=pow(max(0.,sin(uTime*(2.+r*5.)+r*40.)),14.);
-          vec3 rainbow=0.5+0.5*cos(6.2831*(vUv.x*1.2+uTime*0.35+vec3(0.,.33,.66)));
-          float sheen=smoothstep(.0,.15,abs(fract(vUv.x*1.5-uTime*.45)-.5)-.38);
-          vec3 col=t.rgb*(.78+.22*rainbow)+tw*vec3(1.,1.,1.)*1.4+(1.-sheen)*.25; gl_FragColor=vec4(col,1.);} `, side: THREE.DoubleSide }); }
+    if (!diaMat) {
+      diaMat = applyGoldDiamondPlate(new THREE.MeshPhysicalMaterial({
+        color: GOLD_PLATE.color, metalness: GOLD_PLATE.metalness, roughness: GOLD_PLATE.roughness,
+        envMapIntensity: GOLD_PLATE.envMapIntensity, ior: 1.5, iridescence: 1, iridescenceIOR: GOLD_PLATE.ior,
+        iridescenceThicknessRange: [100, 400], map: plateTexture(2), side: THREE.DoubleSide,
+      }), PLATE_UNI.uTime);
+    }
     return diaMat;
   }
-  if (kind === 1) return chromeMat || (chromeMat = new THREE.MeshPhongMaterial({ map: plateTexture(1), shininess: 200, specular: 0xffffff }));
-  return plateMat || (plateMat = new THREE.MeshLambertMaterial({ map: plateTexture(0) }));
+  if (kind === 1) return chromeMat || (chromeMat = new THREE.MeshPhysicalMaterial({ map: plateTexture(1), metalness: 1, roughness: 0.12, envMapIntensity: 1.4, color: '#e8eaed' }));
+  return plateMat || (plateMat = new THREE.MeshPhysicalMaterial({ map: plateTexture(0), metalness: 0.15, roughness: 0.45, envMapIntensity: 0.6 }));
+}
+export function addRideUnderglow(target, dims, color = '#c44dff') {
+  const col = new THREE.Color(color);
+  const glow = new THREE.MeshPhysicalMaterial({ color: col, emissive: col, emissiveIntensity: 3.2, roughness: 0.35, metalness: 0, transparent: true, opacity: 0.95, depthWrite: false });
+  const wash = new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false });
+  const g = new THREE.Group(); g.name = 'underglow';
+  const len = (dims && dims.L) || 4.0, halfW = ((dims && dims.W) || 1.55) / 2;
+  for (const s of [-1, 1]) {
+    const rail = new THREE.Mesh(new THREE.CapsuleGeometry(0.035, len * 0.62, 4, 8), glow);
+    rail.rotation.x = Math.PI / 2; rail.position.set(s * (halfW - 0.08), 0.07, 0); g.add(rail);
+  }
+  const disc = new THREE.Mesh(new THREE.CircleGeometry(len * 0.32, 24), wash);
+  disc.rotation.x = -Math.PI / 2; disc.position.y = 0.02; disc.renderOrder = 1; g.add(disc);
+  target.add(g); return g;
 }
 // Routes every primitive to a material bin (paint / chrome / glass / matte / lamp) so the car gets real PBR materials, still merged to 5 meshes.
 const BIN = { glass: new Set(['#25384f', '#7aa7c7']), chrome: new Set(['#d8dde6', '#9aa3af', '#e9edf3', '#e5b83a', '#aab2bd', '#7d8590', '#dddddd']), matte: new Set(['#16171a', '#202226', '#222', '#0e0e10', '#2b2b2f', '#111', '#7a4a2a', '#f4f1ea', '#3a2f2a', '#4a3a32', '#222222']), lamp: new Set(['#fff6c8', '#fff27a', '#c1121f']) };
@@ -133,6 +156,7 @@ export function buildCar(spec) {
   // plates (front + rear) 
   const pm = plateMaterial(spec.plate || 0); const rear = new THREE.Mesh(plateGeo, pm), front = new THREE.Mesh(plateGeo, pm);
   rear.position.set(0, y0 + 0.28, -L / 2 - 0.1); rear.rotation.y = Math.PI; front.position.set(0, y0 + 0.14, L / 2 + 0.16); group.add(rear, front);
+  if ((spec.extras || 0) & (1 << 9)) addRideUnderglow(body, d, spec.c1 || '#c44dff');
   group.userData = { body, hydro: !!spec.lowrider, dims: d, plateDiamond: spec.plate === 2, bound: Math.max(L, 3) / 2 };
   return group;
 }
@@ -161,7 +185,9 @@ export function buildCarHD(spec, d, farOnly = false) {
   const level = (geos) => { const grp = new THREE.Group(); for (const r in geos) { const m = new THREE.Mesh(geos[r], mats[r]); m.castShadow = r !== 'glass' && r !== 'plate'; m.receiveShadow = r !== 'glass'; if (r === 'glass') m.renderOrder = 2; grp.add(m); } return grp; };
   const group = new THREE.Group(), body = new THREE.Group(); group.add(body);
   if (farOnly) body.add(level(a.far)); else { const lod = new THREE.LOD(); lod.addLevel(level(a.near), 0); lod.addLevel(level(a.far), HD_FAR); body.add(lod); }
-  const dm = MODEL_DIM[spec.model]; group.userData = { body, hydro: !!spec.lowrider, dims: dm, plateDiamond: spec.plate === 2, bound: Math.max(dm.L, 3) / 2, hd: true, tris: a.tris }; return group;
+  const dm = MODEL_DIM[spec.model];
+  if ((spec.extras || 0) & (1 << 9)) addRideUnderglow(body, dm, spec.c1 || '#c44dff');
+  group.userData = { body, hydro: !!spec.lowrider, dims: dm, plateDiamond: spec.plate === 2, bound: Math.max(dm.L, 3) / 2, hd: true, tris: a.tris }; return group;
 }
 const cache = new Map();
 function cloneTree(o) {
